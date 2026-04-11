@@ -33,11 +33,27 @@ type Client interface {
 }
 
 type ghClient struct {
-	ghPath string
+	ghPath       string
+	activeMonths int // 0=無効、N=直近Nか月以内にpushがあったリポのみ対象
 }
 
 func New(cfg *config.Config) Client {
-	return &ghClient{ghPath: cfg.GhPath}
+	return &ghClient{
+		ghPath:       cfg.GhPath,
+		activeMonths: cfg.ActiveMonths,
+	}
+}
+
+// isRepoActive はリポジトリが指定された月数以内にpushがあったかを返す
+func isRepoActive(pushedAt time.Time, activeMonths int) bool {
+	if activeMonths <= 0 {
+		return true // フィルタ無効
+	}
+	if pushedAt.IsZero() {
+		return false // pushedAt不明はスキップ
+	}
+	cutoff := time.Now().AddDate(0, -activeMonths, 0)
+	return pushedAt.After(cutoff)
 }
 
 type ghAlert struct {
@@ -214,7 +230,7 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	return alerts, nil
 }
 
-// enrichUpdateErrors はアラートをリポジトリ別にグループ化し、各リポジトリのdependabotUpdateエラーを補完する
+// enrichUpdateErrors はアラートをリポジトリ別にグループ化し、各リポジトリのdependabotUpdate情報（エラー + PR番号）を補完する
 func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts []model.Alert) {
 	repoSet := make(map[string]struct{})
 	for _, a := range alerts {
@@ -222,28 +238,42 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 	}
 
 	for repo := range repoSet {
-		updateErrors := c.fetchUpdateErrors(ctx, owner, repo)
+		info := c.fetchGraphQLUpdates(ctx, owner, repo)
 		for i := range alerts {
 			if alerts[i].Repo == repo {
-				if e, ok := updateErrors[alerts[i].Number]; ok {
+				if e, ok := info.Errors[alerts[i].Number]; ok {
 					alerts[i].UpdateError = e
+				}
+				if pr, ok := info.PRNumbers[alerts[i].Number]; ok {
+					alerts[i].PRNumber = pr
 				}
 			}
 		}
 	}
 }
 
+// repoListItem は `gh repo list --json name,isArchived,pushedAt` の各要素
+type repoListItem struct {
+	Name       string    `json:"name"`
+	IsArchived bool      `json:"isArchived"`
+	PushedAt   time.Time `json:"pushedAt"`
+}
+
 // fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
 func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
-	// リポジトリ一覧取得（アーカイブ済みを除外）
+	// リポジトリ一覧取得（pushedAt含む）
 	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
-		"--json", "name,isArchived",
-		"--jq", "[.[] | select(.isArchived == false) | .name][]",
+		"--json", "name,isArchived,pushedAt",
 		"--limit", "1000",
 	)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
+	}
+
+	var repoItems []repoListItem
+	if err := json.Unmarshal(out, &repoItems); err != nil {
+		return nil, fmt.Errorf("リポジトリ一覧JSONパース失敗: %w", err)
 	}
 
 	excludeSet := make(map[string]struct{}, len(excludes))
@@ -252,17 +282,27 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	}
 
 	var repos []string
-	for _, line := range splitLines(string(out)) {
-		if line == "" {
+	skippedInactive := 0
+	for _, item := range repoItems {
+		if item.IsArchived {
 			continue
 		}
-		if _, skip := excludeSet[line]; skip {
-			slog.Debug("リポジトリ除外", "owner", owner, "repo", line)
+		if _, skip := excludeSet[item.Name]; skip {
+			slog.Debug("リポジトリ除外", "owner", owner, "repo", item.Name)
 			continue
 		}
-		repos = append(repos, line)
+		if !isRepoActive(item.PushedAt, c.activeMonths) {
+			slog.Debug("直近活動なしリポジトリをスキップ",
+				"owner", owner, "repo", item.Name, "pushedAt", item.PushedAt, "activeMonths", c.activeMonths)
+			skippedInactive++
+			continue
+		}
+		repos = append(repos, item.Name)
 	}
 
+	if skippedInactive > 0 {
+		slog.Info("直近活動なしリポジトリをスキップ", "owner", owner, "skipped", skippedInactive, "activeMonths", c.activeMonths)
+	}
 	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos), "excluded", len(excludes))
 
 	// GitHub secondary rate limit: 最大100並列。余裕を持って10に制限
@@ -321,12 +361,15 @@ func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]m
 		return nil, err
 	}
 
-	// GraphQL APIでdependabotUpdateエラー情報を補完
+	// GraphQL APIでdependabotUpdate情報（エラー + PR番号）を補完
 	if len(alerts) > 0 {
-		updateErrors := c.fetchUpdateErrors(ctx, owner, repo)
+		info := c.fetchGraphQLUpdates(ctx, owner, repo)
 		for i := range alerts {
-			if e, ok := updateErrors[alerts[i].Number]; ok {
+			if e, ok := info.Errors[alerts[i].Number]; ok {
 				alerts[i].UpdateError = e
+			}
+			if pr, ok := info.PRNumbers[alerts[i].Number]; ok {
+				alerts[i].PRNumber = pr
 			}
 		}
 	}
@@ -464,30 +507,49 @@ type graphqlUpdateResponse struct {
 	} `json:"data"`
 }
 
-// parseUpdateErrors はGraphQL応答からdependabotUpdateエラーをパースする
-func parseUpdateErrors(data []byte) map[int]*model.DependabotUpdateError {
+// graphqlUpdateInfo はGraphQL APIのdependabotUpdate応答から抽出した情報
+type graphqlUpdateInfo struct {
+	Errors    map[int]*model.DependabotUpdateError // アラート番号 → エラー情報
+	PRNumbers map[int]int                          // アラート番号 → PR番号
+}
+
+// parseGraphQLUpdates はGraphQL応答からdependabotUpdateの全情報（エラー + PR番号）をパースする
+func parseGraphQLUpdates(data []byte) graphqlUpdateInfo {
+	info := graphqlUpdateInfo{
+		Errors:    make(map[int]*model.DependabotUpdateError),
+		PRNumbers: make(map[int]int),
+	}
 	var resp graphqlUpdateResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		slog.Debug("GraphQLレスポンスパース失敗", "error", err)
-		return nil
+		return info
 	}
-
-	errors := make(map[int]*model.DependabotUpdateError)
 	for _, node := range resp.Data.Repository.VulnerabilityAlerts.Nodes {
-		if node.DependabotUpdate != nil && node.DependabotUpdate.Error != nil {
+		if node.DependabotUpdate == nil {
+			continue
+		}
+		if node.DependabotUpdate.Error != nil {
 			e := node.DependabotUpdate.Error
-			errors[node.Number] = &model.DependabotUpdateError{
+			info.Errors[node.Number] = &model.DependabotUpdateError{
 				ErrorType: e.ErrorType,
 				Title:     e.Title,
 				Body:      e.Body,
 			}
 		}
+		if node.DependabotUpdate.PullRequest != nil && node.DependabotUpdate.PullRequest.Number > 0 {
+			info.PRNumbers[node.Number] = node.DependabotUpdate.PullRequest.Number
+		}
 	}
-	return errors
+	return info
 }
 
-// fetchUpdateErrors はGraphQL APIでdependabotUpdateエラー情報を取得する
-func (c *ghClient) fetchUpdateErrors(ctx context.Context, owner, repo string) map[int]*model.DependabotUpdateError {
+// parseUpdateErrors はGraphQL応答からdependabotUpdateエラーをパースする（後方互換ラッパー）
+func parseUpdateErrors(data []byte) map[int]*model.DependabotUpdateError {
+	return parseGraphQLUpdates(data).Errors
+}
+
+// fetchGraphQLUpdates はGraphQL APIでdependabotUpdateの全情報（エラー + PR番号）を取得する
+func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) graphqlUpdateInfo {
 	query := fmt.Sprintf(`query {
 		repository(owner: %q, name: %q) {
 			vulnerabilityAlerts(first: 100, states: OPEN) {
@@ -506,24 +568,12 @@ func (c *ghClient) fetchUpdateErrors(ctx context.Context, owner, repo string) ma
 	out, err := cmd.Output()
 	if err != nil {
 		slog.Debug("GraphQL API失敗（dependabotUpdate取得）", "owner", owner, "repo", repo, "error", err)
-		return nil
-	}
-	return parseUpdateErrors(out)
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
+		return graphqlUpdateInfo{
+			Errors:    make(map[int]*model.DependabotUpdateError),
+			PRNumbers: make(map[int]int),
 		}
 	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
+	return parseGraphQLUpdates(out)
 }
 
 func (c *ghClient) FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error) {

@@ -49,6 +49,21 @@ func saveRecord(s *store.Store, id int, pkg, owner, repo string) {
 	})
 }
 
+func saveRecordWithPR(s *store.Store, number int, pkg, owner, repo string, prNumber int) *model.AlertRecord {
+	rec := &model.AlertRecord{
+		Alert: model.Alert{
+			Number:      number, // UNIQUE(owner, repo, number) のため重複しない値が必要
+			PackageName: pkg,
+			Owner:       owner,
+			Repo:        repo,
+			PRNumber:    prNumber,
+		},
+		State: model.AlertStatePending,
+	}
+	s.Save(rec)
+	return rec
+}
+
 // fakeGhBin はテスト用の偽ghバイナリを一時ディレクトリに作成して返す。
 // successが trueなら終了コード0、falseなら1を返すスクリプトを生成する。
 func fakeGhBin(t *testing.T, success bool) string {
@@ -161,6 +176,97 @@ func TestMerge_GhCommandFails(t *testing.T) {
 	// gh失敗時はMergedにならない
 	if rec.State == model.AlertStateMerged {
 		t.Error("State should not be merged when gh command fails")
+	}
+}
+
+// TestMerge_UsesStoredPRNumber はPRNumber設定済みならFindDependabotPRを呼ばないことを確認
+func TestMerge_UsesStoredPRNumber(t *testing.T) {
+	ghPath := fakeGhBin(t, true)
+	// prErr をセット → もし FindDependabotPR が呼ばれたら失敗するはず
+	ghClient := &mockGHClient{prErr: errors.New("FindDependabotPR should not be called")}
+	m, s := setupMerger(t, ghClient, ghPath)
+
+	rec := saveRecordWithPR(s, 1, "lodash", "org", "repo", 42)
+
+	err := m.Merge(context.Background(), rec.Alert.ID)
+	if err != nil {
+		t.Fatalf("Merge() error = %v (PRNumber should be used instead of FindDependabotPR)", err)
+	}
+
+	got, _ := s.Get(rec.Alert.ID)
+	if got.State != model.AlertStateMerged {
+		t.Errorf("State = %q, want %q", got.State, model.AlertStateMerged)
+	}
+}
+
+// TestMerge_FallsBackWhenPRNumberZero はPRNumber=0のとき FindDependabotPR にフォールバックすることを確認
+func TestMerge_FallsBackWhenPRNumberZero(t *testing.T) {
+	ghPath := fakeGhBin(t, true)
+	ghClient := &mockGHClient{prNum: 42}
+	m, s := setupMerger(t, ghClient, ghPath)
+
+	rec := saveRecordWithPR(s, 1, "lodash", "org", "repo", 0) // PRNumber=0
+
+	err := m.Merge(context.Background(), rec.Alert.ID)
+	if err != nil {
+		t.Fatalf("Merge() error = %v", err)
+	}
+
+	got, _ := s.Get(rec.Alert.ID)
+	if got.State != model.AlertStateMerged {
+		t.Errorf("State = %q, want %q", got.State, model.AlertStateMerged)
+	}
+}
+
+// TestMerge_UpdatesSiblingAlerts は同PRを共有する兄弟アラートが全てmergedになることを確認
+func TestMerge_UpdatesSiblingAlerts(t *testing.T) {
+	ghPath := fakeGhBin(t, true)
+	ghClient := &mockGHClient{prErr: errors.New("should not be called")}
+	m, s := setupMerger(t, ghClient, ghPath)
+
+	// 同じPR #42 を共有する2つのアラート（Number=1,2）、別PRのアラート1つ（Number=3）
+	rec1 := saveRecordWithPR(s, 1, "pkg-a", "org", "repo", 42)
+	rec2 := saveRecordWithPR(s, 2, "pkg-b", "org", "repo", 42)
+	rec3 := saveRecordWithPR(s, 3, "pkg-c", "org", "repo", 99)
+
+	// rec1 をマージ → rec2 も merged になるはず
+	if err := m.Merge(context.Background(), rec1.Alert.ID); err != nil {
+		t.Fatalf("Merge() error = %v", err)
+	}
+
+	got1, _ := s.Get(rec1.Alert.ID)
+	if got1.State != model.AlertStateMerged {
+		t.Errorf("rec1 State = %q, want merged", got1.State)
+	}
+
+	got2, _ := s.Get(rec2.Alert.ID)
+	if got2.State != model.AlertStateMerged {
+		t.Errorf("rec2 State = %q, want merged (sibling with same PRNumber)", got2.State)
+	}
+
+	got3, _ := s.Get(rec3.Alert.ID)
+	if got3.State == model.AlertStateMerged {
+		t.Error("rec3 (different PRNumber) should NOT be merged")
+	}
+}
+
+// TestMerge_NoSiblingUpdateWhenPRNumberZero はPRNumber=0のとき兄弟更新しないことを確認
+func TestMerge_NoSiblingUpdateWhenPRNumberZero(t *testing.T) {
+	ghPath := fakeGhBin(t, true)
+	ghClient := &mockGHClient{prNum: 42}
+	m, s := setupMerger(t, ghClient, ghPath)
+
+	rec1 := saveRecordWithPR(s, 1, "pkg-a", "org", "repo", 0)
+	rec2 := saveRecordWithPR(s, 2, "pkg-b", "org", "repo", 0)
+
+	// rec1 をマージ → rec2 は影響なし（PRNumber=0 は兄弟なし）
+	if err := m.Merge(context.Background(), rec1.Alert.ID); err != nil {
+		t.Fatalf("Merge() error = %v", err)
+	}
+
+	got2, _ := s.Get(rec2.Alert.ID)
+	if got2.State == model.AlertStateMerged {
+		t.Error("rec2 should NOT be merged (PRNumber=0 means no sibling matching)")
 	}
 }
 

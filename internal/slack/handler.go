@@ -37,7 +37,28 @@ func (c *SlackClient) handleInteraction(ctx context.Context, callback *slackgo.I
 	}
 }
 
+// isAllowedUser はユーザーIDが承認許可リストに含まれるかを返す。
+// 許可リストが空の場合は全員を許可する（後方互換）。
+func (c *SlackClient) isAllowedUser(userID string) bool {
+	if len(c.allowedUserIDs) == 0 {
+		return true
+	}
+	for _, id := range c.allowedUserIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *SlackClient) handleApprove(ctx context.Context, action *slackgo.BlockAction, callback *slackgo.InteractionCallback) {
+	if !c.isAllowedUser(callback.User.ID) {
+		slog.Warn("承認権限なし", "userID", callback.User.ID, "userName", callback.User.Name)
+		c.postReply(callback.Channel.ID, callback.Message.Timestamp,
+			fmt.Sprintf("🚫 %s さんは承認権限がありません", callback.User.Name))
+		return
+	}
+
 	alertID, err := strconv.Atoi(action.Value)
 	if err != nil {
 		slog.Error("alertIDパース失敗", "value", action.Value, "error", err)
@@ -58,6 +79,13 @@ func (c *SlackClient) handleApprove(ctx context.Context, action *slackgo.BlockAc
 }
 
 func (c *SlackClient) handleReject(action *slackgo.BlockAction, callback *slackgo.InteractionCallback) {
+	if !c.isAllowedUser(callback.User.ID) {
+		slog.Warn("却下権限なし", "userID", callback.User.ID, "userName", callback.User.Name)
+		c.postReply(callback.Channel.ID, callback.Message.Timestamp,
+			fmt.Sprintf("🚫 %s さんは却下権限がありません", callback.User.Name))
+		return
+	}
+
 	alertID, err := strconv.Atoi(action.Value)
 	if err != nil {
 		slog.Error("alertIDパース失敗", "value", action.Value, "error", err)

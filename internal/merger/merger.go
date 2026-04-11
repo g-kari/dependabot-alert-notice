@@ -34,10 +34,14 @@ func (m *Merger) Merge(ctx context.Context, alertID int) error {
 
 	alert := record.Alert
 
-	// Dependabot PRを検索
-	prNum, err := m.ghClient.FindDependabotPR(ctx, alert.Owner, alert.Repo, alert.PackageName)
-	if err != nil {
-		return fmt.Errorf("PR検索失敗: %w", err)
+	// PRNumberが既知ならそれを使う。なければ従来のPR検索にフォールバック（grouped PR以外）
+	prNum := alert.PRNumber
+	if prNum == 0 {
+		var err error
+		prNum, err = m.ghClient.FindDependabotPR(ctx, alert.Owner, alert.Repo, alert.PackageName)
+		if err != nil {
+			return fmt.Errorf("PR検索失敗: %w", err)
+		}
 	}
 
 	// PRをマージ
@@ -53,12 +57,28 @@ func (m *Merger) Merge(ctx context.Context, alertID int) error {
 		return fmt.Errorf("PRマージ失敗 (#%d): %w", prNum, err)
 	}
 
-	// ステート更新
+	// 当該アラートをmergedに更新
 	if err := m.store.UpdateState(alertID, model.AlertStateMerged); err != nil {
 		return fmt.Errorf("ステート更新失敗: %w", err)
 	}
 
-	slog.Info("PRマージ完了", "alertID", alertID, "pr", prNum, "repo", repo)
+	// PRNumberが設定されている場合、同PRを共有する兄弟アラートも一括でmergedに更新
+	siblingCount := 0
+	if alert.PRNumber > 0 {
+		siblings := m.store.ListByPRNumber(alert.Owner, alert.Repo, alert.PRNumber)
+		for _, sib := range siblings {
+			if sib.Alert.ID == alertID {
+				continue // 当該アラートは既に更新済み
+			}
+			if err := m.store.UpdateState(sib.Alert.ID, model.AlertStateMerged); err != nil {
+				slog.Error("兄弟アラートのステート更新失敗", "alertID", sib.Alert.ID, "error", err)
+			} else {
+				siblingCount++
+			}
+		}
+	}
+
+	slog.Info("PRマージ完了", "alertID", alertID, "pr", prNum, "repo", repo, "siblingsMerged", siblingCount)
 	return nil
 }
 

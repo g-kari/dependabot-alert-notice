@@ -25,9 +25,10 @@ func (t Target) IsExcluded(repo string) bool {
 }
 
 type SlackConfig struct {
-	ChannelID string `yaml:"channel_id"`
-	BotToken  string `yaml:"bot_token"`
-	AppToken  string `yaml:"app_token"`
+	ChannelID      string   `yaml:"channel_id"`
+	BotToken       string   `yaml:"bot_token"`
+	AppToken       string   `yaml:"app_token"`
+	AllowedUserIDs []string `yaml:"allowed_user_ids,omitempty"` // 空=全員許可。Slack User ID (U...) リスト
 }
 
 type DiscordConfig struct {
@@ -84,6 +85,7 @@ type Config struct {
 	Web               WebConfig       `yaml:"web"`
 	Evaluator         EvaluatorConfig `yaml:"evaluator"`
 	NotifyMinSeverity string          `yaml:"notify_min_severity"` // 通知する最低重要度 (low/medium/high/critical)
+	ActiveMonths      int             `yaml:"active_months"`       // 直近Nか月以内に更新されたリポのみ対象 (0=無効)
 }
 
 // severityRank は重要度の数値ランク（大きいほど深刻）

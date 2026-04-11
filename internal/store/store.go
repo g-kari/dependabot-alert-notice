@@ -578,6 +578,71 @@ func (s *Store) ListReposByOwner(owner string) []string {
 	return repos
 }
 
+// ListByPRNumber は同じ (owner, repo) で同じPR番号を持つアラートレコードを返す。
+// prNumber が 0 の場合は空スライスを返す（PRNumber未設定のアラート同士をマッチさせない）。
+func (s *Store) ListByPRNumber(owner, repo string, prNumber int) []*model.AlertRecord {
+	if prNumber == 0 {
+		return []*model.AlertRecord{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
+		FROM alert_records
+		WHERE owner = ? AND repo = ? AND json_extract(alert_json, '$.PRNumber') = ?`,
+		owner, repo, prNumber)
+	if err != nil {
+		slog.Error("ListByPRNumber クエリ失敗", "owner", owner, "repo", repo, "prNumber", prNumber, "error", err)
+		return []*model.AlertRecord{}
+	}
+	defer func() { _ = rows.Close() }()
+
+	var records []*model.AlertRecord
+	for rows.Next() {
+		var dbID int
+		var alertJSON string
+		var evalJSON sql.NullString
+		var state, evalStatus string
+		var notifiedAt time.Time
+		var mergedAt sql.NullTime
+		var slackTS, discordMsgID string
+
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
+			slog.Error("ListByPRNumber スキャン失敗", "error", err)
+			continue
+		}
+		var alert model.Alert
+		_ = json.Unmarshal([]byte(alertJSON), &alert)
+		alert.ID = dbID
+
+		var eval *model.Evaluation
+		if evalJSON.Valid {
+			eval = &model.Evaluation{}
+			_ = json.Unmarshal([]byte(evalJSON.String), eval)
+		}
+
+		record := &model.AlertRecord{
+			Alert:            alert,
+			Evaluation:       eval,
+			State:            model.AlertState(state),
+			EvalStatus:       model.EvalStatus(evalStatus),
+			NotifiedAt:       notifiedAt,
+			SlackMessageTS:   slackTS,
+			DiscordMessageID: discordMsgID,
+		}
+		if mergedAt.Valid {
+			t := mergedAt.Time
+			record.MergedAt = &t
+		}
+		records = append(records, record)
+	}
+	if records == nil {
+		return []*model.AlertRecord{}
+	}
+	return records
+}
+
 // UpdateDiscordMessageID はDiscord通知メッセージのIDを保存する
 func (s *Store) UpdateDiscordMessageID(alertID int, messageID string) error {
 	s.mu.Lock()

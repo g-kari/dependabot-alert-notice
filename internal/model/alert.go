@@ -70,6 +70,10 @@ type Alert struct {
 
 	// Dependabot更新エラー情報（GraphQL API由来）
 	UpdateError *DependabotUpdateError
+
+	// PRNumber はDependabotが作成したPR番号（GraphQL API由来、0=未設定）。
+	// grouped PRの場合、複数のアラートが同じPRNumberを共有する。
+	PRNumber int `json:"PRNumber,omitempty"`
 }
 
 type Evaluation struct {

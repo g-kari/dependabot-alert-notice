@@ -569,3 +569,109 @@ func TestListReposByOwner_NoRecords(t *testing.T) {
 		t.Errorf("expected 0 repos, got %d", len(repos))
 	}
 }
+
+// TestListByPRNumber_MatchesSameRepoPR は同repo同PR番号のアラートを正しく返すことを確認
+func TestListByPRNumber_MatchesSameRepoPR(t *testing.T) {
+	s := New()
+	r1 := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1, PRNumber: 42},
+		State: model.AlertStatePending,
+	}
+	r2 := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2, PRNumber: 42},
+		State: model.AlertStatePending,
+	}
+	r3 := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 3, PRNumber: 99},
+		State: model.AlertStatePending,
+	}
+	s.Save(r1)
+	s.Save(r2)
+	s.Save(r3)
+
+	result := s.ListByPRNumber("org", "repo", 42)
+	if len(result) != 2 {
+		t.Fatalf("ListByPRNumber(42) len = %d, want 2", len(result))
+	}
+	nums := map[int]bool{}
+	for _, r := range result {
+		nums[r.Alert.Number] = true
+	}
+	if !nums[1] || !nums[2] {
+		t.Errorf("expected alerts #1 and #2, got %v", nums)
+	}
+	if nums[3] {
+		t.Error("alert #3 (PRNumber=99) should not be in result")
+	}
+}
+
+// TestListByPRNumber_ZeroPRNumber は prNumber=0 のとき空スライスを返すことを確認
+func TestListByPRNumber_ZeroPRNumber(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1, PRNumber: 0},
+		State: model.AlertStatePending,
+	})
+
+	result := s.ListByPRNumber("org", "repo", 0)
+	if len(result) != 0 {
+		t.Errorf("ListByPRNumber(0) should return empty, got %d", len(result))
+	}
+}
+
+// TestListByPRNumber_DoesNotCrossRepos は異なるrepo間でマッチしないことを確認
+func TestListByPRNumber_DoesNotCrossRepos(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repoA", Number: 1, PRNumber: 42},
+		State: model.AlertStatePending,
+	})
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repoB", Number: 1, PRNumber: 42},
+		State: model.AlertStatePending,
+	})
+
+	result := s.ListByPRNumber("org", "repoA", 42)
+	if len(result) != 1 {
+		t.Fatalf("ListByPRNumber should return only repoA's alert, got %d", len(result))
+	}
+	if result[0].Alert.Repo != "repoA" {
+		t.Errorf("Repo = %q, want repoA", result[0].Alert.Repo)
+	}
+}
+
+// TestSave_PersistsPRNumber はPRNumberがJSON経由で永続化されることを確認
+func TestSave_PersistsPRNumber(t *testing.T) {
+	s := New()
+	r := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1, PRNumber: 77},
+		State: model.AlertStatePending,
+	}
+	s.Save(r)
+
+	got, err := s.Get(r.Alert.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Alert.PRNumber != 77 {
+		t.Errorf("PRNumber = %d, want 77", got.Alert.PRNumber)
+	}
+}
+
+// TestSave_PRNumberZeroDefault は PRNumber未設定のレコードが 0 として読み出されることを確認
+func TestSave_PRNumberZeroDefault(t *testing.T) {
+	s := New()
+	r := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1},
+		State: model.AlertStatePending,
+	}
+	s.Save(r)
+
+	got, err := s.Get(r.Alert.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Alert.PRNumber != 0 {
+		t.Errorf("PRNumber = %d, want 0 (zero value)", got.Alert.PRNumber)
+	}
+}

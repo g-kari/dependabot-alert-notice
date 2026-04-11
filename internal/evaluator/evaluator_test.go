@@ -2,6 +2,8 @@ package evaluator
 
 import (
 	"testing"
+
+	"github.com/g-kari/dependabot-alert-notice/internal/config"
 )
 
 func TestExtractJSON(t *testing.T) {
@@ -80,6 +82,51 @@ func TestParseEvaluation(t *testing.T) {
 	}
 	if eval.Recommendation != "approve" {
 		t.Errorf("Recommendation = %q, want %q", eval.Recommendation, "approve")
+	}
+}
+
+func TestParseEvaluation_FormattedOutput(t *testing.T) {
+	// 箇条書き形式（改行あり）のJSONがパースできることを確認
+	input := `{"impact":"• RCE実行が可能\n• 機密データの漏洩リスク\n• サービス停止の可能性","recommendation":"approve","reasoning":"• express.json()で外部入力を受け取る場合\n• プロトタイプ汚染につながるパターン"}`
+	eval, err := parseEvaluation([]byte(input))
+	if err != nil {
+		t.Fatalf("parseEvaluation() error = %v", err)
+	}
+	if eval.Impact == "" {
+		t.Error("Impact should not be empty")
+	}
+	if eval.Reasoning == "" {
+		t.Error("Reasoning should not be empty")
+	}
+	// 箇条書きマーカーが含まれていることを確認
+	if len(eval.Impact) < 2 {
+		t.Errorf("Impact too short: %q", eval.Impact)
+	}
+}
+
+// TestDockerEvaluator_SecurityOptFlag は --security-opt=no-new-privileges が使われていることを確認
+func TestDockerEvaluator_SecurityOptFlag(t *testing.T) {
+	cfg := config.EvaluatorConfig{
+		Sandbox: config.SandboxConfig{
+			Image:       "test-image:latest",
+			MemoryLimit: "512m",
+			CPULimit:    "0.5",
+		},
+	}
+	e := &DockerEvaluator{cfg: cfg}
+	args := e.buildDockerArgs("test prompt", "/home/test/.claude")
+
+	hasSecurityOpt := false
+	for _, arg := range args {
+		if arg == "--security-opt=no-new-privileges" {
+			hasSecurityOpt = true
+		}
+		if arg == "--no-new-privileges" {
+			t.Error("args should not contain deprecated --no-new-privileges flag")
+		}
+	}
+	if !hasSecurityOpt {
+		t.Error("args should contain --security-opt=no-new-privileges")
 	}
 }
 

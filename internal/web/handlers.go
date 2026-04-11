@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
@@ -391,9 +392,10 @@ type settingsData struct {
 	Config            *config.Config
 	Flash             string // 保存成功メッセージ
 	Error             string
-	EnvBotToken       bool // SLACK_BOT_TOKEN が環境変数で設定されているか
-	EnvAppToken       bool // SLACK_APP_TOKEN が環境変数で設定されているか
-	EnvDiscordWebhook bool // DISCORD_WEBHOOK_URL が環境変数で設定されているか
+	EnvBotToken       bool   // SLACK_BOT_TOKEN が環境変数で設定されているか
+	EnvAppToken       bool   // SLACK_APP_TOKEN が環境変数で設定されているか
+	EnvDiscordWebhook bool   // DISCORD_WEBHOOK_URL が環境変数で設定されているか
+	AllowedUserIDsStr string // Config.Slack.AllowedUserIDs のカンマ区切り文字列（テンプレート表示用）
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -406,6 +408,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		EnvBotToken:       os.Getenv("SLACK_BOT_TOKEN") != "",
 		EnvAppToken:       os.Getenv("SLACK_APP_TOKEN") != "",
 		EnvDiscordWebhook: os.Getenv("DISCORD_WEBHOOK_URL") != "",
+		AllowedUserIDsStr: strings.Join(cfg.Slack.AllowedUserIDs, ","),
 	})
 }
 
@@ -440,6 +443,21 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	// slack（トークンは環境変数未設定時のみYAML保存）
 	s.cfg.Slack.ChannelID = r.FormValue("slack_channel_id")
+
+	// slack承認許可ユーザー（カンマ区切り → スライス）
+	if v := r.FormValue("slack_allowed_user_ids"); v != "" {
+		parts := strings.Split(v, ",")
+		var ids []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				ids = append(ids, p)
+			}
+		}
+		s.cfg.Slack.AllowedUserIDs = ids
+	} else {
+		s.cfg.Slack.AllowedUserIDs = nil // 空=全員許可
+	}
 	if os.Getenv("SLACK_BOT_TOKEN") == "" {
 		if v := r.FormValue("slack_bot_token"); v != "" {
 			s.cfg.Slack.BotToken = v
@@ -459,6 +477,13 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// 通知最低重要度
 	if v := r.FormValue("notify_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
 		s.cfg.NotifyMinSeverity = v
+	}
+
+	// 直近活動フィルタ（Nか月以内にpushがあったリポのみ対象）
+	if v := r.FormValue("active_months"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			s.cfg.ActiveMonths = n
+		}
 	}
 
 	// AI自動評価ON/OFF

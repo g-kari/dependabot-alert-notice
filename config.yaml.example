@@ -1,4 +1,5 @@
 poll_interval: 30m
+active_months: 0  # 直近Nか月以内にpushがあったリポのみ対象 (0=無効、例: 6=半年以内)
 
 targets:
   - owner: your-org
@@ -9,6 +10,7 @@ targets:
 slack:
   channel_id: C0123456789
   # SLACK_BOT_TOKEN, SLACK_APP_TOKEN は環境変数で設定
+  allowed_user_ids: []  # 空=全員許可。承認・却下を許可するSlack User ID (U...) のリスト
 
 discord:
   webhook_url: ""  # Discord Webhook URL (環境変数 DISCORD_WEBHOOK_URL でも設定可)

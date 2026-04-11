@@ -14,12 +14,13 @@ import (
 )
 
 type SlackClient struct {
-	api       *slackgo.Client
-	socket    *socketmode.Client
-	channelID string
-	store     *store.Store
-	merger    merger.Interface
-	limiter   *ratelimit.Limiter
+	api            *slackgo.Client
+	socket         *socketmode.Client
+	channelID      string
+	store          *store.Store
+	merger         merger.Interface
+	limiter        *ratelimit.Limiter
+	allowedUserIDs []string // 承認・却下を許可するSlack User IDリスト（空=全員許可）
 }
 
 func New(cfg *config.Config, s *store.Store, m merger.Interface) *SlackClient {
@@ -36,7 +37,8 @@ func New(cfg *config.Config, s *store.Store, m merger.Interface) *SlackClient {
 		store:     s,
 		merger:    m,
 		// Slack: chat.postMessage は1メッセージ/秒/チャンネルが推奨
-		limiter: ratelimit.NewLimiter(1 * time.Second),
+		limiter:        ratelimit.NewLimiter(1 * time.Second),
+		allowedUserIDs: cfg.Slack.AllowedUserIDs,
 	}
 }
 

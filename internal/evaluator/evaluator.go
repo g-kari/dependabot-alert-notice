@@ -67,21 +67,7 @@ func (e *DockerEvaluator) Evaluate(ctx context.Context, alert model.Alert) (*mod
 
 	prompt := buildPrompt(alert)
 
-	args := []string{
-		"run", "--rm",
-		"-v", claudeHome + ":/home/node/.claude:ro",
-		"--read-only",
-		"--tmpfs", "/tmp",
-		"--no-new-privileges",
-		"--cap-drop=ALL",
-		"--memory=" + e.cfg.Sandbox.MemoryLimit,
-		"--cpus=" + e.cfg.Sandbox.CPULimit,
-		"--network=host",
-		e.cfg.Sandbox.Image,
-		"-p", prompt,
-		"--output-format", "json",
-	}
-
+	args := e.buildDockerArgs(prompt, claudeHome)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -91,14 +77,32 @@ func (e *DockerEvaluator) Evaluate(ctx context.Context, alert model.Alert) (*mod
 	return parseEvaluation(out)
 }
 
+// buildDockerArgs はDockerコンテナ実行用のコマンド引数を生成する（テスト可能にするため分離）
+func (e *DockerEvaluator) buildDockerArgs(prompt, claudeHome string) []string {
+	return []string{
+		"run", "--rm",
+		"-v", claudeHome + ":/home/node/.claude:ro",
+		"--read-only",
+		"--tmpfs", "/tmp",
+		"--security-opt=no-new-privileges",
+		"--cap-drop=ALL",
+		"--memory=" + e.cfg.Sandbox.MemoryLimit,
+		"--cpus=" + e.cfg.Sandbox.CPULimit,
+		"--network=host",
+		e.cfg.Sandbox.Image,
+		"-p", prompt,
+		"--output-format", "json",
+	}
+}
+
 func buildPrompt(alert model.Alert) string {
 	return fmt.Sprintf(`あなたはセキュリティエンジニアです。以下のDependabotセキュリティアラートについて、開発エンジニア向けに日本語で解説してください。
 回答は必ず以下のJSON形式のみで出力してください。JSON以外のテキスト（説明文、前置き、コードブロックなど）は含めないでください。
 
 フィールド:
-- impact: この脆弱性によって何が侵害されるか。攻撃者が何をできるようになるか、どんな情報や機能が危険にさらされるかを3〜5文で具体的に説明する
+- impact: この脆弱性によって何が侵害されるか。攻撃者が何をできるようになるか、どんな情報や機能が危険にさらされるかを箇条書きで3〜5項目で具体的に説明する。各項目は「• 」で始め、改行（\n）で区切る
 - recommendation: 推奨アクション (approve/reject/manual-review)
-- reasoning: このパッケージを「どのように使っていたら」侵害される可能性があるか。具体的なコードパターンや使用方法を例示しながら3〜5文で説明する
+- reasoning: このパッケージを「どのように使っていたら」侵害される可能性があるか。具体的なコードパターンや使用方法を箇条書きで3〜5項目で例示する。各項目は「• 」で始め、改行（\n）で区切る
 
 アラート情報:
 - パッケージ: %s (%s)

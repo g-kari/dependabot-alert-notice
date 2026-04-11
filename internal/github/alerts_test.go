@@ -2,6 +2,7 @@ package github
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseAlerts_SkipsArchivedRepository(t *testing.T) {
@@ -335,6 +336,111 @@ func TestParseUpdateErrors(t *testing.T) {
 	}
 }
 
+// TestParseGraphQLUpdates_ExtractsPRNumber はPR番号がGraphQL応答から正しく抽出されることを確認
+func TestParseGraphQLUpdates_ExtractsPRNumber(t *testing.T) {
+	jsonData := `{
+		"data": {
+			"repository": {
+				"vulnerabilityAlerts": {
+					"nodes": [
+						{
+							"number": 11,
+							"dependabotUpdate": {
+								"pullRequest": {"number": 42}
+							}
+						},
+						{
+							"number": 13,
+							"dependabotUpdate": {
+								"pullRequest": {"number": 42}
+							}
+						}
+					]
+				}
+			}
+		}
+	}`
+
+	info := parseGraphQLUpdates([]byte(jsonData))
+	if len(info.PRNumbers) != 2 {
+		t.Fatalf("PRNumbers len = %d, want 2", len(info.PRNumbers))
+	}
+	if info.PRNumbers[11] != 42 {
+		t.Errorf("PRNumbers[11] = %d, want 42", info.PRNumbers[11])
+	}
+	if info.PRNumbers[13] != 42 {
+		t.Errorf("PRNumbers[13] = %d, want 42", info.PRNumbers[13])
+	}
+	if len(info.Errors) != 0 {
+		t.Errorf("Errors len = %d, want 0", len(info.Errors))
+	}
+}
+
+// TestParseGraphQLUpdates_NullUpdate はdependabotUpdateがnullの場合をスキップすることを確認
+func TestParseGraphQLUpdates_NullUpdate(t *testing.T) {
+	jsonData := `{
+		"data": {
+			"repository": {
+				"vulnerabilityAlerts": {
+					"nodes": [
+						{"number": 20, "dependabotUpdate": null},
+						{"number": 21, "dependabotUpdate": {"pullRequest": {"number": 55}}}
+					]
+				}
+			}
+		}
+	}`
+
+	info := parseGraphQLUpdates([]byte(jsonData))
+	if _, ok := info.PRNumbers[20]; ok {
+		t.Error("null dependabotUpdate should produce no PR number for #20")
+	}
+	if info.PRNumbers[21] != 55 {
+		t.Errorf("PRNumbers[21] = %d, want 55", info.PRNumbers[21])
+	}
+}
+
+// TestParseGraphQLUpdates_ErrorAndPR はエラーとPR番号が共存する場合を確認
+func TestParseGraphQLUpdates_ErrorAndPR(t *testing.T) {
+	jsonData := `{
+		"data": {
+			"repository": {
+				"vulnerabilityAlerts": {
+					"nodes": [
+						{
+							"number": 10,
+							"dependabotUpdate": {
+								"error": {
+									"errorType": "security_update_not_possible",
+									"title": "Cannot update",
+									"body": "Details"
+								}
+							}
+						},
+						{
+							"number": 11,
+							"dependabotUpdate": {
+								"pullRequest": {"number": 42}
+							}
+						}
+					]
+				}
+			}
+		}
+	}`
+
+	info := parseGraphQLUpdates([]byte(jsonData))
+	if len(info.Errors) != 1 {
+		t.Errorf("Errors len = %d, want 1", len(info.Errors))
+	}
+	if info.Errors[10] == nil {
+		t.Error("expected error for #10")
+	}
+	if info.PRNumbers[11] != 42 {
+		t.Errorf("PRNumbers[11] = %d, want 42", info.PRNumbers[11])
+	}
+}
+
 func TestContainsPackageName(t *testing.T) {
 	tests := []struct {
 		title   string
@@ -354,6 +460,35 @@ func TestContainsPackageName(t *testing.T) {
 			got := containsPackageName(tt.title, tt.pkgName)
 			if got != tt.want {
 				t.Errorf("containsPackageName(%q, %q) = %v, want %v", tt.title, tt.pkgName, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsRepoActive は直近Nか月フィルタのロジックを確認
+func TestIsRepoActive(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name         string
+		pushedAt     time.Time
+		activeMonths int
+		want         bool
+	}{
+		{"activeMonths=0はフィルタなし（常にtrue）", now.AddDate(-2, 0, 0), 0, true},
+		{"直近6か月: 1か月前はtrue", now.AddDate(0, -1, 0), 6, true},
+		{"直近6か月: 5か月前はtrue", now.AddDate(0, -5, 0), 6, true},
+		{"直近6か月: 7か月前はfalse", now.AddDate(0, -7, 0), 6, false},
+		{"直近12か月: 11か月前はtrue", now.AddDate(0, -11, 0), 12, true},
+		{"直近12か月: 13か月前はfalse", now.AddDate(0, -13, 0), 12, false},
+		{"ゼロ値はfalse（pushedAtなし）", time.Time{}, 6, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRepoActive(tt.pushedAt, tt.activeMonths)
+			if got != tt.want {
+				t.Errorf("isRepoActive(%v, %d) = %v, want %v", tt.pushedAt, tt.activeMonths, got, tt.want)
 			}
 		})
 	}

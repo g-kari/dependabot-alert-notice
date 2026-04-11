@@ -248,6 +248,32 @@ func TestShouldNotify(t *testing.T) {
 	}
 }
 
+// TestLoad_ActiveMonthsDefault はActiveMonthsのデフォルトが0（フィルタなし）であることを確認
+func TestLoad_ActiveMonthsDefault(t *testing.T) {
+	path := writeTemp(t, `targets:
+  - owner: org
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ActiveMonths != 0 {
+		t.Errorf("ActiveMonths = %d, want 0 (disabled by default)", cfg.ActiveMonths)
+	}
+}
+
+// TestLoad_ActiveMonths はYAMLからActiveMonthsが読み込まれることを確認
+func TestLoad_ActiveMonths(t *testing.T) {
+	path := writeTemp(t, `active_months: 6`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ActiveMonths != 6 {
+		t.Errorf("ActiveMonths = %d, want 6", cfg.ActiveMonths)
+	}
+}
+
 func TestLoad_SandboxConfig(t *testing.T) {
 	path := writeTemp(t, `
 evaluator:
