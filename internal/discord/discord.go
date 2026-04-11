@@ -78,6 +78,10 @@ func (c *Client) Notify(record *model.AlertRecord) error {
 		{Name: "Fixed in", Value: nonEmpty(alert.FixedIn, "N/A"), Inline: true},
 	}
 
+	if alert.Summary != "" {
+		fields = append([]embedField{{Name: "タイトル", Value: alert.Summary, Inline: false}}, fields...)
+	}
+
 	if eval != nil {
 		fields = append(fields,
 			embedField{Name: "Risk", Value: nonEmpty(eval.Risk, "N/A"), Inline: true},

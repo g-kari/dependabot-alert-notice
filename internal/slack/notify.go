@@ -20,6 +20,20 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 		slackgo.NewHeaderBlock(
 			slackgo.NewTextBlockObject(slackgo.PlainTextType, headerText, true, false),
 		),
+	}
+
+	if alert.Summary != "" {
+		blocks = append(blocks,
+			slackgo.NewSectionBlock(
+				slackgo.NewTextBlockObject(slackgo.MarkdownType,
+					fmt.Sprintf("_%s_", alert.Summary),
+					false, false,
+				), nil, nil,
+			),
+		)
+	}
+
+	blocks = append(blocks,
 		slackgo.NewSectionBlock(
 			slackgo.NewTextBlockObject(slackgo.MarkdownType,
 				fmt.Sprintf("*Severity:* %s | *CVE:* %s | *CVSS:* %.1f\n*Fixed in:* %s",
@@ -28,7 +42,7 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 			), nil, nil,
 		),
 		slackgo.NewDividerBlock(),
-	}
+	)
 
 	if eval != nil {
 		recEmoji := recommendationToEmoji(eval.Recommendation)
