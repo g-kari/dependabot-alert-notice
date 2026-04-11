@@ -50,19 +50,82 @@ type ghAlert struct {
 }
 
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
-	var endpoint string
+	// リポジトリ指定あり → 直接取得
 	if target.Repo != "" {
-		endpoint = fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", target.Owner, target.Repo)
-	} else {
-		endpoint = fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", target.Owner)
+		return c.fetchRepoAlerts(ctx, target.Owner, target.Repo)
 	}
 
+	// リポジトリ指定なし → org API を試してダメなら全repoにフォールバック
+	alerts, err := c.fetchOrgAlerts(ctx, target.Owner)
+	if err != nil {
+		slog.Debug("org APIが失敗、ユーザーリポジトリにフォールバック", "owner", target.Owner, "error", err)
+		return c.fetchUserRepoAlerts(ctx, target.Owner)
+	}
+	return alerts, nil
+}
+
+func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string) ([]model.Alert, error) {
+	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
+	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("org API 失敗: %w", err)
+	}
+	return c.parseAlerts(out, owner, "")
+}
+
+// fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
+func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]model.Alert, error) {
+	// リポジトリ一覧取得
+	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
+		"--json", "name",
+		"--jq", ".[].name",
+		"--limit", "1000",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
+	}
+
+	var repos []string
+	for _, line := range splitLines(string(out)) {
+		if line != "" {
+			repos = append(repos, line)
+		}
+	}
+
+	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos))
+
+	var all []model.Alert
+	for _, repo := range repos {
+		alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
+		if err != nil {
+			slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
+			continue
+		}
+		all = append(all, alerts...)
+	}
+
+	slog.Info("アラート取得完了（全リポジトリ）", "owner", owner, "repos", len(repos), "alerts", len(all))
+	return all, nil
+}
+
+func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]model.Alert, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", owner, repo)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh api 実行失敗: %w", err)
 	}
+	alerts, err := c.parseAlerts(out, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("アラート取得完了", "target", fmt.Sprintf("%s/%s", owner, repo), "count", len(alerts))
+	return alerts, nil
+}
 
+func (c *ghClient) parseAlerts(out []byte, owner, repo string) ([]model.Alert, error) {
 	var raw []ghAlert
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("JSONパース失敗: %w", err)
@@ -77,12 +140,12 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 			cveID = r.SecurityAdvisory.CVEs[0].ID
 		}
 
-		alert := model.Alert{
+		alerts = append(alerts, model.Alert{
 			ID:               r.Number,
 			Number:           r.Number,
 			State:            r.State,
-			Owner:            target.Owner,
-			Repo:             target.Repo,
+			Owner:            owner,
+			Repo:             repo,
 			PackageName:      r.SecurityVulnerability.Package.Name,
 			PackageEcosystem: r.SecurityVulnerability.Package.Ecosystem,
 			Severity:         model.Severity(r.SecurityVulnerability.Severity),
@@ -91,12 +154,24 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 			FixedIn:          r.SecurityVulnerability.FirstPatchedVersion.Identifier,
 			HTMLURL:          r.HTMLURL,
 			CreatedAt:        createdAt,
-		}
-		alerts = append(alerts, alert)
+		})
 	}
-
-	slog.Info("アラート取得完了", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "count", len(alerts))
 	return alerts, nil
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
 }
 
 func (c *ghClient) FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error) {
