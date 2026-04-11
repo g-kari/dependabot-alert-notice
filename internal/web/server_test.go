@@ -501,6 +501,49 @@ func TestDetail_RendersMarkdownDescription(t *testing.T) {
 	}
 }
 
+// TestSettings_AutoEval はAI自動評価のON/OFF設定が正しく保存されることを確認
+func TestSettings_AutoEval(t *testing.T) {
+	tests := []struct {
+		name     string
+		formVal  string
+		wantBool bool
+	}{
+		{"ONに設定", "true", true},
+		{"OFFに設定", "false", false},
+		{"未送信=OFF", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _, _ := newTestServer(t)
+			srv.cfg = &config.Config{
+				PollInterval: 30 * time.Minute,
+				LogLevel:     "info",
+				ClaudePath:   "claude",
+				GhPath:       "gh",
+				Evaluator: config.EvaluatorConfig{
+					AutoEval: !tt.wantBool, // 逆にセットして変化を確認
+				},
+			}
+
+			body := "poll_interval=30m&log_level=info&claude_path=claude&gh_path=gh"
+			if tt.formVal != "" {
+				body += "&auto_eval=" + tt.formVal
+			}
+			req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			srv.handleSettingsSave(w, req)
+
+			if w.Code != http.StatusSeeOther {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+			}
+			if srv.cfg.Evaluator.AutoEval != tt.wantBool {
+				t.Errorf("AutoEval = %v, want %v", srv.cfg.Evaluator.AutoEval, tt.wantBool)
+			}
+		})
+	}
+}
+
 // TestTargetDelete_InvalidIndex は範囲外インデックスを無視することを確認
 func TestTargetDelete_InvalidIndex(t *testing.T) {
 	srv, _, _ := newTestServer(t)

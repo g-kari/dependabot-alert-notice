@@ -402,6 +402,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Discord.WebhookURL = r.FormValue("discord_webhook_url")
 	}
 
+	// AI自動評価ON/OFF
+	s.cfg.Evaluator.AutoEval = r.FormValue("auto_eval") == "true"
+
 	// evaluator sandbox
 	s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
 	if v := r.FormValue("sandbox_image"); v != "" {

@@ -165,26 +165,28 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			slog.Info("新規アラート登録", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "count", newCount)
 		}
 
-		// pending/failed のアラートをEvaluateJobとして積む
-		maxEval := cfg.Evaluator.MaxEvalPerPoll
-		if maxEval <= 0 {
-			maxEval = 10
-		}
-		pending := s.ListPendingEvaluation(maxEval)
-		sort.Slice(pending, func(i, j int) bool {
-			oi := severityOrder[pending[i].Alert.Severity]
-			oj := severityOrder[pending[j].Alert.Severity]
-			return oi < oj
-		})
-		for _, record := range pending {
-			// critical / high のみAI評価対象
-			if record.Alert.Severity != model.SeverityCritical && record.Alert.Severity != model.SeverityHigh {
-				continue
+		// AI自動評価が有効な場合のみ pending/failed をEvaluateJobとして積む
+		if cfg.Evaluator.AutoEval {
+			maxEval := cfg.Evaluator.MaxEvalPerPoll
+			if maxEval <= 0 {
+				maxEval = 10
 			}
-			q.Enqueue(queue.Job{
-				Type:    queue.JobEvaluateAlert,
-				Payload: record.Alert.ID,
+			pending := s.ListPendingEvaluation(maxEval)
+			sort.Slice(pending, func(i, j int) bool {
+				oi := severityOrder[pending[i].Alert.Severity]
+				oj := severityOrder[pending[j].Alert.Severity]
+				return oi < oj
 			})
+			for _, record := range pending {
+				// critical / high のみAI評価対象
+				if record.Alert.Severity != model.SeverityCritical && record.Alert.Severity != model.SeverityHigh {
+					continue
+				}
+				q.Enqueue(queue.Job{
+					Type:    queue.JobEvaluateAlert,
+					Payload: record.Alert.ID,
+				})
+			}
 		}
 		return nil
 	}

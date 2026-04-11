@@ -160,6 +160,34 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	}
 }
 
+// TestLoad_AutoEvalDefault はAI自動評価がデフォルトOFFであることを確認
+func TestLoad_AutoEvalDefault(t *testing.T) {
+	path := writeTemp(t, `targets:
+  - owner: org
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Evaluator.AutoEval {
+		t.Error("Evaluator.AutoEval should be false by default")
+	}
+}
+
+// TestLoad_AutoEvalFromYAML はYAMLからAutoEvalが読み込まれることを確認
+func TestLoad_AutoEvalFromYAML(t *testing.T) {
+	path := writeTemp(t, `evaluator:
+  auto_eval: true
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Evaluator.AutoEval {
+		t.Error("Evaluator.AutoEval should be true when set in YAML")
+	}
+}
+
 func TestLoad_SandboxConfig(t *testing.T) {
 	path := writeTemp(t, `
 evaluator:

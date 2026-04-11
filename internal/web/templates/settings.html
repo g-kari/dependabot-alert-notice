@@ -167,6 +167,26 @@
 </div>
 
 <div class="card">
+  <h2 style="margin-bottom:16px">🤖 AI評価</h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr>
+          <th style="width:200px">AI自動評価</th>
+          <td>
+            <select name="auto_eval" style="width:160px">
+              <option value="false" {{if not .Config.Evaluator.AutoEval}}selected{{end}}>無効（デフォルト）</option>
+              <option value="true"  {{if .Config.Evaluator.AutoEval}}selected{{end}}>有効</option>
+            </select>
+            <span style="color:var(--color-muted);font-size:0.82rem;margin-left:8px">有効時: ポーリング毎にcritical/highを自動評価</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
   <h2 style="margin-bottom:16px">🐳 Evaluator サンドボックス</h2>
   <div class="table-wrap">
     <table>

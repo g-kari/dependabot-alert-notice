@@ -48,6 +48,7 @@ type SandboxConfig struct {
 }
 
 type EvaluatorConfig struct {
+	AutoEval       bool          `yaml:"auto_eval"`
 	Sandbox        SandboxConfig `yaml:"sandbox"`
 	MaxEvalPerPoll int           `yaml:"max_eval_per_poll"`
 }
