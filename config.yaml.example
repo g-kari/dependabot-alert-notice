@@ -10,6 +10,9 @@ slack:
   channel_id: C0123456789
   # SLACK_BOT_TOKEN, SLACK_APP_TOKEN は環境変数で設定
 
+discord:
+  webhook_url: ""  # Discord Webhook URL (環境変数 DISCORD_WEBHOOK_URL でも設定可)
+
 claude_path: claude    # claude CLIのパス
 gh_path: gh            # gh CLIのパス
 log_level: info        # debug, info, warn, error

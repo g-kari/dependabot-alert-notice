@@ -9,14 +9,29 @@ import (
 )
 
 type Target struct {
-	Owner string `yaml:"owner"`
-	Repo  string `yaml:"repo"`
+	Owner    string   `yaml:"owner"`
+	Repo     string   `yaml:"repo"`
+	Excludes []string `yaml:"excludes,omitempty"`
+}
+
+// IsExcluded はリポジトリ名が除外リストに含まれるか返す
+func (t Target) IsExcluded(repo string) bool {
+	for _, ex := range t.Excludes {
+		if ex == repo {
+			return true
+		}
+	}
+	return false
 }
 
 type SlackConfig struct {
 	ChannelID string `yaml:"channel_id"`
 	BotToken  string `yaml:"bot_token"`
 	AppToken  string `yaml:"app_token"`
+}
+
+type DiscordConfig struct {
+	WebhookURL string `yaml:"webhook_url"`
 }
 
 type WebConfig struct {
@@ -33,13 +48,15 @@ type SandboxConfig struct {
 }
 
 type EvaluatorConfig struct {
-	Sandbox SandboxConfig `yaml:"sandbox"`
+	Sandbox        SandboxConfig `yaml:"sandbox"`
+	MaxEvalPerPoll int           `yaml:"max_eval_per_poll"`
 }
 
 type Config struct {
 	PollInterval time.Duration   `yaml:"poll_interval"`
 	Targets      []Target        `yaml:"targets"`
 	Slack        SlackConfig     `yaml:"slack"`
+	Discord      DiscordConfig   `yaml:"discord"`
 	ClaudePath   string          `yaml:"claude_path"`
 	GhPath       string          `yaml:"gh_path"`
 	LogLevel     string          `yaml:"log_level"`
@@ -73,6 +90,7 @@ func Load(path string) (*Config, error) {
 		DataPath:     "store.db",
 		Web:          WebConfig{Port: 8999},
 		Evaluator: EvaluatorConfig{
+			MaxEvalPerPoll: 10,
 			Sandbox: SandboxConfig{
 				Enabled:     true,
 				Image:       "dependabot-evaluator:latest",
@@ -93,6 +111,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SLACK_APP_TOKEN"); v != "" {
 		cfg.Slack.AppToken = v
+	}
+	if v := os.Getenv("DISCORD_WEBHOOK_URL"); v != "" {
+		cfg.Discord.WebhookURL = v
 	}
 
 	return cfg, nil

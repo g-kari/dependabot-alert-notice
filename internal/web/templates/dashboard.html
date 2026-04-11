@@ -1,48 +1,69 @@
 {{define "content"}}
-<h1>Dependabot アラート一覧</h1>
-<table>
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>パッケージ</th>
+<div class="dashboard-header">
+  <h1>Dependabot アラート一覧</h1>
+  <a href="/" class="btn btn-ghost">🔄 更新</a>
+</div>
+
+{{if .Groups}}
+<div class="cve-list">
+  {{range .Groups}}
+  <details class="cve-group">
+    <summary class="cve-summary">
+      <div class="cve-summary-main">
+        <span class="badge badge-{{.Severity}}">{{.Severity}}</span>
+        <span class="cve-pkg">{{.PackageName}}</span>
+        {{if .CVEID}}<span class="cve-id">{{.CVEID}}</span>{{end}}
+        {{if .Summary}}<span class="cve-desc">{{.Summary}}</span>{{end}}
+      </div>
+      <div class="cve-summary-meta">
+        <span class="badge badge-info">{{len .Records}} リポジトリ</span>
+      </div>
+    </summary>
+    <div class="cve-repos-wrap">
+      <table class="cve-repos">
+        <thead>
+          <tr>
             <th>リポジトリ</th>
-            <th>重要度</th>
-            <th>CVE</th>
             <th>AI評価</th>
             <th>ステータス</th>
             <th>操作</th>
-        </tr>
-    </thead>
-    <tbody>
-        {{range .Records}}
-        <tr>
-            <td><a href="/alerts/{{.Alert.ID}}">{{.Alert.ID}}</a></td>
-            <td>{{.Alert.PackageName}}</td>
-            <td>{{.Alert.Owner}}/{{.Alert.Repo}}</td>
-            <td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td>
-            <td>{{.Alert.CVEID}}</td>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Records}}
+          <tr>
             <td>
-                {{if .Evaluation}}
-                <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
-                {{else}}
-                <span class="badge badge-pending">評価中</span>
-                {{end}}
+              <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.Owner}}/{{.Alert.Repo}}</a>
+            </td>
+            <td>
+              {{if .Evaluation}}
+              <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+              {{else}}
+              <span class="badge badge-pending">評価中</span>
+              {{end}}
             </td>
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
-            <td>
-                {{if eq (printf "%s" .State) "pending"}}
-                <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
-                    <button type="submit" class="btn btn-approve">承認</button>
-                </form>
-                <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline">
-                    <button type="submit" class="btn btn-reject">却下</button>
-                </form>
-                {{end}}
+            <td class="action-cell">
+              {{if eq (printf "%s" .State) "pending"}}
+              <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
+                <button type="submit" class="btn btn-approve btn-sm">承認</button>
+              </form>
+              <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline">
+                <button type="submit" class="btn btn-reject btn-sm">却下</button>
+              </form>
+              {{end}}
             </td>
-        </tr>
-        {{else}}
-        <tr><td colspan="8" style="text-align:center;color:#8b949e;">アラートなし</td></tr>
-        {{end}}
-    </tbody>
-</table>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {{end}}
+</div>
+{{else}}
+<div class="card empty-card">
+  <p class="empty-msg">アラートなし</p>
+</div>
+{{end}}
 {{end}}

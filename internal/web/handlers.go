@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,15 +13,96 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	records := s.store.List()
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].Alert.CreatedAt.After(records[j].Alert.CreatedAt)
+// CVEGroup はCVE ID単位でアラートをまとめたグループ
+type CVEGroup struct {
+	CVEID       string
+	Summary     string
+	Severity    model.Severity
+	PackageName string
+	CVSSScore   float64
+	Records     []*model.AlertRecord
+}
+
+// severityOrder はSeverity降順ソート用の優先度マップ
+var severityOrder = map[model.Severity]int{
+	model.SeverityCritical: 4,
+	model.SeverityHigh:     3,
+	model.SeverityMedium:   2,
+	model.SeverityLow:      1,
+}
+
+// groupByCVE はAlertRecordのリストをCVE ID単位でグルーピングする。
+// CVE IDが空のアラートはアラートIDをキーに個別グループとして扱う。
+// グループはSeverity降順 → CVSS降順でソートされる。
+// グループ内のRecordsはCreatedAt降順でソートされる。
+func groupByCVE(records []*model.AlertRecord) []CVEGroup {
+	if len(records) == 0 {
+		return []CVEGroup{}
+	}
+
+	groupMap := make(map[string]*CVEGroup)
+	// 挿入順を保持するためキーを追跡
+	var keys []string
+
+	for _, r := range records {
+		key := r.Alert.CVEID
+		if key == "" {
+			key = fmt.Sprintf("__noCVE_%d", r.Alert.ID)
+		}
+
+		if g, ok := groupMap[key]; ok {
+			g.Records = append(g.Records, r)
+			// グループ内で最も深刻なSeverity/CVSSを保持
+			if severityOrder[r.Alert.Severity] > severityOrder[g.Severity] {
+				g.Severity = r.Alert.Severity
+				g.CVSSScore = r.Alert.CVSSScore
+				g.PackageName = r.Alert.PackageName
+				g.Summary = r.Alert.Summary
+			} else if r.Alert.Severity == g.Severity && r.Alert.CVSSScore > g.CVSSScore {
+				g.CVSSScore = r.Alert.CVSSScore
+			}
+		} else {
+			groupMap[key] = &CVEGroup{
+				CVEID:       r.Alert.CVEID,
+				Summary:     r.Alert.Summary,
+				Severity:    r.Alert.Severity,
+				PackageName: r.Alert.PackageName,
+				CVSSScore:   r.Alert.CVSSScore,
+				Records:     []*model.AlertRecord{r},
+			}
+			keys = append(keys, key)
+		}
+	}
+
+	groups := make([]CVEGroup, 0, len(keys))
+	for _, k := range keys {
+		g := groupMap[k]
+		// グループ内のRecordsをCreatedAt降順でソート
+		sort.Slice(g.Records, func(i, j int) bool {
+			return g.Records[i].Alert.CreatedAt.After(g.Records[j].Alert.CreatedAt)
+		})
+		groups = append(groups, *g)
+	}
+
+	// グループをSeverity降順 → CVSS降順でソート
+	sort.Slice(groups, func(i, j int) bool {
+		si, sj := severityOrder[groups[i].Severity], severityOrder[groups[j].Severity]
+		if si != sj {
+			return si > sj
+		}
+		return groups[i].CVSSScore > groups[j].CVSSScore
 	})
 
+	return groups
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	records := s.store.List()
+	groups := groupByCVE(records)
+
 	s.render(w, "dashboard.html", struct {
-		Records []*model.AlertRecord
-	}{Records: records})
+		Groups []CVEGroup
+	}{Groups: groups})
 }
 
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
@@ -87,11 +169,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 // --- 設定 ---
 
 type settingsData struct {
-	Config      *config.Config
-	Flash       string // 保存成功メッセージ
-	Error       string
-	EnvBotToken bool // SLACK_BOT_TOKEN が環境変数で設定されているか
-	EnvAppToken bool // SLACK_APP_TOKEN が環境変数で設定されているか
+	Config            *config.Config
+	Flash             string // 保存成功メッセージ
+	Error             string
+	EnvBotToken       bool // SLACK_BOT_TOKEN が環境変数で設定されているか
+	EnvAppToken       bool // SLACK_APP_TOKEN が環境変数で設定されているか
+	EnvDiscordWebhook bool // DISCORD_WEBHOOK_URL が環境変数で設定されているか
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -100,9 +183,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.cfgMu.RUnlock()
 
 	s.render(w, "settings.html", settingsData{
-		Config:      cfg,
-		EnvBotToken: os.Getenv("SLACK_BOT_TOKEN") != "",
-		EnvAppToken: os.Getenv("SLACK_APP_TOKEN") != "",
+		Config:            cfg,
+		EnvBotToken:       os.Getenv("SLACK_BOT_TOKEN") != "",
+		EnvAppToken:       os.Getenv("SLACK_APP_TOKEN") != "",
+		EnvDiscordWebhook: os.Getenv("DISCORD_WEBHOOK_URL") != "",
 	})
 }
 
@@ -137,6 +221,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	// slack.channel_id（トークンは環境変数のみ）
 	s.cfg.Slack.ChannelID = r.FormValue("slack_channel_id")
+
+	// discord.webhook_url（環境変数未設定時のみYAML保存）
+	if os.Getenv("DISCORD_WEBHOOK_URL") == "" {
+		s.cfg.Discord.WebhookURL = r.FormValue("discord_webhook_url")
+	}
 
 	// evaluator sandbox
 	s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
@@ -224,5 +313,77 @@ func (s *Server) handleTargetDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) handleExcludeAdd(w http.ResponseWriter, r *http.Request) {
+	idx, err := strconv.Atoi(r.PathValue("i"))
+	if err != nil {
+		http.Error(w, "不正なインデックス", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "フォームパース失敗", http.StatusBadRequest)
+		return
+	}
+	repo := r.FormValue("repo")
+	if repo == "" {
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
+
+	s.cfgMu.Lock()
+	if idx >= 0 && idx < len(s.cfg.Targets) {
+		t := &s.cfg.Targets[idx]
+		// 重複チェック
+		exists := false
+		for _, ex := range t.Excludes {
+			if ex == repo {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			t.Excludes = append(t.Excludes, repo)
+		}
+	}
+	cfg := s.cfg
+	s.cfgMu.Unlock()
+
+	if s.cfgPath != "" {
+		if err := config.Save(s.cfgPath, cfg); err != nil {
+			slog.Error("設定保存失敗", "error", err)
+		}
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) handleExcludeDelete(w http.ResponseWriter, r *http.Request) {
+	i, err := strconv.Atoi(r.PathValue("i"))
+	if err != nil {
+		http.Error(w, "不正なインデックス", http.StatusBadRequest)
+		return
+	}
+	j, err := strconv.Atoi(r.PathValue("j"))
+	if err != nil {
+		http.Error(w, "不正なインデックス", http.StatusBadRequest)
+		return
+	}
+
+	s.cfgMu.Lock()
+	if i >= 0 && i < len(s.cfg.Targets) {
+		t := &s.cfg.Targets[i]
+		if j >= 0 && j < len(t.Excludes) {
+			t.Excludes = append(t.Excludes[:j], t.Excludes[j+1:]...)
+		}
+	}
+	cfg := s.cfg
+	s.cfgMu.Unlock()
+
+	if s.cfgPath != "" {
+		if err := config.Save(s.cfgPath, cfg); err != nil {
+			slog.Error("設定保存失敗", "error", err)
+		}
+	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }

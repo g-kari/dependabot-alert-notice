@@ -2,53 +2,332 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dependabot Alert Notice</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #c9d1d9; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        nav { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; margin-bottom: 20px; }
-        nav a { color: #58a6ff; text-decoration: none; margin-right: 20px; }
-        nav a:hover { text-decoration: underline; }
-        h1 { font-size: 1.5em; margin-bottom: 16px; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
-        .badge-critical { background: #da3633; color: #fff; }
-        .badge-high { background: #d29922; color: #fff; }
-        .badge-medium { background: #e3b341; color: #000; }
-        .badge-low { background: #3fb950; color: #fff; }
-        .badge-pending { background: #6e7681; color: #fff; }
-        .badge-approved { background: #238636; color: #fff; }
-        .badge-rejected { background: #da3633; color: #fff; }
-        .badge-merged { background: #8957e5; color: #fff; }
-        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #21262d; }
-        th { background: #161b22; color: #8b949e; font-weight: 600; }
-        tr:hover { background: #161b22; }
-        a { color: #58a6ff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .btn { display: inline-block; padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.875em; font-weight: 600; text-decoration: none; }
-        .btn-approve { background: #238636; color: #fff; }
-        .btn-reject { background: #da3633; color: #fff; }
-        .btn-approve:hover { background: #2ea043; }
-        .btn-reject:hover { background: #f85149; }
-        .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
-        .log-entry { padding: 8px 12px; border-bottom: 1px solid #21262d; font-family: monospace; font-size: 0.875em; }
-        .log-info { color: #58a6ff; }
-        .log-error { color: #f85149; }
-        .log-warn { color: #d29922; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dependabot Alert Notice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Reddit+Sans:ital,wdth,wght@0,75..100,200..900;1,75..100,200..900&family=IBM+Plex+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* --- CSS 変数 --- */
+    :root {
+      --color-bg: #fefbfb;
+      --color-text: #483030;
+      --color-muted: #a39696;
+      --color-border: #dfd7d7;
+      --color-surface: #f2f0f0;
+      --color-accent: #73862d;
+      --color-danger: #c0392b;
+      --font: "Reddit Sans", "IBM Plex Sans JP", BlinkMacSystemFont, sans-serif;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      --transition: all 0.4s var(--ease);
+      --max-w: 1100px;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    /* --- リセット & ベース --- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      font-size: 15px;
+      color: var(--color-text);
+      background: var(--color-bg);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    a { color: var(--color-accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { cursor: pointer; font-family: var(--font); border: none; }
+
+    /* --- ヘッダー --- */
+    #site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--color-bg);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .header-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--color-text);
+      text-decoration: none;
+      flex-shrink: 0;
+      transition: var(--transition);
+    }
+    .logo:hover { opacity: 0.7; text-decoration: none; }
+    .header-nav { display: flex; align-items: center; gap: 4px; }
+    .nav-link {
+      padding: 6px 12px;
+      color: var(--color-muted);
+      font-size: 0.875rem;
+      font-weight: 500;
+      border-radius: var(--radius-sm);
+      transition: var(--transition);
+      text-decoration: none;
+    }
+    .nav-link:hover { color: var(--color-text); background: var(--color-surface); text-decoration: none; }
+
+    /* --- コンテナ --- */
+    .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
+
+    /* --- カード --- */
+    .card {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    /* --- ページタイトル --- */
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.25rem; }
+    h2 { font-size: 1rem; font-weight: 600; }
+
+    /* --- テーブル --- */
+    .table-wrap { overflow-x: auto; border-radius: var(--radius-sm); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--color-border); }
+    th {
+      background: var(--color-surface);
+      color: var(--color-muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: var(--color-surface); }
+
+    /* --- バッジ --- */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .badge-critical { background: #fde8e8; color: #b91c1c; }
+    .badge-high     { background: #fef3cd; color: #92400e; }
+    .badge-medium   { background: #fef9c3; color: #713f12; }
+    .badge-low      { background: #dcfce7; color: #166534; }
+    .badge-pending  { background: #f2f0f0; color: #a39696; }
+    .badge-approved { background: #dcfce7; color: #166534; }
+    .badge-rejected { background: #fde8e8; color: #b91c1c; }
+    .badge-merged   { background: #ede9fe; color: #6d28d9; }
+    .badge-info     { background: #dbeafe; color: #1e40af; }
+    .badge-error    { background: #fde8e8; color: #b91c1c; }
+    .badge-warn     { background: #fef3cd; color: #92400e; }
+
+    /* --- ボタン --- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 7px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: var(--transition);
+      text-decoration: none;
+      white-space: nowrap;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--color-text);
+      color: var(--color-bg);
+    }
+    .btn-primary:hover { opacity: 0.82; text-decoration: none; color: var(--color-bg); }
+    .btn-approve {
+      background: #166534;
+      color: #fff;
+    }
+    .btn-approve:hover { background: #15803d; }
+    .btn-reject {
+      background: var(--color-danger);
+      color: #fff;
+    }
+    .btn-reject:hover { background: #e53e3e; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--color-muted);
+      border: 1px solid var(--color-border);
+    }
+    .btn-ghost:hover { color: var(--color-text); background: var(--color-surface); text-decoration: none; }
+
+    /* --- フォーム --- */
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 0.8rem; font-weight: 600; color: var(--color-muted); }
+    input[type=text], select, textarea {
+      padding: 8px 12px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 0.9rem;
+      color: var(--color-text);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type=text]:focus, select:focus, textarea:focus {
+      border-color: var(--color-accent);
+    }
+
+    /* --- アラート/メッセージ --- */
+    .msg {
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+    .msg-error { background: #fde8e8; border: 1px solid #fca5a5; color: #b91c1c; }
+    .msg-success { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
+
+    /* --- ログエントリ --- */
+    .log-entry {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--color-border);
+      font-size: 0.8rem;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-ts { color: var(--color-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .log-msg { flex: 1; }
+
+    /* --- インタラクション --- */
+    .interactive-scale { transition: var(--transition); }
+    .interactive-scale:hover { transform: scale(1.02); }
+    .interactive-scale:active { transform: scale(0.97); }
+
+    /* --- ダッシュボードヘッダー --- */
+    .dashboard-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+    .dashboard-header h1 { margin-bottom: 0; }
+
+    /* --- CVEグループ (アコーディオン) --- */
+    .cve-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .cve-group {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .cve-summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .cve-summary::-webkit-details-marker { display: none; }
+    .cve-summary::marker { display: none; }
+    .cve-summary:hover { background: var(--color-surface); }
+    .cve-group[open] > .cve-summary { border-bottom: 1px solid var(--color-border); }
+
+    .cve-summary-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .cve-pkg { font-weight: 600; white-space: nowrap; }
+    .cve-id {
+      font-size: 0.82rem;
+      color: var(--color-muted);
+      font-family: monospace;
+      white-space: nowrap;
+    }
+    .cve-desc {
+      font-size: 0.85rem;
+      color: var(--color-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cve-summary-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+    /* --- CVEグループ内テーブル --- */
+    .cve-repos-wrap { overflow-x: auto; }
+    .cve-repos { width: 100%; border-collapse: collapse; }
+    .cve-repos th, .cve-repos td {
+      padding: 9px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .cve-repos th {
+      background: var(--color-surface);
+      color: var(--color-muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .cve-repos tr:last-child td { border-bottom: none; }
+    .cve-repos tbody tr { transition: background 0.15s; }
+    .cve-repos tbody tr:hover { background: var(--color-surface); }
+    .repo-link { font-size: 0.88rem; }
+    .action-cell { white-space: nowrap; }
+    .action-cell form + form { margin-left: 4px; }
+
+    /* --- ボタン小サイズ --- */
+    .btn-sm { padding: 4px 12px; font-size: 0.8rem; }
+
+    /* --- 空状態 --- */
+    .empty-card { text-align: center; }
+    .empty-msg { color: var(--color-muted); padding: 1.5rem 0; }
+  </style>
 </head>
 <body>
-    <nav>
-        <a href="/">📊 ダッシュボード</a>
-        <a href="/logs">📋 ログ</a>
-        <a href="/settings">⚙️ 設定</a>
-    </nav>
-    <div class="container">
-        {{template "content" .}}
+  <header id="site-header">
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <span>🤖</span>
+        <span>Dependabot Notice</span>
+      </a>
+      <nav class="header-nav">
+        <a href="/" class="nav-link">📊 ダッシュボード</a>
+        <a href="/logs" class="nav-link">📋 ログ</a>
+        <a href="/settings" class="nav-link">⚙️ 設定</a>
+      </nav>
     </div>
+  </header>
+  <main class="container">
+    {{template "content" .}}
+  </main>
 </body>
 </html>
 {{end}}
