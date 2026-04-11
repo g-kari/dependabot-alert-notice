@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -229,8 +230,19 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", owner, repo)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		msg := strings.ToLower(strings.TrimSpace(string(out)))
+		// Dependabot未有効・権限なし・リポジトリ不存在は警告スキップ
+		if strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "not enabled") ||
+			strings.Contains(msg, "403") ||
+			strings.Contains(msg, "404") ||
+			strings.Contains(msg, "dependabot alerts are disabled") {
+			slog.Warn("Dependabotアラート取得スキップ（未有効または権限なし）",
+				"owner", owner, "repo", repo, "detail", strings.TrimSpace(string(out)))
+			return nil, nil
+		}
 		return nil, fmt.Errorf("gh api 実行失敗: %w", err)
 	}
 	alerts, err := c.parseAlerts(out, owner, repo, nil)
