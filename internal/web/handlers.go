@@ -96,8 +96,43 @@ func groupByCVE(records []*model.AlertRecord) []CVEGroup {
 	return groups
 }
 
+// filterByConfig はconfigの除外リストに基づいてAlertRecordをフィルタリングする。
+// excludeに設定されたリポジトリのアラートのみ除外し、それ以外は全て表示する。
+func filterByConfig(records []*model.AlertRecord, cfg *config.Config) []*model.AlertRecord {
+	// owner → targets のマップを構築
+	targetsByOwner := make(map[string][]config.Target)
+	for _, t := range cfg.Targets {
+		targetsByOwner[t.Owner] = append(targetsByOwner[t.Owner], t)
+	}
+
+	var filtered []*model.AlertRecord
+	for _, r := range records {
+		targets, ok := targetsByOwner[r.Alert.Owner]
+		if !ok {
+			// ターゲット設定にないownerはそのまま表示
+			filtered = append(filtered, r)
+			continue
+		}
+		excluded := false
+		for _, t := range targets {
+			if t.IsExcluded(r.Alert.Repo) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	records := s.store.List()
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	records := filterByConfig(s.store.List(), cfg)
 	groups := groupByCVE(records)
 
 	s.render(w, "dashboard.html", struct {
