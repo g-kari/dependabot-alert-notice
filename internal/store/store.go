@@ -116,7 +116,8 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-func (s *Store) Save(record *model.AlertRecord) {
+// Save はレコードを保存し、新規挿入の場合 true を返す（更新の場合 false）
+func (s *Store) Save(record *model.AlertRecord) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -162,18 +163,19 @@ func (s *Store) Save(record *model.AlertRecord) {
 	)
 	if err != nil {
 		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
-		return
+		return false
 	}
 	if id, err := res.LastInsertId(); err == nil && id > 0 {
 		record.Alert.ID = int(id)
-	} else {
-		// ON CONFLICT UPDATE の場合、LastInsertId が 0 になる → 既存IDを取得
-		var dbID int
-		if err2 := s.db.QueryRow(`SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
-			record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 == nil {
-			record.Alert.ID = dbID
-		}
+		return true // 新規挿入
 	}
+	// ON CONFLICT UPDATE の場合、LastInsertId が 0 になる → 既存IDを取得
+	var dbID int
+	if err2 := s.db.QueryRow(`SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
+		record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 == nil {
+		record.Alert.ID = dbID
+	}
+	return false // 既存レコードの更新
 }
 
 func (s *Store) Get(alertID int) (*model.AlertRecord, error) {

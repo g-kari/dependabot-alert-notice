@@ -180,7 +180,11 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				EvalStatus: model.EvalStatusPending,
 				NotifiedAt: time.Now(),
 			}
-			s.Save(record)
+			isNew := s.Save(record)
+			if !isNew {
+				// 既存レコードの更新（別ターゲットから重複取得など）はスキップ
+				continue
+			}
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),
 				Level:     "info",
@@ -226,8 +230,12 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				return oi < oj
 			})
 			for _, record := range pending {
-				// critical / high のみAI評価対象
-				if record.Alert.Severity != model.SeverityCritical && record.Alert.Severity != model.SeverityHigh {
+				if !cfg.Evaluator.ShouldEvaluate(string(record.Alert.Severity)) {
+					continue
+				}
+				// evaluating にセットしてから積む（別ターゲットの fetch ジョブが二重エンキューするのを防ぐ）
+				if err := s.UpdateEvalStatus(record.Alert.ID, model.EvalStatusEvaluating); err != nil {
+					slog.Error("eval_status更新失敗（エンキュー前）", "alertID", record.Alert.ID, "error", err)
 					continue
 				}
 				q.Enqueue(queue.Job{

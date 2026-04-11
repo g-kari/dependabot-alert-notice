@@ -49,8 +49,27 @@ type SandboxConfig struct {
 
 type EvaluatorConfig struct {
 	AutoEval       bool          `yaml:"auto_eval"`
+	MinSeverity    string        `yaml:"min_severity"` // AI評価対象の最低重要度 (low/medium/high/critical)、デフォルト: high
 	Sandbox        SandboxConfig `yaml:"sandbox"`
 	MaxEvalPerPoll int           `yaml:"max_eval_per_poll"`
+}
+
+// ShouldEvaluate はアラートの重要度がAI評価対象かを返す
+func (e *EvaluatorConfig) ShouldEvaluate(severity string) bool {
+	min := e.MinSeverity
+	if min == "" {
+		min = "high" // デフォルトは high 以上
+	}
+	rank := map[string]int{"critical": 4, "high": 3, "medium": 2, "low": 1}
+	minRank := rank[min]
+	if minRank == 0 {
+		minRank = 3
+	}
+	alertRank := rank[severity]
+	if alertRank == 0 {
+		alertRank = 1
+	}
+	return alertRank >= minRank
 }
 
 type Config struct {

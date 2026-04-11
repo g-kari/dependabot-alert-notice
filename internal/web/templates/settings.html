@@ -210,7 +210,21 @@
                 <option value="false" {{if not .Config.Evaluator.AutoEval}}selected{{end}}>無効（デフォルト）</option>
                 <option value="true"  {{if .Config.Evaluator.AutoEval}}selected{{end}}>有効</option>
               </select>
-              <span class="field-hint">有効時: ポーリング毎にcritical/highを自動評価</span>
+              <span class="field-hint">有効時: ポーリング毎に対象重要度を自動評価</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <th>評価最低重要度</th>
+          <td>
+            <div class="input-row">
+              <select name="eval_min_severity" style="width:160px">
+                <option value="low"      {{if eq .Config.Evaluator.MinSeverity "low"     }}selected{{end}}>low（すべて）</option>
+                <option value="medium"   {{if eq .Config.Evaluator.MinSeverity "medium"  }}selected{{end}}>medium 以上</option>
+                <option value="high"     {{if or (eq .Config.Evaluator.MinSeverity "high") (eq .Config.Evaluator.MinSeverity "")}}selected{{end}}>high 以上（デフォルト）</option>
+                <option value="critical" {{if eq .Config.Evaluator.MinSeverity "critical"}}selected{{end}}>critical のみ</option>
+              </select>
+              <span class="field-hint">この重要度未満のアラートはAI評価をスキップ</span>
             </div>
           </td>
         </tr>

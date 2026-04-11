@@ -464,6 +464,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// AI自動評価ON/OFF
 	s.cfg.Evaluator.AutoEval = r.FormValue("auto_eval") == "true"
 
+	// AI評価最低重要度
+	if v := r.FormValue("eval_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
+		s.cfg.Evaluator.MinSeverity = v
+	}
+
 	// evaluator sandbox
 	s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
 	if v := r.FormValue("sandbox_image"); v != "" {
