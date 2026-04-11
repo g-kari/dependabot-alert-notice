@@ -102,6 +102,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/connectivity-test", s.handleConnectivityTest)
 	mux.HandleFunc("GET /api/connectivity-stream", s.handleConnectivityStream)
 	mux.HandleFunc("POST /api/poll", s.handlePoll)
+	mux.HandleFunc("POST /api/poll/repo", s.handlePollRepo)
 	mux.HandleFunc("POST /api/poll/target/{i}", s.handlePollTarget)
 	mux.HandleFunc("POST /api/evaluate/{id}", s.handleEnqueueEvaluate)
 

@@ -54,16 +54,38 @@ type EvaluatorConfig struct {
 }
 
 type Config struct {
-	PollInterval time.Duration   `yaml:"poll_interval"`
-	Targets      []Target        `yaml:"targets"`
-	Slack        SlackConfig     `yaml:"slack"`
-	Discord      DiscordConfig   `yaml:"discord"`
-	ClaudePath   string          `yaml:"claude_path"`
-	GhPath       string          `yaml:"gh_path"`
-	LogLevel     string          `yaml:"log_level"`
-	DataPath     string          `yaml:"data_path"`
-	Web          WebConfig       `yaml:"web"`
-	Evaluator    EvaluatorConfig `yaml:"evaluator"`
+	PollInterval      time.Duration   `yaml:"poll_interval"`
+	Targets           []Target        `yaml:"targets"`
+	Slack             SlackConfig     `yaml:"slack"`
+	Discord           DiscordConfig   `yaml:"discord"`
+	ClaudePath        string          `yaml:"claude_path"`
+	GhPath            string          `yaml:"gh_path"`
+	LogLevel          string          `yaml:"log_level"`
+	DataPath          string          `yaml:"data_path"`
+	Web               WebConfig       `yaml:"web"`
+	Evaluator         EvaluatorConfig `yaml:"evaluator"`
+	NotifyMinSeverity string          `yaml:"notify_min_severity"` // 通知する最低重要度 (low/medium/high/critical)
+}
+
+// severityRank は重要度の数値ランク（大きいほど深刻）
+var severityRank = map[string]int{
+	"critical": 4,
+	"high":     3,
+	"medium":   2,
+	"low":      1,
+}
+
+// ShouldNotify はアラートの重要度が通知最低重要度を満たすか返す
+func (c *Config) ShouldNotify(severity string) bool {
+	minRank := severityRank[c.NotifyMinSeverity]
+	if minRank == 0 {
+		minRank = 1 // 未設定はlow扱い（全通知）
+	}
+	alertRank := severityRank[severity]
+	if alertRank == 0 {
+		alertRank = 1 // 不明は low 扱い
+	}
+	return alertRank >= minRank
 }
 
 func Save(path string, cfg *Config) error {
@@ -84,12 +106,13 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		PollInterval: 30 * time.Minute,
-		ClaudePath:   "claude",
-		GhPath:       "gh",
-		LogLevel:     "info",
-		DataPath:     "store.db",
-		Web:          WebConfig{Port: 8999},
+		PollInterval:      30 * time.Minute,
+		ClaudePath:        "claude",
+		GhPath:            "gh",
+		LogLevel:          "info",
+		DataPath:          "store.db",
+		NotifyMinSeverity: "low",
+		Web:               WebConfig{Port: 8999},
 		Evaluator: EvaluatorConfig{
 			MaxEvalPerPoll: 10,
 			Sandbox: SandboxConfig{

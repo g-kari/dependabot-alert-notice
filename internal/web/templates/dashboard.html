@@ -129,6 +129,11 @@
       </div>
       <div class="cve-summary-meta">
         <span class="badge badge-info">{{len .Records}} アラート</span>
+        <form method="POST" action="/api/poll/repo" class="inline-form" onclick="event.stopPropagation()">
+          <input type="hidden" name="owner" value="{{.Owner}}">
+          <input type="hidden" name="repo" value="{{.Repo}}">
+          <button type="submit" class="btn btn-ghost btn-sm">⬇️ 今すぐ取得</button>
+        </form>
       </div>
     </summary>
     <div class="cve-repos-wrap">

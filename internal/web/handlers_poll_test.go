@@ -7,6 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 )
 
 // TestPoll_Redirects はポーリングが起動してダッシュボードへリダイレクトされることを確認
@@ -97,6 +100,96 @@ func TestPoll_DoubleExecution(t *testing.T) {
 		t.Errorf("pollFn called %d times, want 1", callCount)
 	}
 	mu.Unlock()
+}
+
+// TestPollTarget_Success は指定インデックスのターゲット1件のFetchJobがエンキューされることを確認
+func TestPollTarget_Success(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		Targets: []config.Target{
+			{Owner: "org1", Repo: "repo1"},
+			{Owner: "org2", Repo: "repo2"},
+		},
+	}
+	srv.jobQueue = queue.New(10, 1)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/poll/target/1", nil)
+	req.SetPathValue("i", "1")
+	w := httptest.NewRecorder()
+	srv.handlePollTarget(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if srv.jobQueue.Len() != 1 {
+		t.Errorf("queue len = %d, want 1", srv.jobQueue.Len())
+	}
+}
+
+// TestPollTarget_InvalidIndex は不正なインデックスで400を返すことを確認
+func TestPollTarget_InvalidIndex(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{Targets: []config.Target{{Owner: "org1"}}}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/poll/target/abc", nil)
+	req.SetPathValue("i", "abc")
+	w := httptest.NewRecorder()
+	srv.handlePollTarget(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestPollTarget_OutOfRange は範囲外インデックスで400を返すことを確認
+func TestPollTarget_OutOfRange(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{Targets: []config.Target{{Owner: "org1"}}}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/poll/target/99", nil)
+	req.SetPathValue("i", "99")
+	w := httptest.NewRecorder()
+	srv.handlePollTarget(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestPollRepo_Success はowner/repoを指定してFetchJobがエンキューされることを確認
+func TestPollRepo_Success(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.jobQueue = queue.New(10, 1)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/poll/repo", nil)
+	req.Form = map[string][]string{
+		"owner": {"myorg"},
+		"repo":  {"myrepo"},
+	}
+	w := httptest.NewRecorder()
+	srv.handlePollRepo(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if srv.jobQueue.Len() != 1 {
+		t.Errorf("queue len = %d, want 1", srv.jobQueue.Len())
+	}
+}
+
+// TestPollRepo_MissingParams はowner/repoが欠けている場合400を返すことを確認
+func TestPollRepo_MissingParams(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.jobQueue = queue.New(10, 1)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/poll/repo", nil)
+	req.Form = map[string][]string{"owner": {"myorg"}} // repo なし
+	w := httptest.NewRecorder()
+	srv.handlePollRepo(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
 }
 
 // TestDashboard_ShowsPollingState はポーリング中にダッシュボードが200を返すことを確認

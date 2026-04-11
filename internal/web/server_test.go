@@ -598,6 +598,45 @@ func TestSettings_AutoEval(t *testing.T) {
 	}
 }
 
+// TestSettings_NotifyMinSeverity は通知最低重要度の設定が正しく保存されることを確認
+func TestSettings_NotifyMinSeverity(t *testing.T) {
+	tests := []struct {
+		name    string
+		formVal string
+		want    string
+	}{
+		{"high に設定", "high", "high"},
+		{"critical に設定", "critical", "critical"},
+		{"medium に設定", "medium", "medium"},
+		{"low に設定", "low", "low"},
+		{"不正値は無視", "invalid", "low"}, // 元の値が維持される
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _, _ := newTestServer(t)
+			srv.cfg = &config.Config{
+				PollInterval:      30 * time.Minute,
+				LogLevel:          "info",
+				ClaudePath:        "claude",
+				GhPath:            "gh",
+				NotifyMinSeverity: "low",
+			}
+			body := "poll_interval=30m&log_level=info&claude_path=claude&gh_path=gh&notify_min_severity=" + tt.formVal
+			req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			srv.handleSettingsSave(w, req)
+
+			if w.Code != http.StatusSeeOther {
+				t.Errorf("status = %d, want %d", w.Code, w.Code)
+			}
+			if srv.cfg.NotifyMinSeverity != tt.want {
+				t.Errorf("NotifyMinSeverity = %q, want %q", srv.cfg.NotifyMinSeverity, tt.want)
+			}
+		})
+	}
+}
+
 // TestTargetDelete_InvalidIndex は範囲外インデックスを無視することを確認
 func TestTargetDelete_InvalidIndex(t *testing.T) {
 	srv, _, _ := newTestServer(t)

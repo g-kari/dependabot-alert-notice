@@ -258,6 +258,27 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handlePollRepo はowner/repoを指定してFetchJobをエンキューする（ダッシュボードリポジトリ別表示から使用）
+func (s *Server) handlePollRepo(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "フォームパース失敗", http.StatusBadRequest)
+		return
+	}
+	owner := r.FormValue("owner")
+	repo := r.FormValue("repo")
+	if owner == "" || repo == "" {
+		http.Error(w, "owner/repoが必要です", http.StatusBadRequest)
+		return
+	}
+	if s.jobQueue != nil {
+		s.jobQueue.Enqueue(queue.Job{
+			Type:    queue.JobFetchAlerts,
+			Payload: config.Target{Owner: owner, Repo: repo},
+		})
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 // handlePollTarget はWebUIから特定ターゲット1件のFetchJobをエンキューする
 func (s *Server) handlePollTarget(w http.ResponseWriter, r *http.Request) {
 	i, err := strconv.Atoi(r.PathValue("i"))
@@ -433,6 +454,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// discord.webhook_url（環境変数未設定時のみYAML保存）
 	if os.Getenv("DISCORD_WEBHOOK_URL") == "" {
 		s.cfg.Discord.WebhookURL = r.FormValue("discord_webhook_url")
+	}
+
+	// 通知最低重要度
+	if v := r.FormValue("notify_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
+		s.cfg.NotifyMinSeverity = v
 	}
 
 	// AI自動評価ON/OFF

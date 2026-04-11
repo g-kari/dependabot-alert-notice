@@ -239,6 +239,12 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 			AlertID:   alert.ID,
 		})
 
+		// 通知最低重要度フィルタ
+		if !cfg.ShouldNotify(string(alert.Severity)) {
+			slog.Debug("通知スキップ（重要度フィルタ）", "alertID", alert.ID, "severity", alert.Severity, "minSeverity", cfg.NotifyMinSeverity)
+			return nil
+		}
+
 		// Slack通知
 		if slackClient != nil {
 			if err := slackClient.Notify(record); err != nil {

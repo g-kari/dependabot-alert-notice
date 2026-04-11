@@ -188,6 +188,66 @@ func TestLoad_AutoEvalFromYAML(t *testing.T) {
 	}
 }
 
+// TestLoad_NotifyMinSeverityDefault は通知最低重要度がデフォルト"low"であることを確認
+func TestLoad_NotifyMinSeverityDefault(t *testing.T) {
+	path := writeTemp(t, `targets:
+  - owner: org
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.NotifyMinSeverity != "low" {
+		t.Errorf("NotifyMinSeverity = %q, want %q", cfg.NotifyMinSeverity, "low")
+	}
+}
+
+// TestLoad_NotifyMinSeverityFromYAML はYAMLからNotifyMinSeverityが読み込まれることを確認
+func TestLoad_NotifyMinSeverityFromYAML(t *testing.T) {
+	path := writeTemp(t, `notify_min_severity: high`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.NotifyMinSeverity != "high" {
+		t.Errorf("NotifyMinSeverity = %q, want high", cfg.NotifyMinSeverity)
+	}
+}
+
+// TestShouldNotify はShouldNotifyが重要度フィルタを正しく判定することを確認
+func TestShouldNotify(t *testing.T) {
+	tests := []struct {
+		minSeverity string
+		severity    string
+		want        bool
+	}{
+		{"low", "critical", true},
+		{"low", "high", true},
+		{"low", "medium", true},
+		{"low", "low", true},
+		{"medium", "critical", true},
+		{"medium", "high", true},
+		{"medium", "medium", true},
+		{"medium", "low", false},
+		{"high", "critical", true},
+		{"high", "high", true},
+		{"high", "medium", false},
+		{"high", "low", false},
+		{"critical", "critical", true},
+		{"critical", "high", false},
+		{"critical", "medium", false},
+		{"critical", "low", false},
+		{"", "high", true}, // 空文字 = low（全通知）
+	}
+	for _, tt := range tests {
+		cfg := &Config{NotifyMinSeverity: tt.minSeverity}
+		got := cfg.ShouldNotify(tt.severity)
+		if got != tt.want {
+			t.Errorf("ShouldNotify(%q, severity=%q) = %v, want %v", tt.minSeverity, tt.severity, got, tt.want)
+		}
+	}
+}
+
 func TestLoad_SandboxConfig(t *testing.T) {
 	path := writeTemp(t, `
 evaluator:

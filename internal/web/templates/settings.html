@@ -174,6 +174,30 @@
 </div>
 
 <div class="card">
+  <h2 style="margin-bottom:16px">🔔 通知設定</h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr>
+          <th style="width:200px">通知最低重要度</th>
+          <td>
+            <div class="input-row">
+              <select name="notify_min_severity" style="width:160px">
+                <option value="low"      {{if eq .Config.NotifyMinSeverity "low"     }}selected{{end}}>low（すべて）</option>
+                <option value="medium"   {{if eq .Config.NotifyMinSeverity "medium"  }}selected{{end}}>medium 以上</option>
+                <option value="high"     {{if eq .Config.NotifyMinSeverity "high"    }}selected{{end}}>high 以上</option>
+                <option value="critical" {{if eq .Config.NotifyMinSeverity "critical"}}selected{{end}}>critical のみ</option>
+              </select>
+              <span class="field-hint">この重要度未満のアラートはSlack/Discordに通知されません</span>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
   <h2 style="margin-bottom:16px">🤖 AI評価</h2>
   <div class="table-wrap">
     <table>
