@@ -269,6 +269,10 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 		}
 	}
 
+	// GitHub secondary rate limit: 最大100並列。余裕を持って10に制限
+	const concurrency = 10
+	sem := make(chan struct{}, concurrency)
+
 	var (
 		totalMu sync.Mutex
 		total   int
@@ -278,6 +282,8 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 		wg.Add(1)
 		go func(repo string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
 			out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
 			if err != nil {

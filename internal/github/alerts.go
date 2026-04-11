@@ -97,6 +97,10 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]mod
 
 	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos))
 
+	// GitHub secondary rate limit: 最大100並列。余裕を持って10に制限
+	const concurrency = 10
+	sem := make(chan struct{}, concurrency)
+
 	var (
 		mu  sync.Mutex
 		all []model.Alert
@@ -106,6 +110,8 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]mod
 		wg.Add(1)
 		go func(repo string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
 			if err != nil {
 				slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
