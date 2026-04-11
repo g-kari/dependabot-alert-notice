@@ -12,7 +12,14 @@ vet:
 lint: vet
     golangci-lint run ./...
 
-run:
+PORT := "8999"
+
+# 起動中のプロセスを停止
+stop:
+    -fuser -k {{PORT}}/tcp 2>/dev/null || true
+
+# ビルドして再起動（古いプロセスを自動停止）
+run: stop
     go run . -config config.yaml
 
 run-once:
