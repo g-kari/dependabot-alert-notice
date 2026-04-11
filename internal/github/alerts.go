@@ -123,27 +123,41 @@ type ghAlert struct {
 // RateLimitError はGitHub APIのレート制限に達した場合のエラー型
 type RateLimitError struct {
 	Remaining int
+	ResetAt   time.Time
 }
 
 func (e *RateLimitError) Error() string {
-	return fmt.Sprintf("GitHub APIレート制限残り %d — ポーリングをスキップします", e.Remaining)
+	return fmt.Sprintf("GitHub APIレート制限残り %d（リセット: %s）— ポーリングをスキップします",
+		e.Remaining, e.ResetAt.Format("15:04:05"))
 }
 
-// checkRateLimit はREST APIの残りリクエスト数を返す
-func (c *ghClient) checkRateLimit(ctx context.Context) (int, error) {
-	out, err := exec.CommandContext(ctx, c.ghPath, "api", "rate_limit", "--jq", ".rate.remaining").Output()
+type rateLimitInfo struct {
+	Remaining int
+	ResetAt   time.Time
+}
+
+// checkRateLimit はREST APIの残りリクエスト数とリセット時刻を返す
+func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
+	out, err := exec.CommandContext(ctx, c.ghPath, "api", "rate_limit", "--jq", "[.rate.remaining, .rate.reset] | @tsv").Output()
 	if err != nil {
-		return 5000, nil // 取得失敗時は続行
+		return rateLimitInfo{Remaining: 5000}, nil // 取得失敗時は続行
 	}
-	var remaining int
-	_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &remaining)
-	return remaining, nil
+	parts := strings.Split(strings.TrimSpace(string(out)), "\t")
+	var remaining, resetUnix int
+	_, _ = fmt.Sscanf(parts[0], "%d", &remaining)
+	if len(parts) > 1 {
+		_, _ = fmt.Sscanf(parts[1], "%d", &resetUnix)
+	}
+	return rateLimitInfo{
+		Remaining: remaining,
+		ResetAt:   time.Unix(int64(resetUnix), 0),
+	}, nil
 }
 
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
 	// レート制限チェック（残り200未満はスキップ）
-	if remaining, _ := c.checkRateLimit(ctx); remaining < 200 {
-		return nil, &RateLimitError{Remaining: remaining}
+	if info, _ := c.checkRateLimit(ctx); info.Remaining < 200 {
+		return nil, &RateLimitError{Remaining: info.Remaining, ResetAt: info.ResetAt}
 	}
 
 	// リポジトリ指定あり → 直接取得（exclude対象の場合は空を返す）

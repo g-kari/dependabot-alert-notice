@@ -139,11 +139,14 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 		if err != nil {
 			var rateLimitErr *github.RateLimitError
 			if errors.As(err, &rateLimitErr) {
-				slog.Warn("GitHub APIレート制限スキップ", "remaining", rateLimitErr.Remaining)
+				slog.Warn("GitHub APIレート制限スキップ",
+					"remaining", rateLimitErr.Remaining,
+					"resetAt", rateLimitErr.ResetAt.Format("15:04:05"))
 				s.AddLog(model.LogEntry{
 					Timestamp: time.Now(),
 					Level:     "warn",
-					Message:   fmt.Sprintf("GitHub APIレート制限のためスキップ（残り %d）", rateLimitErr.Remaining),
+					Message: fmt.Sprintf("GitHub APIレート制限のためスキップ（残り %d、リセット: %s）",
+						rateLimitErr.Remaining, rateLimitErr.ResetAt.Format("15:04:05")),
 				})
 				return nil
 			}
