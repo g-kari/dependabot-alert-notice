@@ -120,7 +120,32 @@ type ghAlert struct {
 	} `json:"security_vulnerability"`
 }
 
+// RateLimitError はGitHub APIのレート制限に達した場合のエラー型
+type RateLimitError struct {
+	Remaining int
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("GitHub APIレート制限残り %d — ポーリングをスキップします", e.Remaining)
+}
+
+// checkRateLimit はREST APIの残りリクエスト数を返す
+func (c *ghClient) checkRateLimit(ctx context.Context) (int, error) {
+	out, err := exec.CommandContext(ctx, c.ghPath, "api", "rate_limit", "--jq", ".rate.remaining").Output()
+	if err != nil {
+		return 5000, nil // 取得失敗時は続行
+	}
+	var remaining int
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &remaining)
+	return remaining, nil
+}
+
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
+	// レート制限チェック（残り200未満はスキップ）
+	if remaining, _ := c.checkRateLimit(ctx); remaining < 200 {
+		return nil, &RateLimitError{Remaining: remaining}
+	}
+
 	// リポジトリ指定あり → 直接取得（exclude対象の場合は空を返す）
 	if target.Repo != "" {
 		if target.IsExcluded(target.Repo) {
