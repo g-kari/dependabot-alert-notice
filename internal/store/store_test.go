@@ -274,6 +274,206 @@ func TestSave_AssignsInternalID(t *testing.T) {
 	}
 }
 
+// TestFindEvalByCVE は同一CVEの評価済み結果を返す
+func TestFindEvalByCVE_NoMatch(t *testing.T) {
+	s := New()
+	if s.FindEvalByCVE("CVE-2024-0001") != nil {
+		t.Error("FindEvalByCVE() should return nil for empty store")
+	}
+}
+
+func TestFindEvalByCVE_EmptyCVEID(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 1, CVEID: ""},
+		Evaluation: &model.Evaluation{Impact: "test", Recommendation: "approve", Reasoning: "ok"},
+		EvalStatus: model.EvalStatusDone,
+	})
+	if s.FindEvalByCVE("") != nil {
+		t.Error("FindEvalByCVE(\"\") should return nil to prevent empty-CVE matching")
+	}
+}
+
+func TestFindEvalByCVE_MatchExists(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1, CVEID: "CVE-2024-0001"},
+		Evaluation: &model.Evaluation{
+			Impact:         "• data leak\n• RCE",
+			Recommendation: "approve",
+			Reasoning:      "• used with eval()",
+		},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	eval := s.FindEvalByCVE("CVE-2024-0001")
+	if eval == nil {
+		t.Fatal("FindEvalByCVE() should return evaluation for existing CVE")
+	}
+	if eval.Recommendation != "approve" {
+		t.Errorf("Recommendation = %q, want approve", eval.Recommendation)
+	}
+	if eval.Impact != "• data leak\n• RCE" {
+		t.Errorf("Impact = %q, want bullet list", eval.Impact)
+	}
+}
+
+func TestFindEvalByCVE_NoEvalJSON(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 1, CVEID: "CVE-2024-0001"},
+		EvalStatus: model.EvalStatusPending,
+	})
+	if s.FindEvalByCVE("CVE-2024-0001") != nil {
+		t.Error("FindEvalByCVE() should return nil when eval_json is NULL")
+	}
+}
+
+func TestFindEvalByCVE_DifferentCVE(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 1, CVEID: "CVE-2024-AAAA"},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusDone,
+	})
+	if s.FindEvalByCVE("CVE-2024-BBBB") != nil {
+		t.Error("FindEvalByCVE() should return nil for different CVE")
+	}
+}
+
+func TestFindEvalByCVE_SameCVEMultipleRepos(t *testing.T) {
+	s := New()
+	// repo1: 評価なし
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "CVE-2024-0001"},
+		EvalStatus: model.EvalStatusPending,
+	})
+	// repo2: 評価済み
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo2", Number: 1, CVEID: "CVE-2024-0001"},
+		Evaluation: &model.Evaluation{Recommendation: "manual-review", Impact: "test"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	eval := s.FindEvalByCVE("CVE-2024-0001")
+	if eval == nil {
+		t.Fatal("FindEvalByCVE() should find the eval from repo2")
+	}
+	if eval.Recommendation != "manual-review" {
+		t.Errorf("Recommendation = %q, want manual-review", eval.Recommendation)
+	}
+}
+
+func saveTestAlert(s *Store, owner, repo string, number int) *model.AlertRecord {
+	rec := &model.AlertRecord{
+		Alert: model.Alert{
+			Number:      number,
+			Owner:       owner,
+			Repo:        repo,
+			PackageName: "pkg-" + repo,
+			Severity:    model.SeverityHigh,
+		},
+		State:      model.AlertStatePending,
+		EvalStatus: model.EvalStatusPending,
+		NotifiedAt: time.Now(),
+	}
+	s.Save(rec)
+	return rec
+}
+
+func TestRemoveResolvedAlerts_RemovesClosedAlerts(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org", "repo1", 1)
+	saveTestAlert(s, "org", "repo1", 2)
+	saveTestAlert(s, "org", "repo1", 3)
+
+	// #1,#2 はまだ open、#3 は GitHub で close された
+	removed := s.RemoveResolvedAlerts("org", "repo1", []int{1, 2})
+	if len(removed) != 1 {
+		t.Fatalf("removed = %d, want 1", len(removed))
+	}
+	if removed[0].Alert.Number != 3 {
+		t.Errorf("removed[0].Number = %d, want 3", removed[0].Alert.Number)
+	}
+	// DB に #3 が残っていないこと
+	if s.HasByKey("org", "repo1", 3) {
+		t.Error("#3 はまだ DB に残っている")
+	}
+	// #1, #2 は残っていること
+	if !s.HasByKey("org", "repo1", 1) || !s.HasByKey("org", "repo1", 2) {
+		t.Error("#1 or #2 が消えた")
+	}
+}
+
+func TestRemoveResolvedAlerts_NoOpenAlerts(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org", "repo1", 1)
+	saveTestAlert(s, "org", "repo1", 2)
+
+	// 全アラートが close された
+	removed := s.RemoveResolvedAlerts("org", "repo1", nil)
+	if len(removed) != 2 {
+		t.Fatalf("removed = %d, want 2", len(removed))
+	}
+}
+
+func TestRemoveResolvedAlerts_AllStillOpen(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org", "repo1", 1)
+	saveTestAlert(s, "org", "repo1", 2)
+
+	removed := s.RemoveResolvedAlerts("org", "repo1", []int{1, 2})
+	if len(removed) != 0 {
+		t.Fatalf("removed = %d, want 0", len(removed))
+	}
+}
+
+func TestRemoveResolvedAlerts_DifferentRepo(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org", "repo1", 1)
+	saveTestAlert(s, "org", "repo2", 1)
+
+	// repo1 のみ cleanup → repo2 は影響なし
+	removed := s.RemoveResolvedAlerts("org", "repo1", nil)
+	if len(removed) != 1 {
+		t.Fatalf("removed = %d, want 1", len(removed))
+	}
+	if !s.HasByKey("org", "repo2", 1) {
+		t.Error("repo2 の #1 が消えた")
+	}
+}
+
+func TestRemoveResolvedAlerts_ReturnsSlackTS(t *testing.T) {
+	s := New()
+	rec := saveTestAlert(s, "org", "repo1", 1)
+	_ = s.UpdateSlackMessageTS(rec.Alert.ID, "1234567890.123456")
+
+	removed := s.RemoveResolvedAlerts("org", "repo1", nil)
+	if len(removed) != 1 {
+		t.Fatalf("removed = %d, want 1", len(removed))
+	}
+	if removed[0].SlackMessageTS != "1234567890.123456" {
+		t.Errorf("SlackMessageTS = %q, want 1234567890.123456", removed[0].SlackMessageTS)
+	}
+}
+
+func TestUpdateDiscordMessageID(t *testing.T) {
+	s := New()
+	rec := saveTestAlert(s, "org", "repo1", 1)
+
+	if err := s.UpdateDiscordMessageID(rec.Alert.ID, "discord-msg-123"); err != nil {
+		t.Fatalf("UpdateDiscordMessageID: %v", err)
+	}
+
+	got, err := s.Get(rec.Alert.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DiscordMessageID != "discord-msg-123" {
+		t.Errorf("DiscordMessageID = %q, want discord-msg-123", got.DiscordMessageID)
+	}
+}
+
 func TestAddLogAndListLogs(t *testing.T) {
 	s := New()
 	s.AddLog(model.LogEntry{Timestamp: time.Now(), Level: "info", Message: "test1"})

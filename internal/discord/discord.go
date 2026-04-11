@@ -2,19 +2,24 @@ package discord
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/ratelimit"
 )
 
 // Client はDiscord Webhook通知クライアント
 type Client struct {
 	webhookURL string
 	httpClient *http.Client
+	limiter    *ratelimit.Limiter
 }
 
 // New はDiscord Webhookクライアントを生成する
@@ -22,6 +27,8 @@ func New(webhookURL string) *Client {
 	return &Client{
 		webhookURL: webhookURL,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+		// Discord Webhook: レスポンスヘッダでレート制限を動的に制御。デフォルト500ms間隔
+		limiter: ratelimit.NewLimiter(500 * time.Millisecond),
 	}
 }
 
@@ -52,17 +59,21 @@ type webhookPayload struct {
 }
 
 // NotifyEval はAI評価完了をDiscord Webhookに追加通知する
-func (c *Client) NotifyEval(record *model.AlertRecord) error {
+func (c *Client) NotifyEval(record *model.AlertRecord) (string, error) {
 	if record.Evaluation == nil {
-		return nil
+		return "", nil
 	}
 	return c.Notify(record)
 }
 
-// Notify はDependabotアラートをDiscord Webhookに通知する
-func (c *Client) Notify(record *model.AlertRecord) error {
+// Notify はDependabotアラートをDiscord Webhookに通知し、メッセージIDを返す
+func (c *Client) Notify(record *model.AlertRecord) (string, error) {
 	if c.webhookURL == "" {
-		return fmt.Errorf("discord webhook URLが未設定です")
+		return "", fmt.Errorf("discord webhook URLが未設定です")
+	}
+
+	if err := c.limiter.Wait(context.Background()); err != nil {
+		return "", fmt.Errorf("discord通知レート制限待機失敗: %w", err)
 	}
 
 	alert := record.Alert
@@ -84,9 +95,9 @@ func (c *Client) Notify(record *model.AlertRecord) error {
 
 	if eval != nil {
 		fields = append(fields,
-			embedField{Name: "Risk", Value: nonEmpty(eval.Risk, "N/A"), Inline: true},
 			embedField{Name: "Recommendation", Value: nonEmpty(eval.Recommendation, "N/A"), Inline: true},
-			embedField{Name: "AI評価", Value: nonEmpty(eval.Reasoning, "N/A"), Inline: false},
+			embedField{Name: "侵害される内容", Value: nonEmpty(eval.Impact, "N/A"), Inline: false},
+			embedField{Name: "侵害される使い方", Value: nonEmpty(eval.Reasoning, "N/A"), Inline: false},
 		)
 	}
 
@@ -103,21 +114,125 @@ func (c *Client) Notify(record *model.AlertRecord) error {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("discord payload JSONシリアライズ失敗: %w", err)
+		return "", fmt.Errorf("discord payload JSONシリアライズ失敗: %w", err)
 	}
 
-	resp, err := c.httpClient.Post(c.webhookURL, "application/json", bytes.NewReader(body))
+	// ?wait=true でメッセージIDを取得
+	url := c.webhookURL + "?wait=true"
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("discord webhook送信失敗: %w", err)
+		return "", fmt.Errorf("discord webhook送信失敗: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// レスポンスヘッダからレート制限情報を読み取る
+	c.applyRateLimitHeaders(resp)
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", fmt.Errorf("discord webhook レート制限 (429)")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("discord webhook エラーレスポンス: %d", resp.StatusCode)
+		return "", fmt.Errorf("discord webhook エラーレスポンス: %d", resp.StatusCode)
 	}
 
-	slog.Info("Discord通知送信完了", "alertID", alert.ID, "package", alert.PackageName)
+	// レスポンスからメッセージIDを取得
+	var msgResp struct {
+		ID string `json:"id"`
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	_ = json.Unmarshal(respBody, &msgResp)
+
+	slog.Info("Discord通知送信完了", "alertID", alert.ID, "package", alert.PackageName, "messageID", msgResp.ID)
+	return msgResp.ID, nil
+}
+
+// NotifyResolved は対応済みアラートをDiscord Webhookメッセージに反映する（PATCHで編集）
+func (c *Client) NotifyResolved(record *model.AlertRecord) error {
+	if record.DiscordMessageID == "" {
+		return nil
+	}
+
+	if err := c.limiter.Wait(context.Background()); err != nil {
+		return fmt.Errorf("discord resolved通知レート制限待機失敗: %w", err)
+	}
+
+	alert := record.Alert
+	title := fmt.Sprintf("✅ %s %s in %s/%s — 対応済み",
+		severityToEmoji(alert.Severity), alert.PackageName, alert.Owner, alert.Repo)
+
+	payload := webhookPayload{
+		Embeds: []embed{
+			{
+				Title: title,
+				Color: 0x22c55e, // 緑
+				URL:   alert.HTMLURL,
+				Fields: []embedField{
+					{Name: "Status", Value: "✅ 対応済み — GitHub側で解決済み", Inline: false},
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("discord resolved payload JSONシリアライズ失敗: %w", err)
+	}
+
+	// PATCH /webhooks/{id}/{token}/messages/{message_id}
+	patchURL := c.webhookURL + "/messages/" + record.DiscordMessageID
+	req, err := http.NewRequest(http.MethodPatch, patchURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("discord resolved PATCHリクエスト作成失敗: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("discord resolved PATCH送信失敗: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	c.applyRateLimitHeaders(resp)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord resolved PATCHエラー: %d", resp.StatusCode)
+	}
+
+	slog.Info("Discord対応済み通知完了", "alertID", alert.ID, "messageID", record.DiscordMessageID)
 	return nil
+}
+
+// applyRateLimitHeaders はDiscordのレスポンスヘッダからレート制限情報を抽出してLimiterに反映する
+func (c *Client) applyRateLimitHeaders(resp *http.Response) {
+	// 残りリクエスト数が0の場合はリセット時刻まで待機
+	remaining := resp.Header.Get("X-RateLimit-Remaining")
+	resetAfter := resp.Header.Get("X-RateLimit-Reset-After")
+
+	if remaining == "0" && resetAfter != "" {
+		if secs, err := strconv.ParseFloat(resetAfter, 64); err == nil && secs > 0 {
+			c.limiter.SetRetryAfter(time.Duration(secs * float64(time.Second)))
+			slog.Debug("Discord レート制限ヘッダ適用", "resetAfter", secs)
+		}
+	}
+
+	// 429 の場合は Retry-After ヘッダまたは JSON レスポンスから読む
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := resp.Header.Get("Retry-After")
+		if secs, err := strconv.ParseFloat(retryAfter, 64); err == nil && secs > 0 {
+			c.limiter.SetRetryAfter(time.Duration(secs * float64(time.Second)))
+			slog.Warn("Discord 429 レート制限", "retryAfterSec", secs)
+			return
+		}
+		// ヘッダにない場合はレスポンスボディのJSONを試みる
+		var retryBody struct {
+			RetryAfter float64 `json:"retry_after"`
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(bodyBytes, &retryBody); err == nil && retryBody.RetryAfter > 0 {
+			c.limiter.SetRetryAfter(time.Duration(retryBody.RetryAfter * float64(time.Second)))
+			slog.Warn("Discord 429 レート制限（JSON）", "retryAfterSec", retryBody.RetryAfter)
+		}
+	}
 }
 
 func severityToColor(s model.Severity) int {

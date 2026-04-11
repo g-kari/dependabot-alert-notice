@@ -98,13 +98,14 @@ const (
 )
 
 type AlertRecord struct {
-	Alert          Alert
-	Evaluation     *Evaluation
-	State          AlertState
-	EvalStatus     EvalStatus
-	NotifiedAt     time.Time
-	MergedAt       *time.Time
-	SlackMessageTS string // Slack通知済みメッセージのTimestamp（編集に使用）
+	Alert            Alert
+	Evaluation       *Evaluation
+	State            AlertState
+	EvalStatus       EvalStatus
+	NotifiedAt       time.Time
+	MergedAt         *time.Time
+	SlackMessageTS   string // Slack通知済みメッセージのTimestamp（編集に使用）
+	DiscordMessageID string // Discord Webhookメッセージ ID（編集に使用）
 }
 
 type LogEntry struct {

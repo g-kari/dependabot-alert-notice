@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -205,8 +206,13 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 					}
 				}
 				if discordClient != nil {
-					if err := discordClient.Notify(record); err != nil {
+					if msgID, err := discordClient.Notify(record); err != nil {
 						slog.Error("Discord通知失敗（新規アラート）", "alertID", record.Alert.ID, "error", err)
+					} else if msgID != "" {
+						record.DiscordMessageID = msgID
+						if err := s.UpdateDiscordMessageID(record.Alert.ID, msgID); err != nil {
+							slog.Error("DiscordMessageID保存失敗", "alertID", record.Alert.ID, "error", err)
+						}
 					}
 				}
 			}
@@ -230,6 +236,13 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				return oi < oj
 			})
 			for _, record := range pending {
+				// このターゲットに属するアラートのみ評価（別ターゲットの混入を防ぐ）
+				if record.Alert.Owner != target.Owner {
+					continue
+				}
+				if target.Repo != "" && record.Alert.Repo != target.Repo {
+					continue
+				}
 				if !cfg.Evaluator.ShouldEvaluate(string(record.Alert.Severity)) {
 					continue
 				}
@@ -244,6 +257,46 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				})
 			}
 		}
+
+		// 対応済みアラートのクリーンアップ: fetch 結果に含まれないものは GitHub 側で close 済み
+		openByRepo := make(map[string][]int) // "owner/repo" → [numbers]
+		for _, alert := range alerts {
+			key := alert.Owner + "/" + alert.Repo
+			openByRepo[key] = append(openByRepo[key], alert.Number)
+		}
+		// target.Repo 指定時は空結果でもそのリポをクリーンアップ対象に含める
+		if target.Repo != "" {
+			key := target.Owner + "/" + target.Repo
+			if _, ok := openByRepo[key]; !ok {
+				openByRepo[key] = nil
+			}
+		}
+		for key, numbers := range openByRepo {
+			parts := strings.SplitN(key, "/", 2)
+			removed := s.RemoveResolvedAlerts(parts[0], parts[1], numbers)
+			for _, rec := range removed {
+				slog.Info("対応済みアラート削除", "id", rec.Alert.ID, "package", rec.Alert.PackageName, "repo", key)
+				s.AddLog(model.LogEntry{
+					Timestamp: time.Now(),
+					Level:     "info",
+					Message:   fmt.Sprintf("対応済みアラート削除: %s in %s（GitHub側で解決済み）", rec.Alert.PackageName, key),
+					AlertID:   rec.Alert.ID,
+				})
+				// Slack通知更新
+				if slackClient != nil && rec.SlackMessageTS != "" {
+					if err := slackClient.NotifyResolved(rec); err != nil {
+						slog.Error("Slack対応済み通知失敗", "alertID", rec.Alert.ID, "error", err)
+					}
+				}
+				// Discord通知更新
+				if discordClient != nil && rec.DiscordMessageID != "" {
+					if err := discordClient.NotifyResolved(rec); err != nil {
+						slog.Error("Discord対応済み通知失敗", "alertID", rec.Alert.ID, "error", err)
+					}
+				}
+			}
+		}
+
 		return nil
 	}
 }
@@ -269,19 +322,33 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 		alert := record.Alert
 		slog.Info("AI評価中", "id", alert.ID, "package", alert.PackageName, "severity", alert.Severity)
 
-		evaluation, err := eval.Evaluate(ctx, alert)
-		if err != nil {
-			slog.Error("AI評価失敗", "alertID", alert.ID, "error", err)
+		// 同一CVEの評価済み結果を再利用
+		var evaluation *model.Evaluation
+		if existing := s.FindEvalByCVE(alert.CVEID); existing != nil {
+			slog.Info("CVE重複評価スキップ（既存結果を再利用）", "alertID", alert.ID, "cveID", alert.CVEID)
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),
-				Level:     "error",
-				Message:   fmt.Sprintf("AI評価失敗 (#%d): %v", alert.ID, err),
+				Level:     "info",
+				Message:   fmt.Sprintf("AI評価スキップ (#%d %s): CVE %s の評価を再利用", alert.ID, alert.PackageName, alert.CVEID),
 				AlertID:   alert.ID,
 			})
-			if updateErr := s.UpdateEvalStatus(alert.ID, model.EvalStatusFailed); updateErr != nil {
-				slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", updateErr)
+			evaluation = existing
+		} else {
+			var err error
+			evaluation, err = eval.Evaluate(ctx, alert)
+			if err != nil {
+				slog.Error("AI評価失敗", "alertID", alert.ID, "error", err)
+				s.AddLog(model.LogEntry{
+					Timestamp: time.Now(),
+					Level:     "error",
+					Message:   fmt.Sprintf("AI評価失敗 (#%d): %v", alert.ID, err),
+					AlertID:   alert.ID,
+				})
+				if updateErr := s.UpdateEvalStatus(alert.ID, model.EvalStatusFailed); updateErr != nil {
+					slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", updateErr)
+				}
+				return fmt.Errorf("AI評価失敗: %w", err)
 			}
-			return fmt.Errorf("AI評価失敗: %w", err)
 		}
 
 		record.Evaluation = evaluation
@@ -320,8 +387,12 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 
 		// Discord: eval付きで通知
 		if discordClient != nil {
-			if err := discordClient.NotifyEval(record); err != nil {
+			if msgID, err := discordClient.NotifyEval(record); err != nil {
 				slog.Error("Discord通知失敗（AI評価完了）", "alertID", alert.ID, "error", err)
+			} else if msgID != "" {
+				if err := s.UpdateDiscordMessageID(alert.ID, msgID); err != nil {
+					slog.Error("DiscordMessageID保存失敗（AI評価後）", "alertID", alert.ID, "error", err)
+				}
 			}
 		}
 

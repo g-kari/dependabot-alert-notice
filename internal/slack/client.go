@@ -3,9 +3,11 @@ package slack
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
+	"github.com/g-kari/dependabot-alert-notice/internal/ratelimit"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
 	slackgo "github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -17,6 +19,7 @@ type SlackClient struct {
 	channelID string
 	store     *store.Store
 	merger    merger.Interface
+	limiter   *ratelimit.Limiter
 }
 
 func New(cfg *config.Config, s *store.Store, m merger.Interface) *SlackClient {
@@ -32,6 +35,8 @@ func New(cfg *config.Config, s *store.Store, m merger.Interface) *SlackClient {
 		channelID: cfg.Slack.ChannelID,
 		store:     s,
 		merger:    m,
+		// Slack: chat.postMessage は1メッセージ/秒/チャンネルが推奨
+		limiter: ratelimit.NewLimiter(1 * time.Second),
 	}
 }
 

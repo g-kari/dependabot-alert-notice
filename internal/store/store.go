@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,6 +114,17 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("slack_message_tsカラム追加失敗: %w", err)
 		}
 	}
+
+	// discord_message_id カラム追加
+	var discordIDColCount int
+	_ = s.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('alert_records') WHERE name = 'discord_message_id'`,
+	).Scan(&discordIDColCount)
+	if discordIDColCount == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE alert_records ADD COLUMN discord_message_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("discord_message_idカラム追加失敗: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -140,16 +152,17 @@ func (s *Store) Save(record *model.AlertRecord) bool {
 	}
 
 	res, err := s.db.Exec(`INSERT INTO alert_records
-		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(owner, repo, number) DO UPDATE SET
-			alert_json       = excluded.alert_json,
-			eval_json        = excluded.eval_json,
-			state            = excluded.state,
-			eval_status      = excluded.eval_status,
-			notified_at      = excluded.notified_at,
-			merged_at        = excluded.merged_at,
-			slack_message_ts = excluded.slack_message_ts`,
+			alert_json         = excluded.alert_json,
+			eval_json          = excluded.eval_json,
+			state              = excluded.state,
+			eval_status        = excluded.eval_status,
+			notified_at        = excluded.notified_at,
+			merged_at          = excluded.merged_at,
+			slack_message_ts   = excluded.slack_message_ts,
+			discord_message_id = excluded.discord_message_id`,
 		record.Alert.Owner,
 		record.Alert.Repo,
 		record.Alert.Number,
@@ -160,6 +173,7 @@ func (s *Store) Save(record *model.AlertRecord) bool {
 		record.NotifiedAt,
 		mergedAt,
 		record.SlackMessageTS,
+		record.DiscordMessageID,
 	)
 	if err != nil {
 		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
@@ -185,7 +199,7 @@ func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
 }
 
 func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
-	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts
+	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
 		FROM alert_records WHERE id = ?`, alertID)
 
 	var dbID int
@@ -196,8 +210,9 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	var notifiedAt time.Time
 	var mergedAt sql.NullTime
 	var slackTS string
+	var discordMsgID string
 
-	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS); err != nil {
+	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("アラートID %d が見つかりません", alertID)
 		}
@@ -215,12 +230,13 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	}
 
 	record := &model.AlertRecord{
-		Alert:          alert,
-		Evaluation:     eval,
-		State:          model.AlertState(state),
-		EvalStatus:     model.EvalStatus(evalStatus),
-		NotifiedAt:     notifiedAt,
-		SlackMessageTS: slackTS,
+		Alert:            alert,
+		Evaluation:       eval,
+		State:            model.AlertState(state),
+		EvalStatus:       model.EvalStatus(evalStatus),
+		NotifiedAt:       notifiedAt,
+		SlackMessageTS:   slackTS,
+		DiscordMessageID: discordMsgID,
 	}
 	if mergedAt.Valid {
 		t := mergedAt.Time
@@ -233,7 +249,7 @@ func (s *Store) List() []*model.AlertRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts FROM alert_records`)
+	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id FROM alert_records`)
 	if err != nil {
 		slog.Error("レコード一覧取得失敗", "error", err)
 		return nil
@@ -250,8 +266,9 @@ func (s *Store) List() []*model.AlertRecord {
 		var notifiedAt time.Time
 		var mergedAt sql.NullTime
 		var slackTS string
+		var discordMsgID string
 
-		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS); err != nil {
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
 			continue
 		}
 
@@ -266,12 +283,13 @@ func (s *Store) List() []*model.AlertRecord {
 		}
 
 		record := &model.AlertRecord{
-			Alert:          alert,
-			Evaluation:     eval,
-			State:          model.AlertState(state),
-			EvalStatus:     model.EvalStatus(evalStatus),
-			NotifiedAt:     notifiedAt,
-			SlackMessageTS: slackTS,
+			Alert:            alert,
+			Evaluation:       eval,
+			State:            model.AlertState(state),
+			EvalStatus:       model.EvalStatus(evalStatus),
+			NotifiedAt:       notifiedAt,
+			SlackMessageTS:   slackTS,
+			DiscordMessageID: discordMsgID,
 		}
 		if mergedAt.Valid {
 			t := mergedAt.Time
@@ -408,6 +426,136 @@ func (s *Store) NeedsEvaluation(alertID int) bool {
 		return false
 	}
 	return model.EvalStatus(evalStatus) == model.EvalStatusFailed
+}
+
+// FindEvalByCVE は同じCVE IDを持つ既存レコードのAI評価を返す。
+// cveIDが空の場合はnilを返す（空CVE同士のマッチを防ぐ）。
+func (s *Store) FindEvalByCVE(cveID string) *model.Evaluation {
+	if cveID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var evalJSON sql.NullString
+	err := s.db.QueryRow(`
+		SELECT eval_json FROM alert_records
+		WHERE json_extract(alert_json, '$.CVEID') = ?
+		  AND eval_json IS NOT NULL
+		LIMIT 1`, cveID).Scan(&evalJSON)
+	if err != nil || !evalJSON.Valid {
+		return nil
+	}
+	var eval model.Evaluation
+	if err := json.Unmarshal([]byte(evalJSON.String), &eval); err != nil {
+		return nil
+	}
+	return &eval
+}
+
+// RemoveResolvedAlerts は (owner, repo) のうち openNumbers に含まれないレコードを削除し、
+// 削除されたレコードを返す（Slack/Discord通知の更新に使うため）。
+func (s *Store) RemoveResolvedAlerts(owner, repo string, openNumbers []int) []*model.AlertRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 削除対象を先に取得
+	var rows *sql.Rows
+	var err error
+	if len(openNumbers) == 0 {
+		rows, err = s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
+			FROM alert_records WHERE owner = ? AND repo = ?`, owner, repo)
+	} else {
+		placeholders := make([]string, len(openNumbers))
+		args := []interface{}{owner, repo}
+		for i, n := range openNumbers {
+			placeholders[i] = "?"
+			args = append(args, n)
+		}
+		query := fmt.Sprintf(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
+			FROM alert_records WHERE owner = ? AND repo = ? AND number NOT IN (%s)`,
+			strings.Join(placeholders, ","))
+		rows, err = s.db.Query(query, args...)
+	}
+	if err != nil {
+		slog.Error("resolved対象レコード取得失敗", "error", err)
+		return nil
+	}
+
+	var removed []*model.AlertRecord
+	for rows.Next() {
+		var dbID int
+		var alertJSON string
+		var evalJSON sql.NullString
+		var state, evalStatus string
+		var notifiedAt time.Time
+		var mergedAt sql.NullTime
+		var slackTS, discordMsgID string
+
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
+			continue
+		}
+		var alert model.Alert
+		_ = json.Unmarshal([]byte(alertJSON), &alert)
+		alert.ID = dbID
+
+		var eval *model.Evaluation
+		if evalJSON.Valid {
+			eval = &model.Evaluation{}
+			_ = json.Unmarshal([]byte(evalJSON.String), eval)
+		}
+
+		rec := &model.AlertRecord{
+			Alert:            alert,
+			Evaluation:       eval,
+			State:            model.AlertState(state),
+			EvalStatus:       model.EvalStatus(evalStatus),
+			NotifiedAt:       notifiedAt,
+			SlackMessageTS:   slackTS,
+			DiscordMessageID: discordMsgID,
+		}
+		if mergedAt.Valid {
+			t := mergedAt.Time
+			rec.MergedAt = &t
+		}
+		removed = append(removed, rec)
+	}
+	_ = rows.Close()
+
+	if len(removed) == 0 {
+		return nil
+	}
+
+	// 削除実行
+	ids := make([]interface{}, len(removed))
+	placeholders := make([]string, len(removed))
+	for i, r := range removed {
+		ids[i] = r.Alert.ID
+		placeholders[i] = "?"
+	}
+	query := fmt.Sprintf(`DELETE FROM alert_records WHERE id IN (%s)`, strings.Join(placeholders, ","))
+	if _, err := s.db.Exec(query, ids...); err != nil {
+		slog.Error("resolvedアラート削除失敗", "error", err)
+		return nil
+	}
+
+	return removed
+}
+
+// UpdateDiscordMessageID はDiscord通知メッセージのIDを保存する
+func (s *Store) UpdateDiscordMessageID(alertID int, messageID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE alert_records SET discord_message_id = ? WHERE id = ?`, messageID, alertID)
+	if err != nil {
+		return fmt.Errorf("discord_message_id更新失敗: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("アラートID %d が見つかりません", alertID)
+	}
+	return nil
 }
 
 func (s *Store) AddLog(entry model.LogEntry) {
