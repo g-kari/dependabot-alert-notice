@@ -15,14 +15,24 @@ lint: vet
     eval "$(devbox shellenv)" && golangci-lint run ./...
 
 PORT := "8999"
+TUNNEL_CONFIG := "tunnel.yml"
+SESSION := "dependabot"
 
-# 起動中のプロセスを停止
+# アプリ＋トンネルをすべて停止
 stop:
+    -tmux kill-session -t {{SESSION}} 2>/dev/null || true
     -fuser -k {{PORT}}/tcp 2>/dev/null || true
+    -pkill -f "cloudflared tunnel.*dependabot-alert-notice" 2>/dev/null || true
 
-# ビルドして再起動（古いプロセスを自動停止）
+# tmuxセッションでアプリ＋トンネルを再起動（左ペイン:アプリ / 右ペイン:トンネル）
 run: stop
-    eval "$(devbox shellenv)" && go run . -config config.yaml
+    tmux new-session -d -s {{SESSION}}
+    tmux send-keys -t {{SESSION}} 'eval "$(devbox shellenv)" && go run . -config config.yaml' Enter
+    @if [ -f {{TUNNEL_CONFIG}} ]; then \
+        tmux split-window -h -t {{SESSION}}; \
+        tmux send-keys -t {{SESSION}} 'cloudflared tunnel --config {{TUNNEL_CONFIG}} run {{TUNNEL_NAME}}' Enter; \
+    fi
+    tmux attach -t {{SESSION}}
 
 run-once:
     eval "$(devbox shellenv)" && go run . -config config.yaml -once

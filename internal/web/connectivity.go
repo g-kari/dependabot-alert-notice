@@ -133,13 +133,17 @@ func testTargets(ctx context.Context, ghPath string, targets []config.Target) []
 		} else {
 			endpoint = fmt.Sprintf("/orgs/%s/dependabot/alerts", t.Owner)
 		}
-		out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
+		out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").CombinedOutput()
 		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = err.Error()
+			}
 			results = append(results, targetResult{
 				Owner:   t.Owner,
 				Repo:    t.Repo,
 				OK:      false,
-				Message: err.Error(),
+				Message: msg,
 			})
 			continue
 		}
