@@ -17,7 +17,7 @@ import (
 	"github.com/yuin/goldmark"
 )
 
-//go:embed templates/*.html
+//go:embed templates/*.html static/*
 var templateFS embed.FS
 
 type Server struct {
@@ -105,6 +105,16 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/poll/repo", s.handlePollRepo)
 	mux.HandleFunc("POST /api/poll/target/{i}", s.handlePollTarget)
 	mux.HandleFunc("POST /api/evaluate/{id}", s.handleEnqueueEvaluate)
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		data, err := templateFS.ReadFile("static/favicon.ico")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/x-icon")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	})
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
