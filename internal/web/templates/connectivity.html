@@ -12,79 +12,107 @@
 <div id="results" style="margin-top:16px"></div>
 
 <script>
-async function runTests() {
-  const btn = document.getElementById('runBtn');
-  const spinner = document.getElementById('spinner');
-  const results = document.getElementById('results');
+const TOOLS = [
+  { type: 'gh',     label: '🐙 gh CLI',     },
+  { type: 'claude', label: '🤖 Claude CLI', },
+  { type: 'slack',  label: '💬 Slack API',  },
+];
 
-  btn.disabled = true;
-  spinner.style.display = 'inline';
-  results.innerHTML = '';
-
-  try {
-    const res = await fetch('/api/connectivity-test', { method: 'POST' });
-    const data = await res.json();
-    results.innerHTML = renderResults(data);
-  } catch (e) {
-    results.innerHTML = `<div style="color:#f85149">エラー: ${e.message}</div>`;
-  } finally {
-    btn.disabled = false;
-    spinner.style.display = 'none';
-  }
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function statusBadge(ok) {
+function badge(ok, pending) {
+  if (pending) return '<span style="color:#8b949e">⏳ 確認中...</span>';
   return ok
     ? '<span style="color:#3fb950;font-weight:bold">✅ OK</span>'
     : '<span style="color:#f85149;font-weight:bold">❌ NG</span>';
 }
 
-function renderResults(data) {
-  const tools = [
-    { label: 'gh CLI',      key: 'gh',     icon: '🐙' },
-    { label: 'Claude CLI',  key: 'claude', icon: '🤖' },
-    { label: 'Slack API',   key: 'slack',  icon: '💬' },
-  ];
-
-  let html = '<div class="card"><h2 style="margin-bottom:16px">ツール</h2><table>';
-  for (const t of tools) {
-    const r = data[t.key];
-    html += `
-      <tr>
-        <th style="width:160px">${t.icon} ${t.label}</th>
-        <td style="width:80px">${statusBadge(r.ok)}</td>
-        <td style="color:#8b949e;white-space:pre-wrap;font-size:0.85em">${escHtml(r.message)}</td>
-      </tr>`;
-  }
-  html += '</table></div>';
-
-  if (data.targets && data.targets.length > 0) {
-    html += '<div class="card" style="margin-top:16px"><h2 style="margin-bottom:16px">📌 監視ターゲット</h2><table>';
-    html += '<thead><tr><th>Owner</th><th>Repo</th><th>状態</th><th>アラート数</th><th>メッセージ</th></tr></thead><tbody>';
-    for (const t of data.targets) {
-      html += `
-        <tr>
-          <td>${escHtml(t.owner)}</td>
-          <td>${escHtml(t.repo || '（org全体）')}</td>
-          <td>${statusBadge(t.ok)}</td>
-          <td style="text-align:right">${t.ok ? t.count : '-'}</td>
-          <td style="color:#8b949e;font-size:0.85em">${escHtml(t.message)}</td>
-        </tr>`;
-    }
-    html += '</tbody></table></div>';
-  } else {
-    html += '<div class="card" style="margin-top:16px"><p style="color:#8b949e">監視ターゲットが未設定です。<a href="/settings">設定</a>から追加してください。</p></div>';
-  }
-
-  return html;
+function initUI() {
+  const results = document.getElementById('results');
+  results.innerHTML = `
+    <div class="card">
+      <h2 style="margin-bottom:16px">ツール</h2>
+      <table id="tools-table">
+        <tbody>
+          ${TOOLS.map(t => `
+            <tr id="row-${t.type}">
+              <th style="width:160px">${t.label}</th>
+              <td style="width:80px">${badge(false, true)}</td>
+              <td style="color:#8b949e;white-space:pre-wrap;font-size:0.85em"></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2 style="margin-bottom:16px">📌 監視ターゲット</h2>
+      <table id="targets-table">
+        <thead><tr>
+          <th>Owner</th><th>Repo</th><th>状態</th><th>アラート数</th><th>メッセージ</th>
+        </tr></thead>
+        <tbody id="targets-body">
+          <tr id="targets-placeholder"><td colspan="5" style="color:#8b949e;text-align:center">確認中...</td></tr>
+        </tbody>
+      </table>
+    </div>`;
 }
 
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function updateTool(ev) {
+  const row = document.getElementById('row-' + ev.type);
+  if (!row) return;
+  const cells = row.querySelectorAll('td');
+  cells[0].innerHTML = badge(ev.ok, false);
+  cells[1].textContent = ev.message;
+}
+
+function addTarget(ev) {
+  const tbody = document.getElementById('targets-body');
+  const placeholder = document.getElementById('targets-placeholder');
+  if (placeholder) placeholder.remove();
+
+  const repo = ev.repo || '（org全体）';
+  const count = ev.ok ? ev.count : '-';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${escHtml(ev.owner)}</td>
+    <td>${escHtml(repo)}</td>
+    <td>${badge(ev.ok, false)}</td>
+    <td style="text-align:right">${count}</td>
+    <td style="color:#8b949e;font-size:0.85em">${escHtml(ev.message)}</td>`;
+  tbody.appendChild(tr);
+}
+
+function runTests() {
+  const btn = document.getElementById('runBtn');
+  const spinner = document.getElementById('spinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline';
+
+  initUI();
+
+  const source = new EventSource('/api/connectivity-stream');
+  source.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'done') {
+      source.close();
+      btn.disabled = false;
+      spinner.style.display = 'none';
+      return;
+    }
+    if (ev.type === 'target') {
+      addTarget(ev);
+    } else {
+      updateTool(ev);
+    }
+  };
+  source.onerror = () => {
+    source.close();
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  };
 }
 </script>
 {{end}}

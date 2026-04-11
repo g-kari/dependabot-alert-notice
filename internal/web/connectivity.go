@@ -16,6 +16,15 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 )
 
+type streamEvent struct {
+	Type    string `json:"type"` // "gh" | "claude" | "slack" | "target" | "done"
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+	Owner   string `json:"owner,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	Count   int    `json:"count,omitempty"`
+}
+
 type toolResult struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
@@ -38,6 +47,77 @@ type connectivityResult struct {
 
 func (s *Server) handleConnectivity(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "connectivity.html", nil)
+}
+
+func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+
+	var sendMu sync.Mutex
+	send := func(ev streamEvent) {
+		b, _ := json.Marshal(ev)
+		sendMu.Lock()
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+		sendMu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res := testGH(ctx, cfg.GhPath)
+		send(streamEvent{Type: "gh", OK: res.OK, Message: res.Message})
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res := testClaude(ctx, cfg.ClaudePath)
+		send(streamEvent{Type: "claude", OK: res.OK, Message: res.Message})
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res := testSlack(ctx, cfg.Slack)
+		send(streamEvent{Type: "slack", OK: res.OK, Message: res.Message})
+	}()
+
+	for _, t := range cfg.Targets {
+		wg.Add(1)
+		go func(t config.Target) {
+			defer wg.Done()
+			var res targetResult
+			if t.Repo != "" {
+				res = testRepoTarget(ctx, cfg.GhPath, t.Owner, t.Repo)
+			} else {
+				res = testOrgTarget(ctx, cfg.GhPath, t.Owner)
+				if !res.OK {
+					res = testUserRepoTarget(ctx, cfg.GhPath, t.Owner)
+				}
+			}
+			send(streamEvent{Type: "target", OK: res.OK, Message: res.Message, Owner: res.Owner, Repo: res.Repo, Count: res.Count})
+		}(t)
+	}
+
+	wg.Wait()
+	send(streamEvent{Type: "done"})
 }
 
 func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) {
