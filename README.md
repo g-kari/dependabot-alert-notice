@@ -19,8 +19,8 @@ sequenceDiagram
         App->>Queue: FetchAlerts ジョブ投入
         Queue->>GH: REST: GET /repos/.../dependabot/alerts
         GH-->>Queue: []Alert (open)
-        Queue->>GH: GraphQL: dependabotUpdate エラー取得
-        GH-->>Queue: DependabotUpdateError (更新不可理由)
+        Queue->>GH: GraphQL: dependabotUpdate エラー・PR番号取得
+        GH-->>Queue: DependabotUpdateError + PRNumber (grouped PR対応)
         Queue->>Queue: 新規アラートのみ store に保存
 
         Queue->>Queue: EvaluateAlert ジョブ投入
@@ -32,13 +32,13 @@ sequenceDiagram
         Slack-->>User: 通知表示
     end
 
-    alt Slack から承認
+    alt Slack から承認（許可ユーザーのみ）
         User->>Slack: ✅ マージ承認 ボタン
         Slack->>App: Socket Mode イベント
         App->>GH: gh pr merge --squash --auto
-        GH-->>App: マージ完了
+        GH-->>App: マージ完了（grouped PRは兄弟アラートも一括更新）
         App->>Slack: スレッドリプライ「マージしました」
-    else Slack から却下
+    else Slack から却下（許可ユーザーのみ）
         User->>Slack: ❌ 却下 ボタン
         Slack->>App: Socket Mode イベント
         App->>App: store.UpdateState(rejected)
@@ -104,8 +104,8 @@ graph TB
     end
 
     subgraph Dockerサンドボックス
-        Evaluator --> DockerRun["docker run\n--read-only\n--cap-drop=ALL\n--no-new-privileges"]
-        DockerRun --> ClaudeCLI["claude -p\n(認証情報のみ\nread-only mount)"]
+        Evaluator --> DockerRun["docker run\n--read-only\n--cap-drop=ALL\n--security-opt=no-new-privileges"]
+        DockerRun --> ClaudeCLI["claude -p\n(~/.claude + ~/.claude.json\nread-only mount)"]
     end
 
     Store --> Web
@@ -121,7 +121,8 @@ graph LR
     subgraph ホスト
         App["dependabot-alert-notice"]
         Secrets["GITHUB_TOKEN\nSLACK_BOT_TOKEN\nSLACK_APP_TOKEN"]
-        ClaudeHome["~/.claude\n(認証情報)"]
+        ClaudeHome["~/.claude\n(認証情報ディレクトリ)"]
+        ClaudeJSON["~/.claude.json\n(設定ファイル)"]
     end
 
     subgraph Dockerコンテナ read-only
@@ -131,6 +132,7 @@ graph LR
 
     App -->|"プロンプト文字列のみ渡す"| ClaudeCLI
     ClaudeHome -->|"read-only mount"| ClaudeCLI
+    ClaudeJSON -->|"read-only mount"| ClaudeCLI
     Secrets -.->|"一切渡さない"| ClaudeCLI
     ClaudeCLI -->|"JSON評価結果のみ返す"| App
 ```
@@ -139,6 +141,7 @@ graph LR
 - ホストの `GITHUB_TOKEN` / `SLACK_*` トークンへアクセス不可
 - ホストファイルシステムへの書き込み不可（`--read-only`）
 - 全 Linux capability を削除（`--cap-drop=ALL`）
+- 新規権限昇格禁止（`--security-opt=no-new-privileges`）
 - メモリ 512MB / CPU 0.5 コア制限
 
 ## WebUI
@@ -183,7 +186,7 @@ GitHub Dependabot REST API + GraphQL API の全情報を表示:
 | **詳細説明** | `security_advisory.description`（Markdown形式の脆弱性説明） |
 | **CWE** | Common Weakness Enumeration 一覧 |
 | **参照リンク** | NVD、アドバイザリ等の外部リンク |
-| **AI評価** | リスク、推奨アクション、影響、理由。手動で評価開始/再評価可能 |
+| **AI評価** | 推奨アクション、侵害内容、侵害される使い方。手動で評価開始/再評価可能 |
 
 ### ログページ (`/logs`)
 
@@ -191,7 +194,7 @@ GitHub Dependabot REST API + GraphQL API の全情報を表示:
 
 ### 設定ページ (`/settings`)
 
-- ポーリング間隔、ターゲット、除外リポジトリ、Slack/Discord設定、サンドボックス設定をWebUIから変更可能
+- ポーリング間隔・直近活動フィルタ、監視ターゲット・除外リポジトリ、Slack/Discord設定、通知最低重要度、AI自動評価・評価最低重要度、サンドボックス設定をWebUIから変更可能
 
 ## セットアップ
 
@@ -204,11 +207,14 @@ cp config.yaml.example config.yaml
 
 ```yaml
 poll_interval: 30m
+active_months: 6  # 直近6か月以内にpushがあったリポのみ対象（0=無効）
 targets:
   - owner: your-org
     repo: your-repo
 slack:
   channel_id: C0123456789
+  allowed_user_ids: []  # 空=全員許可。承認・却下を許可するSlack User ID (U...) リスト
+notify_min_severity: low  # 通知する最低重要度
 ```
 
 ```bash
@@ -303,16 +309,21 @@ Slack アプリに以下の設定が必要:
 | キー | デフォルト | 説明 |
 |---|---|---|
 | `poll_interval` | `30m` | ポーリング間隔 |
+| `active_months` | `0` | 直近Nか月以内にpushがあったリポのみ対象（0=無効） |
 | `targets[].owner` | 必須 | GitHubオーナー名 |
 | `targets[].repo` | 省略可 | リポジトリ名（省略でorg全体） |
 | `targets[].excludes` | `[]` | 除外リポジトリ名リスト |
 | `slack.channel_id` | 必須 | 通知先チャンネルID |
+| `slack.allowed_user_ids` | `[]` | 承認・却下を許可するSlack User IDリスト（空=全員許可） |
 | `discord.webhook_url` | 省略可 | Discord Webhook URL（環境変数 `DISCORD_WEBHOOK_URL` でも可） |
+| `notify_min_severity` | `low` | 通知する最低重要度（`low`/`medium`/`high`/`critical`） |
 | `claude_path` | `claude` | claude CLIパス |
 | `gh_path` | `gh` | gh CLIパス |
-| `log_level` | `info` | ログレベル |
+| `log_level` | `info` | ログレベル（`debug`/`info`/`warn`/`error`） |
 | `data_path` | `store.db` | SQLiteデータベースファイルパス |
 | `web.port` | `8999` | WebUIポート |
+| `evaluator.auto_eval` | `false` | ポーリング毎に自動AI評価するか |
+| `evaluator.min_severity` | `high` | AI評価する最低重要度（`low`/`medium`/`high`/`critical`） |
 | `evaluator.sandbox.enabled` | `true` | Docker隔離の有効/無効 |
 | `evaluator.sandbox.image` | `dependabot-evaluator:latest` | Dockerイメージ名 |
 | `evaluator.sandbox.memory_limit` | `512m` | コンテナメモリ上限 |
