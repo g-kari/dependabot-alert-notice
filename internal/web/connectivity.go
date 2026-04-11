@@ -194,6 +194,9 @@ func testClaude(ctx context.Context, claudePath string) toolResult {
 func testSlack(ctx context.Context, slackCfg config.SlackConfig) toolResult {
 	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	if botToken == "" {
+		botToken = slackCfg.BotToken
+	}
+	if botToken == "" {
 		return toolResult{OK: false, Message: "SLACK_BOT_TOKEN が未設定"}
 	}
 	api := slackgo.New(botToken)
