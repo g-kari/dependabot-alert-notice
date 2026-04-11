@@ -17,7 +17,7 @@ import (
 )
 
 type streamEvent struct {
-	Type    string `json:"type"` // "gh" | "claude" | "slack" | "target" | "done"
+	Type    string `json:"type"` // "gh" | "claude" | "slack" | "sandbox" | "target" | "done"
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 	Owner   string `json:"owner,omitempty"`
@@ -42,6 +42,7 @@ type connectivityResult struct {
 	GH      toolResult     `json:"gh"`
 	Claude  toolResult     `json:"claude"`
 	Slack   toolResult     `json:"slack"`
+	Sandbox toolResult     `json:"sandbox"`
 	Targets []targetResult `json:"targets"`
 }
 
@@ -99,6 +100,13 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 		send(streamEvent{Type: "slack", OK: res.OK, Message: res.Message})
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res := testSandbox(ctx, cfg.Evaluator.Sandbox)
+		send(streamEvent{Type: "sandbox", OK: res.OK, Message: res.Message})
+	}()
+
 	for _, t := range cfg.Targets {
 		wg.Add(1)
 		go func(t config.Target) {
@@ -134,7 +142,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 		wg  sync.WaitGroup
 	)
 
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -157,6 +165,14 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 		r := testSlack(ctx, cfg.Slack)
 		mu.Lock()
 		res.Slack = r
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+		r := testSandbox(ctx, cfg.Evaluator.Sandbox)
+		mu.Lock()
+		res.Sandbox = r
 		mu.Unlock()
 	}()
 
@@ -254,6 +270,31 @@ func testOrgTarget(ctx context.Context, ghPath, owner string) targetResult {
 	count := 0
 	_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count)
 	return targetResult{Owner: owner, OK: true, Count: count, Message: fmt.Sprintf("org: %d 件のアラートを取得", count)}
+}
+
+func testSandbox(ctx context.Context, sandboxCfg config.SandboxConfig) toolResult {
+	if !sandboxCfg.Enabled {
+		return toolResult{OK: true, Message: "サンドボックス無効（直接実行モード）"}
+	}
+	// Docker デーモンの疎通確認
+	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}").CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return toolResult{OK: false, Message: "Docker 接続失敗: " + msg}
+	}
+	// イメージの存在確認
+	imageOut, err := exec.CommandContext(ctx, "docker", "image", "inspect", sandboxCfg.Image, "--format", "{{.Id}}").CombinedOutput()
+	if err != nil {
+		return toolResult{OK: false, Message: fmt.Sprintf("イメージ %q が見つかりません（docker build が必要です）", sandboxCfg.Image)}
+	}
+	imageID := strings.TrimSpace(string(imageOut))
+	if len(imageID) > 19 {
+		imageID = imageID[:19] + "..."
+	}
+	return toolResult{OK: true, Message: fmt.Sprintf("Docker OK, イメージ %q 確認済み (%s)", sandboxCfg.Image, imageID)}
 }
 
 func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult {

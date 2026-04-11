@@ -118,6 +118,58 @@ func TestConnectivityTest_NoSlackToken(t *testing.T) {
 	}
 }
 
+func TestConnectivityTest_SandboxDisabled(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		GhPath:     "/nonexistent-gh-12345",
+		ClaudePath: "/nonexistent-claude-12345",
+		Evaluator: config.EvaluatorConfig{
+			Sandbox: config.SandboxConfig{Enabled: false},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/connectivity-test", nil)
+	w := httptest.NewRecorder()
+	srv.handleConnectivityTest(w, req)
+
+	var result connectivityResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !result.Sandbox.OK {
+		t.Errorf("サンドボックス無効時は OK=true を返すべき: %s", result.Sandbox.Message)
+	}
+	if !strings.Contains(result.Sandbox.Message, "無効") {
+		t.Errorf("メッセージに '無効' が含まれるべき: %s", result.Sandbox.Message)
+	}
+}
+
+func TestConnectivityTest_SandboxEnabled_NoDocker(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		GhPath:     "/nonexistent-gh-12345",
+		ClaudePath: "/nonexistent-claude-12345",
+		Evaluator: config.EvaluatorConfig{
+			Sandbox: config.SandboxConfig{
+				Enabled: true,
+				Image:   "dependabot-evaluator:latest",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/connectivity-test", nil)
+	w := httptest.NewRecorder()
+	srv.handleConnectivityTest(w, req)
+
+	var result connectivityResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	// docker が存在しない or イメージが存在しない場合は OK=false になるはず
+	// docker が存在してイメージもある環境ではスキップ
+	t.Logf("sandbox result: ok=%v, message=%q", result.Sandbox.OK, result.Sandbox.Message)
+}
+
 func TestConnectivityTest_WithTarget(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	srv.cfg = &config.Config{

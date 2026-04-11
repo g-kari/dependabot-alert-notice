@@ -95,6 +95,26 @@ func TestConnectivityStream_EventFormat(t *testing.T) {
 	}
 }
 
+func TestConnectivityStream_ContainsSandboxEvent(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		GhPath:     "/nonexistent-gh-12345",
+		ClaudePath: "/nonexistent-claude-12345",
+		Evaluator: config.EvaluatorConfig{
+			Sandbox: config.SandboxConfig{Enabled: false},
+		},
+	}
+	t.Setenv("SLACK_BOT_TOKEN", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/connectivity-stream", nil)
+	w := httptest.NewRecorder()
+	srv.handleConnectivityStream(w, req)
+
+	if !strings.Contains(w.Body.String(), `"type":"sandbox"`) {
+		t.Error("レスポンスに sandbox イベントが含まれていない")
+	}
+}
+
 func TestConnectivityStream_WithTarget(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	srv.cfg = &config.Config{
