@@ -190,6 +190,26 @@ func TestListIncludesEvalStatus(t *testing.T) {
 	}
 }
 
+func TestListPendingEvaluation(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusPending})
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusFailed})
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 3}, EvalStatus: model.EvalStatusDone})
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 4}, EvalStatus: model.EvalStatusEvaluating})
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 5}, EvalStatus: model.EvalStatusPending})
+
+	got := s.ListPendingEvaluation(10)
+	if len(got) != 3 { // pending x2 + failed x1
+		t.Errorf("ListPendingEvaluation() len = %d, want 3", len(got))
+	}
+
+	// limit が効くか
+	got2 := s.ListPendingEvaluation(2)
+	if len(got2) != 2 {
+		t.Errorf("ListPendingEvaluation(2) len = %d, want 2", len(got2))
+	}
+}
+
 func TestAddLogAndListLogs(t *testing.T) {
 	s := New()
 	s.AddLog(model.LogEntry{Timestamp: time.Now(), Level: "info", Message: "test1"})

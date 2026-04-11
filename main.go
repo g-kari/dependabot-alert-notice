@@ -147,8 +147,8 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 	if maxEval <= 0 {
 		maxEval = 10
 	}
-	evalCount := 0
 
+	// Step1: 全ターゲットのアラートを取得し、未登録のものをすべて pending で保存（一覧に全件表示）
 	for _, target := range cfg.Targets {
 		alerts, err := ghClient.FetchAlerts(ctx, target)
 		if err != nil {
@@ -161,88 +161,82 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 			continue
 		}
 
-		// 未評価・評価失敗のアラートだけ抽出
-		var newAlerts []model.Alert
+		newCount := 0
 		for _, alert := range alerts {
-			if s.NeedsEvaluation(alert.ID) {
-				newAlerts = append(newAlerts, alert)
+			if s.Has(alert.ID) {
+				continue
 			}
-		}
-
-		if len(newAlerts) == 0 {
-			continue
-		}
-
-		// 重要度順にソート（CRITICAL→HIGH→MEDIUM→LOW）
-		sort.Slice(newAlerts, func(i, j int) bool {
-			oi := severityOrder[newAlerts[i].Severity]
-			oj := severityOrder[newAlerts[j].Severity]
-			return oi < oj
-		})
-
-		slog.Info("新規アラート", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo),
-			"count", len(newAlerts), "max_eval_per_poll", maxEval, "eval_done_so_far", evalCount)
-
-		for _, alert := range newAlerts {
-			slog.Info("新規アラート検出", "id", alert.ID, "package", alert.PackageName, "severity", alert.Severity)
+			s.Save(&model.AlertRecord{
+				Alert:      alert,
+				State:      model.AlertStatePending,
+				EvalStatus: model.EvalStatusPending,
+				NotifiedAt: time.Now(),
+			})
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),
 				Level:     "info",
 				Message:   fmt.Sprintf("新規アラート: %s (%s) in %s/%s", alert.PackageName, alert.Severity, alert.Owner, alert.Repo),
 				AlertID:   alert.ID,
 			})
+			newCount++
+		}
+		if newCount > 0 {
+			slog.Info("新規アラート登録", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "count", newCount)
+		}
+	}
 
-			// AI評価（上限に達したらスキップ → 次回ポーリングで再試行）
-			if evalCount >= maxEval {
-				slog.Info("AI評価スキップ（上限到達）", "alertID", alert.ID, "max", maxEval)
-				continue
-			}
+	// Step2: pending/failed のレコードを重要度順に最大 maxEval 件 AI評価
+	pending := s.ListPendingEvaluation(maxEval)
 
-			// 評価開始前に「評価中」でレコード保存（WebUIに状態を反映）
-			s.Save(&model.AlertRecord{
-				Alert:      alert,
-				State:      model.AlertStatePending,
-				EvalStatus: model.EvalStatusEvaluating,
-				NotifiedAt: time.Now(),
+	// 重要度順にソート（CRITICAL→HIGH→MEDIUM→LOW）
+	sort.Slice(pending, func(i, j int) bool {
+		oi := severityOrder[pending[i].Alert.Severity]
+		oj := severityOrder[pending[j].Alert.Severity]
+		return oi < oj
+	})
+
+	slog.Info("AI評価開始", "count", len(pending), "max", maxEval)
+
+	for _, record := range pending {
+		alert := record.Alert
+		slog.Info("AI評価中", "id", alert.ID, "package", alert.PackageName, "severity", alert.Severity)
+
+		// 評価中マークを付ける
+		if err := s.UpdateEvalStatus(alert.ID, model.EvalStatusEvaluating); err != nil {
+			slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", err)
+			continue
+		}
+
+		evaluation, err := eval.Evaluate(ctx, alert)
+		if err != nil {
+			slog.Error("AI評価失敗", "alertID", alert.ID, "error", err)
+			s.AddLog(model.LogEntry{
+				Timestamp: time.Now(),
+				Level:     "error",
+				Message:   fmt.Sprintf("AI評価失敗 (#%d): %v", alert.ID, err),
+				AlertID:   alert.ID,
 			})
-
-			evaluation, err := eval.Evaluate(ctx, alert)
-			if err != nil {
-				slog.Error("AI評価失敗", "alertID", alert.ID, "error", err)
-				s.AddLog(model.LogEntry{
-					Timestamp: time.Now(),
-					Level:     "error",
-					Message:   fmt.Sprintf("AI評価失敗 (#%d): %v", alert.ID, err),
-					AlertID:   alert.ID,
-				})
-				if updateErr := s.UpdateEvalStatus(alert.ID, model.EvalStatusFailed); updateErr != nil {
-					slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", updateErr)
-				}
-				continue
+			if updateErr := s.UpdateEvalStatus(alert.ID, model.EvalStatusFailed); updateErr != nil {
+				slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", updateErr)
 			}
-			evalCount++
+			continue
+		}
 
-			record := &model.AlertRecord{
-				Alert:      alert,
-				Evaluation: evaluation,
-				State:      model.AlertStatePending,
-				EvalStatus: model.EvalStatusDone,
-				NotifiedAt: time.Now(),
+		record.Evaluation = evaluation
+		record.EvalStatus = model.EvalStatusDone
+		s.Save(record)
+
+		// Slack通知
+		if slackClient != nil {
+			if err := slackClient.Notify(record); err != nil {
+				slog.Error("Slack通知失敗", "alertID", alert.ID, "error", err)
 			}
-			s.Save(record)
+		}
 
-			// Slack通知
-			if slackClient != nil {
-				if err := slackClient.Notify(record); err != nil {
-					slog.Error("Slack通知失敗", "alertID", alert.ID, "error", err)
-				}
-			}
-
-			// Discord通知
-			if discordClient != nil {
-				if err := discordClient.Notify(record); err != nil {
-					slog.Error("Discord通知失敗", "alertID", alert.ID, "error", err)
-				}
+		// Discord通知
+		if discordClient != nil {
+			if err := discordClient.Notify(record); err != nil {
+				slog.Error("Discord通知失敗", "alertID", alert.ID, "error", err)
 			}
 		}
 	}

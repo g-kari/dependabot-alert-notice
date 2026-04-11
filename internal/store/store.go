@@ -235,6 +235,51 @@ func (s *Store) UpdateState(alertID int, state model.AlertState) error {
 	return nil
 }
 
+// ListPendingEvaluation はAI評価が必要なレコード（pending/failed）を最大limit件返す。
+func (s *Store) ListPendingEvaluation(limit int) []*model.AlertRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at
+		FROM alert_records
+		WHERE eval_status IN ('pending', 'failed')
+		LIMIT ?`, limit)
+	if err != nil {
+		slog.Error("評価待ちレコード取得失敗", "error", err)
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+
+	var records []*model.AlertRecord
+	for rows.Next() {
+		var alertJSON string
+		var evalJSON sql.NullString
+		var state, evalStatus string
+		var notifiedAt time.Time
+		var mergedAt sql.NullTime
+
+		if err := rows.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+			continue
+		}
+		var alert model.Alert
+		_ = json.Unmarshal([]byte(alertJSON), &alert)
+
+		record := &model.AlertRecord{
+			Alert:      alert,
+			State:      model.AlertState(state),
+			EvalStatus: model.EvalStatus(evalStatus),
+			NotifiedAt: notifiedAt,
+		}
+		if mergedAt.Valid {
+			t := mergedAt.Time
+			record.MergedAt = &t
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
 func (s *Store) UpdateEvalStatus(alertID int, status model.EvalStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
