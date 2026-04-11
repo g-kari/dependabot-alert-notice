@@ -14,7 +14,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Owner</th><th>Repo</th><th>除外リポジトリ</th><th></th></tr>
+        <tr><th>Owner</th><th>Repo</th><th>除外リポジトリ</th><th>操作</th></tr>
       </thead>
       <tbody>
         {{range $i, $t := .Config.Targets}}
@@ -37,7 +37,10 @@
             </form>
             {{end}}
           </td>
-          <td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap">
+            <form method="POST" action="/api/poll/target/{{$i}}">
+              <button type="submit" class="btn btn-ghost" style="padding:3px 10px;font-size:0.78rem">今すぐ取得</button>
+            </form>
             <form method="POST" action="/settings/targets/{{$i}}/delete">
               <button type="submit" class="btn btn-reject" style="padding:3px 10px;font-size:0.78rem">削除</button>
             </form>

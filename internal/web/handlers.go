@@ -258,6 +258,29 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handlePollTarget はWebUIから特定ターゲット1件のFetchJobをエンキューする
+func (s *Server) handlePollTarget(w http.ResponseWriter, r *http.Request) {
+	i, err := strconv.Atoi(r.PathValue("i"))
+	if err != nil {
+		http.Error(w, "不正なインデックス", http.StatusBadRequest)
+		return
+	}
+	s.cfgMu.RLock()
+	targets := s.cfg.Targets
+	s.cfgMu.RUnlock()
+	if i < 0 || i >= len(targets) {
+		http.Error(w, "インデックスが範囲外です", http.StatusBadRequest)
+		return
+	}
+	if s.jobQueue != nil {
+		s.jobQueue.Enqueue(queue.Job{
+			Type:    queue.JobFetchAlerts,
+			Payload: targets[i],
+		})
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
 // handleEnqueueEvaluate は指定アラートのAI評価をJobQueueに積む
 func (s *Server) handleEnqueueEvaluate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
