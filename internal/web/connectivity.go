@@ -142,7 +142,7 @@ func testTargets(ctx context.Context, ghPath string, targets []config.Target) []
 }
 
 func testRepoTarget(ctx context.Context, ghPath, owner, repo string) targetResult {
-	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts", owner, repo)
+	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
 	out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -157,7 +157,7 @@ func testRepoTarget(ctx context.Context, ghPath, owner, repo string) targetResul
 }
 
 func testOrgTarget(ctx context.Context, ghPath, owner string) targetResult {
-	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts", owner)
+	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open", owner)
 	out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").CombinedOutput()
 	if err != nil {
 		return targetResult{Owner: owner, OK: false, Message: strings.TrimSpace(string(out))}
@@ -185,7 +185,7 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 
 	total := 0
 	for _, repo := range repos {
-		endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts", owner, repo)
+		endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
 		out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
 		if err != nil {
 			continue
