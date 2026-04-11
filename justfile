@@ -34,6 +34,16 @@ run: stop
     fi
     tmux attach -t {{SESSION}}
 
+# ホットリロードで起動（air使用）+ トンネル
+dev: stop
+    tmux new-session -d -s {{SESSION}}
+    tmux send-keys -t {{SESSION}} 'eval "$(devbox shellenv)" && air' Enter
+    @if [ -f {{TUNNEL_CONFIG}} ]; then \
+        tmux split-window -h -t {{SESSION}}; \
+        tmux send-keys -t {{SESSION}} 'cloudflared tunnel --config {{TUNNEL_CONFIG}} run {{TUNNEL_NAME}}' Enter; \
+    fi
+    tmux attach -t {{SESSION}}
+
 run-once:
     eval "$(devbox shellenv)" && go run . -config config.yaml -once
 

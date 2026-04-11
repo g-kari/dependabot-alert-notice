@@ -43,6 +43,7 @@ type Config struct {
 	ClaudePath   string          `yaml:"claude_path"`
 	GhPath       string          `yaml:"gh_path"`
 	LogLevel     string          `yaml:"log_level"`
+	DataPath     string          `yaml:"data_path"`
 	Web          WebConfig       `yaml:"web"`
 	Evaluator    EvaluatorConfig `yaml:"evaluator"`
 }
@@ -69,6 +70,7 @@ func Load(path string) (*Config, error) {
 		ClaudePath:   "claude",
 		GhPath:       "gh",
 		LogLevel:     "info",
+		DataPath:     "store.db",
 		Web:          WebConfig{Port: 8999},
 		Evaluator: EvaluatorConfig{
 			Sandbox: SandboxConfig{

@@ -50,7 +50,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	s := store.New()
+	dataPath := cfg.DataPath
+	s, err := store.NewWithPath(dataPath)
+	if err != nil {
+		slog.Error("ストア初期化失敗", "path", dataPath, "error", err)
+		os.Exit(1)
+	}
 	ghClient := github.New(cfg)
 	eval := evaluator.New(cfg)
 	m := merger.New(cfg, s, ghClient)
