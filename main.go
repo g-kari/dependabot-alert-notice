@@ -60,6 +60,10 @@ func main() {
 		slog.Error("ストア初期化失敗", "path", dataPath, "error", err)
 		os.Exit(1)
 	}
+
+	// ストア初期化後にslogハンドラを差し替えてWebUIログにも出力
+	slog.SetDefault(slog.New(store.NewStoreLogHandler(slog.Default().Handler(), s)))
+
 	ghClient := github.New(cfg)
 	eval := evaluator.New(cfg)
 	m := merger.New(cfg, s, ghClient)
