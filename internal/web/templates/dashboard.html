@@ -1,4 +1,7 @@
 {{define "content"}}
+{{if .HasEvaluating}}
+<script>setTimeout(function(){ location.reload(); }, 5000);</script>
+{{end}}
 <div class="dashboard-header">
   <h1>Dependabot アラート一覧</h1>
   <div class="dashboard-actions">
@@ -48,8 +51,12 @@
             <td>
               {{if .Evaluation}}
               <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+              {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
+              <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
+              {{else if eq (printf "%s" .EvalStatus) "failed"}}
+              <span class="badge badge-error">❌ 評価失敗</span>
               {{else}}
-              <span class="badge badge-pending">評価中</span>
+              <span class="badge badge-pending">未評価</span>
               {{end}}
             </td>
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>

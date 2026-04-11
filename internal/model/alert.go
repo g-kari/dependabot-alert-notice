@@ -44,10 +44,20 @@ const (
 	AlertStateMerged   AlertState = "merged"
 )
 
+type EvalStatus string
+
+const (
+	EvalStatusPending    EvalStatus = "pending"    // 評価待ち（まだ処理されていない）
+	EvalStatusEvaluating EvalStatus = "evaluating" // AI評価中
+	EvalStatusDone       EvalStatus = "done"       // AI評価完了
+	EvalStatusFailed     EvalStatus = "failed"     // AI評価失敗
+)
+
 type AlertRecord struct {
 	Alert      Alert
 	Evaluation *Evaluation
 	State      AlertState
+	EvalStatus EvalStatus
 	NotifiedAt time.Time
 	MergedAt   *time.Time
 }

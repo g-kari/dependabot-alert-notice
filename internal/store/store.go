@@ -57,10 +57,16 @@ func (s *Store) migrate() error {
 		alert_json    TEXT NOT NULL,
 		eval_json     TEXT,
 		state         TEXT NOT NULL,
+		eval_status   TEXT NOT NULL DEFAULT 'done',
 		notified_at   DATETIME NOT NULL,
 		merged_at     DATETIME
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	// 既存DBへのカラム追加（エラーは無視: すでに存在する場合）
+	_, _ = s.db.Exec(`ALTER TABLE alert_records ADD COLUMN eval_status TEXT NOT NULL DEFAULT 'done'`)
+	return nil
 }
 
 func (s *Store) Save(record *model.AlertRecord) {
@@ -80,15 +86,21 @@ func (s *Store) Save(record *model.AlertRecord) {
 		mergedAt = sql.NullTime{Time: *record.MergedAt, Valid: true}
 	}
 
+	evalStatus := string(record.EvalStatus)
+	if evalStatus == "" {
+		evalStatus = string(model.EvalStatusDone)
+	}
+
 	_, err := s.db.Exec(`INSERT OR REPLACE INTO alert_records
-		(id, owner, repo, alert_json, eval_json, state, notified_at, merged_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, owner, repo, alert_json, eval_json, state, eval_status, notified_at, merged_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.Alert.ID,
 		record.Alert.Owner,
 		record.Alert.Repo,
 		string(alertJSON),
 		evalJSON,
 		string(record.State),
+		evalStatus,
 		record.NotifiedAt,
 		mergedAt,
 	)
@@ -104,16 +116,17 @@ func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
 }
 
 func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
-	row := s.db.QueryRow(`SELECT alert_json, eval_json, state, notified_at, merged_at
+	row := s.db.QueryRow(`SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at
 		FROM alert_records WHERE id = ?`, alertID)
 
 	var alertJSON string
 	var evalJSON sql.NullString
 	var state string
+	var evalStatus string
 	var notifiedAt time.Time
 	var mergedAt sql.NullTime
 
-	if err := row.Scan(&alertJSON, &evalJSON, &state, &notifiedAt, &mergedAt); err != nil {
+	if err := row.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("アラートID %d が見つかりません", alertID)
 		}
@@ -133,6 +146,7 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 		Alert:      alert,
 		Evaluation: eval,
 		State:      model.AlertState(state),
+		EvalStatus: model.EvalStatus(evalStatus),
 		NotifiedAt: notifiedAt,
 	}
 	if mergedAt.Valid {
@@ -146,7 +160,7 @@ func (s *Store) List() []*model.AlertRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT alert_json, eval_json, state, notified_at, merged_at FROM alert_records`)
+	rows, err := s.db.Query(`SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at FROM alert_records`)
 	if err != nil {
 		slog.Error("レコード一覧取得失敗", "error", err)
 		return nil
@@ -158,10 +172,11 @@ func (s *Store) List() []*model.AlertRecord {
 		var alertJSON string
 		var evalJSON sql.NullString
 		var state string
+		var evalStatus string
 		var notifiedAt time.Time
 		var mergedAt sql.NullTime
 
-		if err := rows.Scan(&alertJSON, &evalJSON, &state, &notifiedAt, &mergedAt); err != nil {
+		if err := rows.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
 			continue
 		}
 
@@ -178,6 +193,7 @@ func (s *Store) List() []*model.AlertRecord {
 			Alert:      alert,
 			Evaluation: eval,
 			State:      model.AlertState(state),
+			EvalStatus: model.EvalStatus(evalStatus),
 			NotifiedAt: notifiedAt,
 		}
 		if mergedAt.Valid {
@@ -217,6 +233,39 @@ func (s *Store) UpdateState(alertID int, state model.AlertState) error {
 		return fmt.Errorf("アラートID %d が見つかりません", alertID)
 	}
 	return nil
+}
+
+func (s *Store) UpdateEvalStatus(alertID int, status model.EvalStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE alert_records SET eval_status = ? WHERE id = ?`,
+		string(status), alertID)
+	if err != nil {
+		return fmt.Errorf("eval_status更新失敗: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("アラートID %d が見つかりません", alertID)
+	}
+	return nil
+}
+
+// NeedsEvaluation はアラートがAI評価を必要とするかどうかを返す。
+// レコードが存在しない場合、または評価失敗(failed)の場合にtrueを返す。
+func (s *Store) NeedsEvaluation(alertID int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var evalStatus string
+	err := s.db.QueryRow(`SELECT eval_status FROM alert_records WHERE id = ?`, alertID).Scan(&evalStatus)
+	if err == sql.ErrNoRows {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	return model.EvalStatus(evalStatus) == model.EvalStatusFailed
 }
 
 func (s *Store) AddLog(entry model.LogEntry) {

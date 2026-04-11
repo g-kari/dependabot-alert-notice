@@ -96,6 +96,100 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestEvalStatusSaveAndGet(t *testing.T) {
+	s := New()
+
+	record := &model.AlertRecord{
+		Alert:      model.Alert{ID: 10, PackageName: "axios"},
+		State:      model.AlertStatePending,
+		EvalStatus: model.EvalStatusEvaluating,
+		NotifiedAt: time.Now(),
+	}
+	s.Save(record)
+
+	got, err := s.Get(10)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.EvalStatus != model.EvalStatusEvaluating {
+		t.Errorf("EvalStatus = %q, want %q", got.EvalStatus, model.EvalStatusEvaluating)
+	}
+}
+
+func TestUpdateEvalStatus(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{ID: 20},
+		State:      model.AlertStatePending,
+		EvalStatus: model.EvalStatusEvaluating,
+	})
+
+	if err := s.UpdateEvalStatus(20, model.EvalStatusFailed); err != nil {
+		t.Fatalf("UpdateEvalStatus() error = %v", err)
+	}
+
+	got, _ := s.Get(20)
+	if got.EvalStatus != model.EvalStatusFailed {
+		t.Errorf("EvalStatus = %q, want %q", got.EvalStatus, model.EvalStatusFailed)
+	}
+}
+
+func TestUpdateEvalStatusNotFound(t *testing.T) {
+	s := New()
+	err := s.UpdateEvalStatus(999, model.EvalStatusDone)
+	if err == nil {
+		t.Error("UpdateEvalStatus() should return error for non-existent ID")
+	}
+}
+
+func TestNeedsEvaluation(t *testing.T) {
+	s := New()
+
+	// 存在しない → true
+	if !s.NeedsEvaluation(1) {
+		t.Error("NeedsEvaluation() should return true for non-existent alert")
+	}
+
+	// evaluating → false（評価中はスキップ）
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusEvaluating})
+	if s.NeedsEvaluation(1) {
+		t.Error("NeedsEvaluation() should return false for evaluating alert")
+	}
+
+	// done → false
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusDone})
+	if s.NeedsEvaluation(2) {
+		t.Error("NeedsEvaluation() should return false for done alert")
+	}
+
+	// failed → true（再試行対象）
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 3}, EvalStatus: model.EvalStatusFailed})
+	if !s.NeedsEvaluation(3) {
+		t.Error("NeedsEvaluation() should return true for failed alert")
+	}
+}
+
+func TestListIncludesEvalStatus(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusEvaluating})
+	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusFailed})
+
+	list := s.List()
+	if len(list) != 2 {
+		t.Fatalf("List() len = %d, want 2", len(list))
+	}
+	statuses := map[int]model.EvalStatus{}
+	for _, r := range list {
+		statuses[r.Alert.ID] = r.EvalStatus
+	}
+	if statuses[1] != model.EvalStatusEvaluating {
+		t.Errorf("id=1 EvalStatus = %q, want evaluating", statuses[1])
+	}
+	if statuses[2] != model.EvalStatusFailed {
+		t.Errorf("id=2 EvalStatus = %q, want failed", statuses[2])
+	}
+}
+
 func TestAddLogAndListLogs(t *testing.T) {
 	s := New()
 	s.AddLog(model.LogEntry{Timestamp: time.Now(), Level: "info", Message: "test1"})

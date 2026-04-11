@@ -1,41 +1,68 @@
 {{define "content"}}
-<h1>アラート #{{.Alert.ID}}: {{.Alert.PackageName}}</h1>
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.25rem">
+  <a href="/" class="btn btn-ghost" style="padding:5px 12px;font-size:0.82rem">← 戻る</a>
+  <h1 style="margin:0">アラート #{{.Alert.ID}}: {{.Alert.PackageName}}</h1>
+</div>
 
 <div class="card">
-    <h2 style="margin-bottom:12px">アラート情報</h2>
+  <h2 style="margin-bottom:14px">アラート情報</h2>
+  <div class="table-wrap">
     <table>
-        <tr><th style="width:200px">パッケージ</th><td>{{.Alert.PackageName}} ({{.Alert.PackageEcosystem}})</td></tr>
+      <tbody>
+        <tr><th style="width:160px">パッケージ</th><td>{{.Alert.PackageName}} <span style="color:var(--color-muted)">({{.Alert.PackageEcosystem}})</span></td></tr>
         <tr><th>リポジトリ</th><td>{{.Alert.Owner}}/{{.Alert.Repo}}</td></tr>
         <tr><th>重要度</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td></tr>
-        <tr><th>CVE</th><td>{{.Alert.CVEID}}</td></tr>
+        <tr><th>CVE</th><td style="font-family:monospace">{{.Alert.CVEID}}</td></tr>
         <tr><th>CVSS</th><td>{{printf "%.1f" .Alert.CVSSScore}}</td></tr>
         <tr><th>概要</th><td>{{.Alert.Summary}}</td></tr>
         <tr><th>修正バージョン</th><td>{{.Alert.FixedIn}}</td></tr>
         <tr><th>ステータス</th><td><span class="badge badge-{{.State}}">{{.State}}</span></td></tr>
-        <tr><th>GitHub</th><td><a href="{{.Alert.HTMLURL}}" target="_blank">開く</a></td></tr>
+        <tr><th>GitHub</th><td><a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener">↗ 開く</a></td></tr>
+      </tbody>
     </table>
+  </div>
 </div>
 
 {{if .Evaluation}}
 <div class="card">
-    <h2 style="margin-bottom:12px">AI評価</h2>
+  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <div class="table-wrap">
     <table>
-        <tr><th style="width:200px">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
-        <tr><th>推奨</th><td>{{.Evaluation.Recommendation}}</td></tr>
+      <tbody>
+        <tr><th style="width:160px">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
+        <tr><th>推奨アクション</th><td><strong>{{.Evaluation.Recommendation}}</strong></td></tr>
         <tr><th>影響</th><td>{{.Evaluation.Impact}}</td></tr>
         <tr><th>理由</th><td>{{.Evaluation.Reasoning}}</td></tr>
+      </tbody>
     </table>
+  </div>
+</div>
+{{else if eq (printf "%s" .EvalStatus) "evaluating"}}
+<div class="card">
+  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <div class="msg">
+    <span class="badge badge-pending eval-spinning">⏳ AI評価中...</span>
+    <span style="margin-left:8px;color:var(--color-muted);font-size:0.88rem">しばらくお待ちください（自動更新されます）</span>
+  </div>
+</div>
+<script>setTimeout(function(){ location.reload(); }, 5000);</script>
+{{else if eq (printf "%s" .EvalStatus) "failed"}}
+<div class="card">
+  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <div class="msg msg-error">
+    ❌ AI評価に失敗しました。次回のポーリングで再試行されます。
+  </div>
 </div>
 {{end}}
 
 {{if eq (printf "%s" .State) "pending"}}
-<div style="margin-top:16px">
-    <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
-        <button type="submit" class="btn btn-approve">✅ マージ承認</button>
-    </form>
-    <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline;margin-left:8px">
-        <button type="submit" class="btn btn-reject">❌ 却下</button>
-    </form>
+<div style="display:flex;gap:10px;margin-top:4px">
+  <form method="POST" action="/alerts/{{.Alert.ID}}/approve">
+    <button type="submit" class="btn btn-approve">✅ マージ承認</button>
+  </form>
+  <form method="POST" action="/alerts/{{.Alert.ID}}/reject">
+    <button type="submit" class="btn btn-reject">❌ 却下</button>
+  </form>
 </div>
 {{end}}
 {{end}}

@@ -161,10 +161,10 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 			continue
 		}
 
-		// 未処理アラートだけ抽出
+		// 未評価・評価失敗のアラートだけ抽出
 		var newAlerts []model.Alert
 		for _, alert := range alerts {
-			if !s.Has(alert.ID) {
+			if s.NeedsEvaluation(alert.ID) {
 				newAlerts = append(newAlerts, alert)
 			}
 		}
@@ -198,6 +198,14 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 				continue
 			}
 
+			// 評価開始前に「評価中」でレコード保存（WebUIに状態を反映）
+			s.Save(&model.AlertRecord{
+				Alert:      alert,
+				State:      model.AlertStatePending,
+				EvalStatus: model.EvalStatusEvaluating,
+				NotifiedAt: time.Now(),
+			})
+
 			evaluation, err := eval.Evaluate(ctx, alert)
 			if err != nil {
 				slog.Error("AI評価失敗", "alertID", alert.ID, "error", err)
@@ -207,7 +215,9 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 					Message:   fmt.Sprintf("AI評価失敗 (#%d): %v", alert.ID, err),
 					AlertID:   alert.ID,
 				})
-				// 評価失敗でもレコード保存（次回ポーリングでスキップされてしまうのを避けるため保存しない）
+				if updateErr := s.UpdateEvalStatus(alert.ID, model.EvalStatusFailed); updateErr != nil {
+					slog.Error("eval_status更新失敗", "alertID", alert.ID, "error", updateErr)
+				}
 				continue
 			}
 			evalCount++
@@ -216,6 +226,7 @@ func pollOnce(ctx context.Context, cfg *config.Config, ghClient github.Client, e
 				Alert:      alert,
 				Evaluation: evaluation,
 				State:      model.AlertStatePending,
+				EvalStatus: model.EvalStatusDone,
 				NotifiedAt: time.Now(),
 			}
 			s.Save(record)

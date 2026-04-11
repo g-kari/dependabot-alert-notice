@@ -139,10 +139,19 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	records := filterByConfig(s.store.List(), cfg)
 	groups := groupByCVE(records)
 
+	hasEvaluating := false
+	for _, r := range records {
+		if r.EvalStatus == model.EvalStatusEvaluating {
+			hasEvaluating = true
+			break
+		}
+	}
+
 	s.render(w, "dashboard.html", struct {
-		Groups    []CVEGroup
-		IsPolling bool
-	}{Groups: groups, IsPolling: polling})
+		Groups        []CVEGroup
+		IsPolling     bool
+		HasEvaluating bool
+	}{Groups: groups, IsPolling: polling, HasEvaluating: hasEvaluating})
 }
 
 // handlePoll はWebUIから手動でDependabotアラートのポーリングをトリガーする
