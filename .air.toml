@@ -5,8 +5,8 @@ tmp_dir = "tmp"
 cmd = "go build -o ./tmp/dependabot-alert-notice ."
 bin = "./tmp/dependabot-alert-notice"
 args_bin = ["-config", "config.yaml"]
-include_ext = ["go"]
-exclude_dir = ["tmp", "bin", "internal/web/templates"]
+include_ext = ["go", "html"]
+exclude_dir = ["tmp", "bin"]
 delay = 500
 kill_delay = 500
 
