@@ -18,13 +18,16 @@ import (
 var templateFS embed.FS
 
 type Server struct {
-	port    int
-	store   *store.Store
-	merger  merger.Interface
-	server  *http.Server
-	cfg     *config.Config
-	cfgPath string
-	cfgMu   sync.RWMutex
+	port      int
+	store     *store.Store
+	merger    merger.Interface
+	server    *http.Server
+	cfg       *config.Config
+	cfgPath   string
+	cfgMu     sync.RWMutex
+	pollFn    func()
+	isPolling bool
+	pollingMu sync.Mutex
 }
 
 func New(cfg *config.Config, cfgPath string, s *store.Store, m merger.Interface) *Server {
@@ -35,6 +38,11 @@ func New(cfg *config.Config, cfgPath string, s *store.Store, m merger.Interface)
 		cfg:     cfg,
 		cfgPath: cfgPath,
 	}
+}
+
+// SetPollFn はWebUIから手動ポーリングを実行するための関数をセットする
+func (s *Server) SetPollFn(fn func()) {
+	s.pollFn = fn
 }
 
 // render はlayout.html + 指定ページテンプレートをペアでパースして実行する。
@@ -68,6 +76,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /settings/connectivity", s.handleConnectivity)
 	mux.HandleFunc("POST /api/connectivity-test", s.handleConnectivityTest)
 	mux.HandleFunc("GET /api/connectivity-stream", s.handleConnectivityStream)
+	mux.HandleFunc("POST /api/poll", s.handlePoll)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),

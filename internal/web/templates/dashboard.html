@@ -1,7 +1,17 @@
 {{define "content"}}
 <div class="dashboard-header">
   <h1>Dependabot アラート一覧</h1>
-  <a href="/" class="btn btn-ghost">🔄 更新</a>
+  <div class="dashboard-actions">
+    {{if .IsPolling}}
+    <span class="badge badge-pending polling-badge">⏳ 取得中...</span>
+    <a href="/" class="btn btn-ghost">🔄 更新</a>
+    {{else}}
+    <form method="POST" action="/api/poll" style="display:inline">
+      <button type="submit" class="btn btn-primary">⬇️ 今すぐ取得</button>
+    </form>
+    <a href="/" class="btn btn-ghost">🔄 更新</a>
+    {{end}}
+  </div>
 </div>
 
 {{if .Groups}}

@@ -132,12 +132,45 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg
 	s.cfgMu.RUnlock()
 
+	s.pollingMu.Lock()
+	polling := s.isPolling
+	s.pollingMu.Unlock()
+
 	records := filterByConfig(s.store.List(), cfg)
 	groups := groupByCVE(records)
 
 	s.render(w, "dashboard.html", struct {
-		Groups []CVEGroup
-	}{Groups: groups})
+		Groups    []CVEGroup
+		IsPolling bool
+	}{Groups: groups, IsPolling: polling})
+}
+
+// handlePoll はWebUIから手動でDependabotアラートのポーリングをトリガーする
+func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
+	if s.pollFn == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	s.pollingMu.Lock()
+	if s.isPolling {
+		s.pollingMu.Unlock()
+		http.Error(w, "ポーリング実行中です", http.StatusConflict)
+		return
+	}
+	s.isPolling = true
+	s.pollingMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.pollingMu.Lock()
+			s.isPolling = false
+			s.pollingMu.Unlock()
+		}()
+		s.pollFn()
+	}()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {

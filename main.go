@@ -62,14 +62,6 @@ func main() {
 	eval := evaluator.New(cfg)
 	m := merger.New(cfg, s, ghClient)
 
-	// WebUIサーバー起動
-	webSrv := web.New(cfg, *configPath, s, m)
-	go func() {
-		if err := webSrv.Start(ctx); err != nil {
-			slog.Error("WebUIサーバー停止", "error", err)
-		}
-	}()
-
 	// Slack Socket Mode起動（トークンが設定されている場合のみ）
 	var slackClient *slack.SlackClient
 	if cfg.Slack.BotToken != "" && cfg.Slack.AppToken != "" {
@@ -87,6 +79,17 @@ func main() {
 	} else {
 		slog.Warn("Discord Webhook URL未設定のためDiscord通知無効")
 	}
+
+	// WebUIサーバー起動
+	webSrv := web.New(cfg, *configPath, s, m)
+	webSrv.SetPollFn(func() {
+		pollOnce(ctx, cfg, ghClient, eval, s, slackClient, discordClient)
+	})
+	go func() {
+		if err := webSrv.Start(ctx); err != nil {
+			slog.Error("WebUIサーバー停止", "error", err)
+		}
+	}()
 
 	// ポーリングループ
 	if *once {
