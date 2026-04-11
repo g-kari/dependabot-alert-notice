@@ -1,0 +1,184 @@
+{{define "content"}}
+<h1>⚙️ 設定</h1>
+
+{{if .Error}}
+<div style="background:#3d1f1f;border:1px solid #f85149;border-radius:6px;padding:12px 16px;margin-bottom:16px;color:#f85149;">
+  ❌ {{.Error}}
+</div>
+{{end}}
+
+{{if .Flash}}
+<div style="background:#1f3d1f;border:1px solid #3fb950;border-radius:6px;padding:12px 16px;margin-bottom:16px;color:#3fb950;">
+  ✅ {{.Flash}}
+</div>
+{{end}}
+
+{{/* 監視ターゲット */}}
+<div class="card">
+  <h2 style="margin-bottom:16px">📌 監視ターゲット</h2>
+  <table>
+    <thead>
+      <tr><th>Owner</th><th>Repo</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range $i, $t := .Config.Targets}}
+      <tr>
+        <td>{{$t.Owner}}</td>
+        <td>{{if $t.Repo}}{{$t.Repo}}{{else}}<span style="color:#8b949e">（org全体）</span>{{end}}</td>
+        <td>
+          <form method="POST" action="/settings/targets/{{$i}}/delete" style="display:inline">
+            <button type="submit" class="btn btn-reject" style="padding:3px 10px;font-size:0.8em">削除</button>
+          </form>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="3" style="text-align:center;color:#8b949e">ターゲットなし</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <form method="POST" action="/settings/targets/add" style="margin-top:16px;display:flex;gap:8px;align-items:flex-end">
+    <div>
+      <label style="display:block;font-size:0.85em;color:#8b949e;margin-bottom:4px">Owner <span style="color:#f85149">*</span></label>
+      <input type="text" name="owner" placeholder="your-org" required
+        style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:180px">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.85em;color:#8b949e;margin-bottom:4px">Repo <span style="color:#8b949e">（省略でorg全体）</span></label>
+      <input type="text" name="repo" placeholder="your-repo"
+        style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:180px">
+    </div>
+    <button type="submit" class="btn btn-approve">＋ 追加</button>
+  </form>
+</div>
+
+{{/* メイン設定フォーム */}}
+<form method="POST" action="/settings">
+<div class="card">
+  <h2 style="margin-bottom:16px">🔄 ポーリング</h2>
+  <table>
+    <tr>
+      <th style="width:200px">ポーリング間隔</th>
+      <td>
+        <input type="text" name="poll_interval" value="{{.Config.PollInterval}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:120px">
+        <span style="color:#8b949e;font-size:0.85em;margin-left:8px">例: 30m, 1h, 5m</span>
+      </td>
+    </tr>
+    <tr>
+      <th>ログレベル</th>
+      <td>
+        <select name="log_level" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9">
+            <option value="debug" {{if eq .Config.LogLevel "debug"}}selected{{end}}>debug</option>
+          <option value="info"  {{if eq .Config.LogLevel "info"}}selected{{end}}>info</option>
+          <option value="warn"  {{if eq .Config.LogLevel "warn"}}selected{{end}}>warn</option>
+          <option value="error" {{if eq .Config.LogLevel "error"}}selected{{end}}>error</option>
+        </select>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-bottom:16px">💬 Slack</h2>
+  <table>
+    <tr>
+      <th style="width:200px">チャンネルID</th>
+      <td>
+        <input type="text" name="slack_channel_id" value="{{.Config.Slack.ChannelID}}" placeholder="C0123456789"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:220px">
+      </td>
+    </tr>
+    <tr>
+      <th>SLACK_BOT_TOKEN</th>
+      <td>
+        {{if .EnvBotToken}}
+        <span style="color:#3fb950">✅ 環境変数で設定済み</span>
+        {{else}}
+        <span style="color:#f85149">⚠️ 未設定（環境変数 SLACK_BOT_TOKEN で設定してください）</span>
+        {{end}}
+      </td>
+    </tr>
+    <tr>
+      <th>SLACK_APP_TOKEN</th>
+      <td>
+        {{if .EnvAppToken}}
+        <span style="color:#3fb950">✅ 環境変数で設定済み</span>
+        {{else}}
+        <span style="color:#f85149">⚠️ 未設定（環境変数 SLACK_APP_TOKEN で設定してください）</span>
+        {{end}}
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-bottom:16px">🤖 Claude / GitHub CLI</h2>
+  <table>
+    <tr>
+      <th style="width:200px">claude パス</th>
+      <td>
+        <input type="text" name="claude_path" value="{{.Config.ClaudePath}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:280px">
+      </td>
+    </tr>
+    <tr>
+      <th>gh パス</th>
+      <td>
+        <input type="text" name="gh_path" value="{{.Config.GhPath}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:280px">
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-bottom:16px">🐳 Evaluator サンドボックス</h2>
+  <table>
+    <tr>
+      <th style="width:200px">Docker隔離</th>
+      <td>
+        <select name="sandbox_enabled" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9">
+          <option value="true"  {{if .Config.Evaluator.Sandbox.Enabled}}selected{{end}}>有効（推奨）</option>
+          <option value="false" {{if not .Config.Evaluator.Sandbox.Enabled }}selected{{end}}>無効</option>
+        </select>
+      </td>
+    </tr>
+    <tr>
+      <th>イメージ</th>
+      <td>
+        <input type="text" name="sandbox_image" value="{{.Config.Evaluator.Sandbox.Image}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:280px">
+      </td>
+    </tr>
+    <tr>
+      <th>メモリ制限</th>
+      <td>
+        <input type="text" name="sandbox_memory" value="{{.Config.Evaluator.Sandbox.MemoryLimit}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:120px">
+      </td>
+    </tr>
+    <tr>
+      <th>CPU制限</th>
+      <td>
+        <input type="text" name="sandbox_cpu" value="{{.Config.Evaluator.Sandbox.CPULimit}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:120px">
+      </td>
+    </tr>
+    <tr>
+      <th>タイムアウト</th>
+      <td>
+        <input type="text" name="sandbox_timeout" value="{{.Config.Evaluator.Sandbox.Timeout}}"
+          style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#c9d1d9;width:120px">
+        <span style="color:#8b949e;font-size:0.85em;margin-left:8px">例: 60s, 2m</span>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div style="margin-top:8px">
+  <button type="submit" class="btn btn-approve" style="padding:8px 24px;font-size:1em">💾 保存</button>
+  <span style="color:#8b949e;font-size:0.85em;margin-left:12px">※ ポーリング間隔・ターゲットの変更は次のポーリングから反映されます</span>
+</div>
+</form>
+{{end}}

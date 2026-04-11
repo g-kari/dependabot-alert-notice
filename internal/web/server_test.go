@@ -48,7 +48,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store, *mockMerger) {
 	s := store.New()
 	m := &mockMerger{}
 	cfg := &config.Config{Web: config.WebConfig{Port: 0}}
-	srv := New(cfg, s, m)
+	srv := New(cfg, "", s, m)
 	return srv, s, m
 }
 
@@ -283,5 +283,147 @@ func TestLogs_WithEntries(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "テストログメッセージ") {
 		t.Error("response should contain log message")
+	}
+}
+
+// TestSettings_Get は設定ページが200を返すことを確認
+func TestSettings_Get(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	w := httptest.NewRecorder()
+	srv.handleSettings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "設定") {
+		t.Error("response should contain '設定'")
+	}
+}
+
+// TestSettings_Save は設定保存後にリダイレクトされることを確認
+func TestSettings_Save(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		PollInterval: 30 * time.Minute,
+		LogLevel:     "info",
+		ClaudePath:   "claude",
+		GhPath:       "gh",
+		Slack:        config.SlackConfig{ChannelID: "C123"},
+		Evaluator: config.EvaluatorConfig{
+			Sandbox: config.SandboxConfig{
+				Enabled:     true,
+				Image:       "test-image",
+				MemoryLimit: "512m",
+				CPULimit:    "0.5",
+				Timeout:     60 * time.Second,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(
+		"poll_interval=5m&log_level=debug&claude_path=claude&gh_path=gh&slack_channel_id=C456&sandbox_enabled=true&sandbox_image=test-image&sandbox_memory=512m&sandbox_cpu=0.5&sandbox_timeout=60s",
+	))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleSettingsSave(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if srv.cfg.PollInterval != 5*time.Minute {
+		t.Errorf("PollInterval = %v, want 5m", srv.cfg.PollInterval)
+	}
+	if srv.cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want debug", srv.cfg.LogLevel)
+	}
+	if srv.cfg.Slack.ChannelID != "C456" {
+		t.Errorf("ChannelID = %q, want C456", srv.cfg.Slack.ChannelID)
+	}
+}
+
+// TestTargetAdd はターゲット追加後にリダイレクトされることを確認
+func TestTargetAdd(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{}
+
+	req := httptest.NewRequest(http.MethodPost, "/settings/targets/add", strings.NewReader("owner=myorg&repo=myrepo"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleTargetAdd(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if len(srv.cfg.Targets) != 1 {
+		t.Fatalf("Targets len = %d, want 1", len(srv.cfg.Targets))
+	}
+	if srv.cfg.Targets[0].Owner != "myorg" || srv.cfg.Targets[0].Repo != "myrepo" {
+		t.Errorf("Targets[0] = %+v", srv.cfg.Targets[0])
+	}
+}
+
+// TestTargetAdd_EmptyOwner はownerが空のとき追加せずリダイレクトされることを確認
+func TestTargetAdd_EmptyOwner(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{}
+
+	req := httptest.NewRequest(http.MethodPost, "/settings/targets/add", strings.NewReader("owner=&repo=myrepo"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleTargetAdd(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if len(srv.cfg.Targets) != 0 {
+		t.Error("Targets should be empty when owner is missing")
+	}
+}
+
+// TestTargetDelete はターゲット削除が正しく動くことを確認
+func TestTargetDelete(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		Targets: []config.Target{
+			{Owner: "org1", Repo: "repo1"},
+			{Owner: "org2", Repo: "repo2"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/settings/targets/0/delete", nil)
+	req.SetPathValue("i", "0")
+	w := httptest.NewRecorder()
+	srv.handleTargetDelete(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if len(srv.cfg.Targets) != 1 {
+		t.Fatalf("Targets len = %d, want 1", len(srv.cfg.Targets))
+	}
+	if srv.cfg.Targets[0].Owner != "org2" {
+		t.Errorf("Targets[0].Owner = %q, want org2", srv.cfg.Targets[0].Owner)
+	}
+}
+
+// TestTargetDelete_InvalidIndex は範囲外インデックスを無視することを確認
+func TestTargetDelete_InvalidIndex(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		Targets: []config.Target{{Owner: "org1"}},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/settings/targets/99/delete", nil)
+	req.SetPathValue("i", "99")
+	w := httptest.NewRecorder()
+	srv.handleTargetDelete(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if len(srv.cfg.Targets) != 1 {
+		t.Error("Targets should not be changed for out-of-range index")
 	}
 }

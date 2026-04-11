@@ -47,6 +47,17 @@ type Config struct {
 	Evaluator    EvaluatorConfig `yaml:"evaluator"`
 }
 
+func Save(path string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("設定シリアライズ失敗: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("設定ファイル書き込み失敗: %w", err)
+	}
+	return nil
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

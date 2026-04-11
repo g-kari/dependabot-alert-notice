@@ -56,7 +56,7 @@ func main() {
 	m := merger.New(cfg, s, ghClient)
 
 	// WebUIサーバー起動
-	webSrv := web.New(cfg, s, m)
+	webSrv := web.New(cfg, *configPath, s, m)
 	go func() {
 		if err := webSrv.Start(ctx); err != nil {
 			slog.Error("WebUIサーバー停止", "error", err)
