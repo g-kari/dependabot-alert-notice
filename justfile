@@ -1,16 +1,18 @@
+set shell := ["bash", "-c"]
+
 default: build
 
 build:
-    go build -o bin/dependabot-alert-notice .
+    eval "$(devbox shellenv)" && go build -o bin/dependabot-alert-notice .
 
 test:
-    go test ./... -v -race -count=1
+    eval "$(devbox shellenv)" && go test ./... -v -race -count=1
 
 vet:
-    go vet ./...
+    eval "$(devbox shellenv)" && go vet ./...
 
 lint: vet
-    golangci-lint run ./...
+    eval "$(devbox shellenv)" && golangci-lint run ./...
 
 PORT := "8999"
 
@@ -20,10 +22,10 @@ stop:
 
 # ビルドして再起動（古いプロセスを自動停止）
 run: stop
-    go run . -config config.yaml
+    eval "$(devbox shellenv)" && go run . -config config.yaml
 
 run-once:
-    go run . -config config.yaml -once
+    eval "$(devbox shellenv)" && go run . -config config.yaml -once
 
 build-evaluator-image:
     docker build -f Dockerfile.evaluator -t dependabot-evaluator:latest .
@@ -51,10 +53,10 @@ tunnel-quick:
     cloudflared tunnel --url http://localhost:8999
 
 install-hooks:
-    pre-commit install
+    eval "$(devbox shellenv)" && pre-commit install
 
 # Go依存関係を最新に更新してテストを通す
 update:
-    go get -u ./...
-    go mod tidy
-    go test ./... -count=1 -race
+    eval "$(devbox shellenv)" && go get -u ./...
+    eval "$(devbox shellenv)" && go mod tidy
+    eval "$(devbox shellenv)" && go test ./... -count=1 -race
