@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strconv"
 
-	"github.com/slack-go/slack/socketmode"
 	slackgo "github.com/slack-go/slack"
+	"github.com/slack-go/slack/socketmode"
 )
 
 func (c *SlackClient) handleEvents(ctx context.Context) {

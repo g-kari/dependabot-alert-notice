@@ -1,6 +1,13 @@
 repos:
   - repo: local
     hooks:
+      - id: go-fmt
+        name: gofmt
+        language: system
+        entry: bash -c 'eval "$(devbox shellenv --recompute 2>/dev/null)" && unformatted=$(gofmt -l .); [ -z "$unformatted" ] || (echo "gofmt が必要なファイル:"; echo "$unformatted"; exit 1)'
+        pass_filenames: false
+        types: [go]
+
       - id: go-vet
         name: go vet
         language: system

@@ -27,10 +27,10 @@ func New(cfg *config.Config) Client {
 }
 
 type ghAlert struct {
-	Number    int    `json:"number"`
-	State     string `json:"state"`
-	HTMLURL   string `json:"html_url"`
-	CreatedAt string `json:"created_at"`
+	Number           int    `json:"number"`
+	State            string `json:"state"`
+	HTMLURL          string `json:"html_url"`
+	CreatedAt        string `json:"created_at"`
 	SecurityAdvisory struct {
 		Summary string `json:"summary"`
 		CVEs    []struct {
@@ -42,7 +42,7 @@ type ghAlert struct {
 			Name      string `json:"name"`
 			Ecosystem string `json:"ecosystem"`
 		} `json:"package"`
-		Severity       string `json:"severity"`
+		Severity            string `json:"severity"`
 		FirstPatchedVersion struct {
 			Identifier string `json:"identifier"`
 		} `json:"first_patched_version"`
