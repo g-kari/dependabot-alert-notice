@@ -350,6 +350,54 @@
     .ref-list a { font-size: 0.88rem; word-break: break-all; }
     .card-warning { border-left: 3px solid var(--color-danger); }
     .card h2 { margin-bottom: 14px; }
+
+    /* --- トースト --- */
+    #toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 9999;
+      pointer-events: none;
+      max-width: 380px;
+    }
+    .toast {
+      background: var(--color-text);
+      color: var(--color-bg);
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      animation: toast-in 0.25s var(--ease);
+    }
+    .toast-msg { flex: 1; }
+    .toast-btn {
+      background: rgba(255,255,255,0.18);
+      color: inherit;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .toast-btn:hover { background: rgba(255,255,255,0.32); }
+    .toast-error { background: var(--color-danger); }
+    .toast-out { animation: toast-out 0.25s var(--ease) forwards; }
+    @keyframes toast-in {
+      from { transform: translateY(10px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    @keyframes toast-out {
+      from { transform: translateY(0);    opacity: 1; }
+      to   { transform: translateY(10px); opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -369,6 +417,48 @@
   <main class="container">
     {{template "content" .}}
   </main>
+  <div id="toast-container"></div>
+  <script data-cfasync="false">
+  (function() {
+    var container = document.getElementById('toast-container');
+
+    function showToast(msg, opts) {
+      opts = opts || {};
+      var t = document.createElement('div');
+      t.className = 'toast' + (opts.err ? ' toast-error' : '');
+      var span = document.createElement('span');
+      span.className = 'toast-msg';
+      span.textContent = msg;
+      t.appendChild(span);
+      if (opts.reload) {
+        var btn = document.createElement('button');
+        btn.className = 'toast-btn btn';
+        btn.textContent = '更新';
+        btn.onclick = function() { location.reload(); };
+        t.appendChild(btn);
+      }
+      container.appendChild(t);
+      var dur = opts.err ? 10000 : (opts.reload ? 12000 : 5000);
+      setTimeout(function() { dismiss(t); }, dur);
+    }
+
+    function dismiss(t) {
+      t.classList.add('toast-out');
+      setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 260);
+    }
+
+    window.__showToast = showToast;
+
+    var ready = false;
+    var es = new EventSource('/api/logs-stream');
+    es.addEventListener('ready', function() { ready = true; });
+    es.onmessage = function(e) {
+      if (!ready) return;
+      var log = JSON.parse(e.data);
+      showToast(log.message, { err: log.level === 'error', reload: true });
+    };
+  })();
+  </script>
 </body>
 </html>
 {{end}}

@@ -176,6 +176,10 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			return oi < oj
 		})
 		for _, record := range pending {
+			// critical / high のみAI評価対象
+			if record.Alert.Severity != model.SeverityCritical && record.Alert.Severity != model.SeverityHigh {
+				continue
+			}
 			q.Enqueue(queue.Job{
 				Type:    queue.JobEvaluateAlert,
 				Payload: record.Alert.ID,
@@ -224,6 +228,13 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 		record.Evaluation = evaluation
 		record.EvalStatus = model.EvalStatusDone
 		s.Save(record)
+
+		s.AddLog(model.LogEntry{
+			Timestamp: time.Now(),
+			Level:     "info",
+			Message:   fmt.Sprintf("AI評価完了 (#%d %s/%s): %s → %s", alert.ID, alert.Owner, alert.Repo, alert.PackageName, evaluation.Recommendation),
+			AlertID:   alert.ID,
+		})
 
 		// Slack通知
 		if slackClient != nil {

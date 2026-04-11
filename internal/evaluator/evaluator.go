@@ -92,9 +92,13 @@ func (e *DockerEvaluator) Evaluate(ctx context.Context, alert model.Alert) (*mod
 }
 
 func buildPrompt(alert model.Alert) string {
-	return fmt.Sprintf(`以下のDependabotセキュリティアラートを評価してください。
+	return fmt.Sprintf(`あなたはセキュリティエンジニアです。以下のDependabotセキュリティアラートについて、開発エンジニア向けに日本語で解説してください。
 回答は必ず以下のJSON形式のみで出力してください。JSON以外のテキスト（説明文、前置き、コードブロックなど）は含めないでください。
-フィールド: risk (critical/high/medium/low), impact (影響の説明), recommendation (approve/reject/manual-review), reasoning (判断理由)
+
+フィールド:
+- impact: この脆弱性によって何が侵害されるか。攻撃者が何をできるようになるか、どんな情報や機能が危険にさらされるかを3〜5文で具体的に説明する
+- recommendation: 推奨アクション (approve/reject/manual-review)
+- reasoning: このパッケージを「どのように使っていたら」侵害される可能性があるか。具体的なコードパターンや使用方法を例示しながら3〜5文で説明する
 
 アラート情報:
 - パッケージ: %s (%s)
@@ -105,7 +109,7 @@ func buildPrompt(alert model.Alert) string {
 - 修正バージョン: %s
 - リポジトリ: %s/%s
 
-{"risk":"...","impact":"...","recommendation":"...","reasoning":"..."}`,
+{"impact":"...","recommendation":"...","reasoning":"..."}`,
 		alert.PackageName, alert.PackageEcosystem,
 		alert.Severity,
 		alert.CVEID,

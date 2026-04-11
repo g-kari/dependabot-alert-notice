@@ -24,14 +24,9 @@
     });
   });
 
-  // 自動リロード時に状態は sessionStorage 経由で引き継がれる（追加保存不要）
   window.__reloadWithState = function() { location.reload(); };
 })();
 </script>
-
-{{if .HasEvaluating}}
-<script>setTimeout(function(){ window.__reloadWithState(); }, 5000);</script>
-{{end}}
 <div class="dashboard-header">
   <h1>Dependabot アラート一覧</h1>
   <div class="dashboard-actions">
@@ -87,7 +82,7 @@
             </td>
             <td>
               {{if .Evaluation}}
-              <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+              <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
               {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
               <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
               {{else if eq (printf "%s" .EvalStatus) "failed"}}
@@ -159,7 +154,7 @@
             </td>
             <td>
               {{if .Evaluation}}
-              <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+              <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
               {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
               <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
               {{else if eq (printf "%s" .EvalStatus) "failed"}}

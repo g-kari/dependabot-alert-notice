@@ -50,6 +50,12 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 		sendEvent(e)
 	}
 
+	// 初期ログ送信完了マーカー（クライアントが既存/新着を区別するため）
+	_, _ = fmt.Fprintf(w, "event: ready\ndata: {}\n\n")
+	if ok {
+		flusher.Flush()
+	}
+
 	// 新着ログを購読
 	ch := s.store.SubscribeLogs()
 	defer s.store.UnsubscribeLogs(ch)

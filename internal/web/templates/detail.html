@@ -90,10 +90,9 @@
   <div class="table-wrap">
     <table>
       <tbody>
-        <tr><th class="detail-th">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
-        <tr><th class="detail-th">推奨アクション</th><td><strong>{{.Evaluation.Recommendation}}</strong></td></tr>
-        <tr><th class="detail-th">影響</th><td>{{.Evaluation.Impact}}</td></tr>
-        <tr><th class="detail-th">理由</th><td>{{.Evaluation.Reasoning}}</td></tr>
+        <tr><th class="detail-th">推奨アクション</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span></td></tr>
+        <tr><th class="detail-th">侵害される内容</th><td>{{.Evaluation.Impact}}</td></tr>
+        <tr><th class="detail-th">侵害される使い方</th><td>{{.Evaluation.Reasoning}}</td></tr>
       </tbody>
     </table>
   </div>
@@ -103,10 +102,9 @@
   <h2>🤖 AI評価</h2>
   <div class="msg">
     <span class="badge badge-pending eval-spinning">⏳ AI評価中...</span>
-    <span class="text-muted eval-waiting-msg">しばらくお待ちください（自動更新されます）</span>
+    <span class="text-muted eval-waiting-msg">完了するとトーストで通知されます</span>
   </div>
 </div>
-<script>setTimeout(function(){ location.reload(); }, 5000);</script>
 {{else if eq (printf "%s" .EvalStatus) "failed"}}
 <div class="card">
   <h2>🤖 AI評価</h2>
