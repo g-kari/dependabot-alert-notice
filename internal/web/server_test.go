@@ -501,6 +501,60 @@ func TestDetail_RendersMarkdownDescription(t *testing.T) {
 	}
 }
 
+// TestSettings_SlackTokens はSlackトークンが環境変数未設定時にフォームから保存されることを確認
+func TestSettings_SlackTokens(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		PollInterval: 30 * time.Minute,
+		LogLevel:     "info",
+		ClaudePath:   "claude",
+		GhPath:       "gh",
+	}
+
+	body := "poll_interval=30m&log_level=info&claude_path=claude&gh_path=gh" +
+		"&slack_channel_id=C999&slack_bot_token=xoxb-new&slack_app_token=xapp-new"
+	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleSettingsSave(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if srv.cfg.Slack.BotToken != "xoxb-new" {
+		t.Errorf("BotToken = %q, want xoxb-new", srv.cfg.Slack.BotToken)
+	}
+	if srv.cfg.Slack.AppToken != "xapp-new" {
+		t.Errorf("AppToken = %q, want xapp-new", srv.cfg.Slack.AppToken)
+	}
+}
+
+// TestSettings_SlackTokens_EnvOverrides は環境変数設定済み時にフォーム値を無視することを確認
+func TestSettings_SlackTokens_EnvOverrides(t *testing.T) {
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-env")
+	t.Setenv("SLACK_APP_TOKEN", "xapp-env")
+
+	srv, _, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		PollInterval: 30 * time.Minute,
+		LogLevel:     "info",
+		ClaudePath:   "claude",
+		GhPath:       "gh",
+		Slack:        config.SlackConfig{BotToken: "xoxb-env", AppToken: "xapp-env"},
+	}
+
+	body := "poll_interval=30m&log_level=info&claude_path=claude&gh_path=gh" +
+		"&slack_channel_id=C999&slack_bot_token=xoxb-from-form&slack_app_token=xapp-from-form"
+	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleSettingsSave(w, req)
+
+	if srv.cfg.Slack.BotToken != "xoxb-env" {
+		t.Errorf("BotToken = %q, want xoxb-env (env should not be overridden)", srv.cfg.Slack.BotToken)
+	}
+}
+
 // TestSettings_AutoEval はAI自動評価のON/OFF設定が正しく保存されることを確認
 func TestSettings_AutoEval(t *testing.T) {
 	tests := []struct {

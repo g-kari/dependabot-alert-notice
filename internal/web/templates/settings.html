@@ -104,22 +104,24 @@
           <td><input type="text" name="slack_channel_id" value="{{.Config.Slack.ChannelID}}" placeholder="C0123456789" style="width:220px"></td>
         </tr>
         <tr>
-          <th>SLACK_BOT_TOKEN</th>
+          <th>Bot Token</th>
           <td>
             {{if .EnvBotToken}}
             <span style="color:#166534;font-weight:500">✅ 環境変数で設定済み</span>
             {{else}}
-            <span style="color:var(--color-danger)">⚠️ 未設定 — 環境変数 SLACK_BOT_TOKEN で設定してください</span>
+            <input type="password" name="slack_bot_token" placeholder="xoxb-… (空白で変更なし)" style="width:320px">
+            {{if .Config.Slack.BotToken}}<span class="badge badge-info" style="margin-left:8px">設定済み</span>{{end}}
             {{end}}
           </td>
         </tr>
         <tr>
-          <th>SLACK_APP_TOKEN</th>
+          <th>App Token</th>
           <td>
             {{if .EnvAppToken}}
             <span style="color:#166534;font-weight:500">✅ 環境変数で設定済み</span>
             {{else}}
-            <span style="color:var(--color-danger)">⚠️ 未設定 — 環境変数 SLACK_APP_TOKEN で設定してください</span>
+            <input type="password" name="slack_app_token" placeholder="xapp-… (空白で変更なし)" style="width:320px">
+            {{if .Config.Slack.AppToken}}<span class="badge badge-info" style="margin-left:8px">設定済み</span>{{end}}
             {{end}}
           </td>
         </tr>

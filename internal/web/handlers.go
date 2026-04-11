@@ -394,8 +394,18 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		s.cfg.GhPath = v
 	}
 
-	// slack.channel_id（トークンは環境変数のみ）
+	// slack（トークンは環境変数未設定時のみYAML保存）
 	s.cfg.Slack.ChannelID = r.FormValue("slack_channel_id")
+	if os.Getenv("SLACK_BOT_TOKEN") == "" {
+		if v := r.FormValue("slack_bot_token"); v != "" {
+			s.cfg.Slack.BotToken = v
+		}
+	}
+	if os.Getenv("SLACK_APP_TOKEN") == "" {
+		if v := r.FormValue("slack_app_token"); v != "" {
+			s.cfg.Slack.AppToken = v
+		}
+	}
 
 	// discord.webhook_url（環境変数未設定時のみYAML保存）
 	if os.Getenv("DISCORD_WEBHOOK_URL") == "" {
