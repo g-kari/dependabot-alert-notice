@@ -14,9 +14,33 @@ import (
 )
 
 type Store struct {
-	mu   sync.RWMutex
-	db   *sql.DB
-	logs []model.LogEntry // ログはセッション限定のin-memory
+	mu        sync.RWMutex
+	db        *sql.DB
+	logs      []model.LogEntry // ログはセッション限定のin-memory
+	logSubs   []chan model.LogEntry
+	logSubsMu sync.Mutex
+}
+
+// SubscribeLogs は新着ログを受け取るチャネルを登録する。呼び出し元はctx終了時に UnsubscribeLogs を呼ぶこと。
+func (s *Store) SubscribeLogs() chan model.LogEntry {
+	ch := make(chan model.LogEntry, 32)
+	s.logSubsMu.Lock()
+	s.logSubs = append(s.logSubs, ch)
+	s.logSubsMu.Unlock()
+	return ch
+}
+
+// UnsubscribeLogs はチャネルの登録を解除する。
+func (s *Store) UnsubscribeLogs(ch chan model.LogEntry) {
+	s.logSubsMu.Lock()
+	defer s.logSubsMu.Unlock()
+	for i, sub := range s.logSubs {
+		if sub == ch {
+			s.logSubs = append(s.logSubs[:i], s.logSubs[i+1:]...)
+			close(ch)
+			return
+		}
+	}
 }
 
 // New はin-memory SQLiteストアを返す（テスト用）
@@ -315,8 +339,18 @@ func (s *Store) NeedsEvaluation(alertID int) bool {
 
 func (s *Store) AddLog(entry model.LogEntry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.logs = append(s.logs, entry)
+	s.mu.Unlock()
+
+	// 購読者に通知（ブロックしない）
+	s.logSubsMu.Lock()
+	for _, ch := range s.logSubs {
+		select {
+		case ch <- entry:
+		default:
+		}
+	}
+	s.logSubsMu.Unlock()
 }
 
 func (s *Store) ListLogs() []model.LogEntry {

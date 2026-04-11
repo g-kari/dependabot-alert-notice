@@ -72,6 +72,10 @@ func saveAlert(s *store.Store, id int, pkg string, sev model.Severity) {
 	})
 }
 
+func withTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d)
+}
+
 // TestDashboard_Empty は空のstoreでダッシュボードが200を返すことを確認
 func TestDashboard_Empty(t *testing.T) {
 	srv, _, _ := newTestServer(t)

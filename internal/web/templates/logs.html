@@ -1,16 +1,67 @@
 {{define "content"}}
-<h1>ログ</h1>
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:1rem">
+  <h1 style="margin:0">ログ</h1>
+  <span id="stream-status" class="badge badge-pending" style="font-size:0.75rem">接続中...</span>
+</div>
 
-<div class="card">
+<div class="card" style="padding:0;overflow:hidden">
+  <div id="log-container">
     {{range .Logs}}
-    <div class="log-entry log-{{.Level}}">
-        <span style="color:#8b949e">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
-        <span class="badge badge-{{.Level}}" style="margin:0 8px">{{.Level}}</span>
-        {{if .AlertID}}<span style="color:#8b949e">[#{{.AlertID}}]</span>{{end}}
-        {{.Message}}
+    <div class="log-entry">
+      <span class="log-ts">{{.Timestamp.Format "01-02 15:04:05"}}</span>
+      <span class="badge badge-{{.Level}}">{{.Level}}</span>
+      {{if .AlertID}}<span style="color:var(--color-muted);font-size:0.8rem">[#{{.AlertID}}]</span>{{end}}
+      <span class="log-msg">{{.Message}}</span>
     </div>
     {{else}}
-    <div style="text-align:center;color:#8b949e;padding:20px;">ログなし</div>
+    <div id="empty-msg" style="text-align:center;color:var(--color-muted);padding:2.5rem">ログなし</div>
     {{end}}
+  </div>
 </div>
+
+<script>
+(function() {
+  const container = document.getElementById('log-container');
+  const status = document.getElementById('stream-status');
+  const emptyMsg = document.getElementById('empty-msg');
+  let initialized = false;
+
+  const es = new EventSource('/api/logs-stream');
+
+  es.onopen = function() {
+    status.textContent = '● ライブ';
+    status.className = 'badge badge-approved';
+  };
+
+  es.onmessage = function(e) {
+    const log = JSON.parse(e.data);
+
+    if (!initialized) {
+      // 初回メッセージ: サーバー側で既存ログを送ってくるのでコンテナをクリア
+      if (emptyMsg) emptyMsg.remove();
+      container.innerHTML = '';
+      initialized = true;
+    }
+
+    const div = document.createElement('div');
+    div.className = 'log-entry log-entry-new';
+    div.innerHTML =
+      '<span class="log-ts">' + log.ts + '</span>' +
+      '<span class="badge badge-' + log.level + '">' + log.level + '</span>' +
+      (log.alert_id ? '<span style="color:var(--color-muted);font-size:0.8rem">[#' + log.alert_id + ']</span>' : '') +
+      '<span class="log-msg">' + escapeHtml(log.message) + '</span>';
+    container.appendChild(div);
+    setTimeout(function() { div.classList.remove('log-entry-new'); }, 600);
+  };
+
+  es.onerror = function() {
+    status.textContent = '● 切断';
+    status.className = 'badge badge-error';
+  };
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+})();
+</script>
 {{end}}

@@ -216,6 +216,8 @@
     .log-entry:last-child { border-bottom: none; }
     .log-ts { color: var(--color-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .log-msg { flex: 1; }
+    @keyframes log-flash { from { background: color-mix(in srgb, var(--color-accent) 15%, transparent); } to { background: transparent; } }
+    .log-entry-new { animation: log-flash 0.6s ease-out; }
 
     /* --- インタラクション --- */
     .interactive-scale { transition: var(--transition); }

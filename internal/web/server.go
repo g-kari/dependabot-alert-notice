@@ -67,6 +67,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /alerts/{id}/approve", s.handleApprove)
 	mux.HandleFunc("POST /alerts/{id}/reject", s.handleReject)
 	mux.HandleFunc("GET /logs", s.handleLogs)
+	mux.HandleFunc("GET /api/logs-stream", s.handleLogsStream)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings", s.handleSettingsSave)
 	mux.HandleFunc("POST /settings/targets/add", s.handleTargetAdd)
