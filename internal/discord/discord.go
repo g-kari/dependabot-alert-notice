@@ -51,6 +51,14 @@ type webhookPayload struct {
 	Embeds []embed `json:"embeds"`
 }
 
+// NotifyEval はAI評価完了をDiscord Webhookに追加通知する
+func (c *Client) NotifyEval(record *model.AlertRecord) error {
+	if record.Evaluation == nil {
+		return nil
+	}
+	return c.Notify(record)
+}
+
 // Notify はDependabotアラートをDiscord Webhookに通知する
 func (c *Client) Notify(record *model.AlertRecord) error {
 	if c.webhookURL == "" {

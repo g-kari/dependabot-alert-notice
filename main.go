@@ -83,7 +83,7 @@ func main() {
 
 	// JobQueue起動
 	q := queue.New(100, 2)
-	q.Register(queue.JobFetchAlerts, makeFetchHandler(cfg, ghClient, s, q))
+	q.Register(queue.JobFetchAlerts, makeFetchHandler(cfg, ghClient, s, q, slackClient, discordClient))
 	q.Register(queue.JobEvaluateAlert, makeEvaluateHandler(cfg, eval, s, slackClient, discordClient))
 	q.Start(ctx)
 
@@ -123,7 +123,7 @@ func enqueueFetchAll(cfg *config.Config, q *queue.Queue) {
 }
 
 // makeFetchHandler はFetchAlertsジョブのハンドラを返す
-func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store, q *queue.Queue) queue.Handler {
+func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store, q *queue.Queue, slackClient *slack.SlackClient, discordClient *discord.Client) queue.Handler {
 	return func(ctx context.Context, job queue.Job) error {
 		target, ok := job.Payload.(config.Target)
 		if !ok {
@@ -159,6 +159,26 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				Message:   fmt.Sprintf("新規アラート: %s (%s) in %s/%s", alert.PackageName, alert.Severity, alert.Owner, alert.Repo),
 				AlertID:   record.Alert.ID,
 			})
+
+			// 重要度フィルタを満たす場合は即通知
+			if cfg.ShouldNotify(string(alert.Severity)) {
+				if slackClient != nil {
+					if ts, err := slackClient.Notify(record); err != nil {
+						slog.Error("Slack通知失敗（新規アラート）", "alertID", record.Alert.ID, "error", err)
+					} else if ts != "" {
+						record.SlackMessageTS = ts
+						if err := s.UpdateSlackMessageTS(record.Alert.ID, ts); err != nil {
+							slog.Error("SlackMessageTS保存失敗", "alertID", record.Alert.ID, "error", err)
+						}
+					}
+				}
+				if discordClient != nil {
+					if err := discordClient.Notify(record); err != nil {
+						slog.Error("Discord通知失敗（新規アラート）", "alertID", record.Alert.ID, "error", err)
+					}
+				}
+			}
+
 			newCount++
 		}
 		if newCount > 0 {
@@ -239,23 +259,33 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 			AlertID:   alert.ID,
 		})
 
-		// 通知最低重要度フィルタ
+		// 重要度フィルタ
 		if !cfg.ShouldNotify(string(alert.Severity)) {
 			slog.Debug("通知スキップ（重要度フィルタ）", "alertID", alert.ID, "severity", alert.Severity, "minSeverity", cfg.NotifyMinSeverity)
 			return nil
 		}
 
-		// Slack通知
+		// Slack: 既存メッセージがあれば編集、なければ新規送信
 		if slackClient != nil {
-			if err := slackClient.Notify(record); err != nil {
-				slog.Error("Slack通知失敗", "alertID", alert.ID, "error", err)
+			if record.SlackMessageTS != "" {
+				if err := slackClient.UpdateEvalMessage(record); err != nil {
+					slog.Error("SlackメッセージAI評価更新失敗", "alertID", alert.ID, "error", err)
+				}
+			} else {
+				if ts, err := slackClient.Notify(record); err != nil {
+					slog.Error("Slack通知失敗（AI評価完了）", "alertID", alert.ID, "error", err)
+				} else if ts != "" {
+					if err := s.UpdateSlackMessageTS(alert.ID, ts); err != nil {
+						slog.Error("SlackMessageTS保存失敗（AI評価後）", "alertID", alert.ID, "error", err)
+					}
+				}
 			}
 		}
 
-		// Discord通知
+		// Discord: eval付きで通知
 		if discordClient != nil {
-			if err := discordClient.Notify(record); err != nil {
-				slog.Error("Discord通知失敗", "alertID", alert.ID, "error", err)
+			if err := discordClient.NotifyEval(record); err != nil {
+				slog.Error("Discord通知失敗（AI評価完了）", "alertID", alert.ID, "error", err)
 			}
 		}
 

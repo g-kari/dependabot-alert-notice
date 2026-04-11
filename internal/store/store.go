@@ -86,20 +86,34 @@ func (s *Store) migrate() error {
 		}
 	}
 
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS alert_records (
-		id            INTEGER PRIMARY KEY AUTOINCREMENT,
-		owner         TEXT NOT NULL,
-		repo          TEXT NOT NULL,
-		number        INTEGER NOT NULL,
-		alert_json    TEXT NOT NULL,
-		eval_json     TEXT,
-		state         TEXT NOT NULL,
-		eval_status   TEXT NOT NULL DEFAULT 'done',
-		notified_at   DATETIME NOT NULL,
-		merged_at     DATETIME,
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS alert_records (
+		id               INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner            TEXT NOT NULL,
+		repo             TEXT NOT NULL,
+		number           INTEGER NOT NULL,
+		alert_json       TEXT NOT NULL,
+		eval_json        TEXT,
+		state            TEXT NOT NULL,
+		eval_status      TEXT NOT NULL DEFAULT 'done',
+		notified_at      DATETIME NOT NULL,
+		merged_at        DATETIME,
+		slack_message_ts TEXT NOT NULL DEFAULT '',
 		UNIQUE(owner, repo, number)
-	)`)
-	return err
+	)`); err != nil {
+		return err
+	}
+
+	// 既存テーブルへのカラム追加（slack_message_tsが存在しない場合）
+	var slackTSColCount int
+	_ = s.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('alert_records') WHERE name = 'slack_message_ts'`,
+	).Scan(&slackTSColCount)
+	if slackTSColCount == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE alert_records ADD COLUMN slack_message_ts TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("slack_message_tsカラム追加失敗: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) Save(record *model.AlertRecord) {
@@ -125,15 +139,16 @@ func (s *Store) Save(record *model.AlertRecord) {
 	}
 
 	res, err := s.db.Exec(`INSERT INTO alert_records
-		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(owner, repo, number) DO UPDATE SET
-			alert_json   = excluded.alert_json,
-			eval_json    = excluded.eval_json,
-			state        = excluded.state,
-			eval_status  = excluded.eval_status,
-			notified_at  = excluded.notified_at,
-			merged_at    = excluded.merged_at`,
+			alert_json       = excluded.alert_json,
+			eval_json        = excluded.eval_json,
+			state            = excluded.state,
+			eval_status      = excluded.eval_status,
+			notified_at      = excluded.notified_at,
+			merged_at        = excluded.merged_at,
+			slack_message_ts = excluded.slack_message_ts`,
 		record.Alert.Owner,
 		record.Alert.Repo,
 		record.Alert.Number,
@@ -143,6 +158,7 @@ func (s *Store) Save(record *model.AlertRecord) {
 		evalStatus,
 		record.NotifiedAt,
 		mergedAt,
+		record.SlackMessageTS,
 	)
 	if err != nil {
 		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
@@ -167,7 +183,7 @@ func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
 }
 
 func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
-	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at
+	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts
 		FROM alert_records WHERE id = ?`, alertID)
 
 	var dbID int
@@ -177,8 +193,9 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	var evalStatus string
 	var notifiedAt time.Time
 	var mergedAt sql.NullTime
+	var slackTS string
 
-	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("アラートID %d が見つかりません", alertID)
 		}
@@ -196,11 +213,12 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	}
 
 	record := &model.AlertRecord{
-		Alert:      alert,
-		Evaluation: eval,
-		State:      model.AlertState(state),
-		EvalStatus: model.EvalStatus(evalStatus),
-		NotifiedAt: notifiedAt,
+		Alert:          alert,
+		Evaluation:     eval,
+		State:          model.AlertState(state),
+		EvalStatus:     model.EvalStatus(evalStatus),
+		NotifiedAt:     notifiedAt,
+		SlackMessageTS: slackTS,
 	}
 	if mergedAt.Valid {
 		t := mergedAt.Time
@@ -213,7 +231,7 @@ func (s *Store) List() []*model.AlertRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at FROM alert_records`)
+	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts FROM alert_records`)
 	if err != nil {
 		slog.Error("レコード一覧取得失敗", "error", err)
 		return nil
@@ -229,8 +247,9 @@ func (s *Store) List() []*model.AlertRecord {
 		var evalStatus string
 		var notifiedAt time.Time
 		var mergedAt sql.NullTime
+		var slackTS string
 
-		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS); err != nil {
 			continue
 		}
 
@@ -245,11 +264,12 @@ func (s *Store) List() []*model.AlertRecord {
 		}
 
 		record := &model.AlertRecord{
-			Alert:      alert,
-			Evaluation: eval,
-			State:      model.AlertState(state),
-			EvalStatus: model.EvalStatus(evalStatus),
-			NotifiedAt: notifiedAt,
+			Alert:          alert,
+			Evaluation:     eval,
+			State:          model.AlertState(state),
+			EvalStatus:     model.EvalStatus(evalStatus),
+			NotifiedAt:     notifiedAt,
+			SlackMessageTS: slackTS,
 		}
 		if mergedAt.Valid {
 			t := mergedAt.Time
@@ -347,6 +367,22 @@ func (s *Store) UpdateEvalStatus(alertID int, status model.EvalStatus) error {
 		string(status), alertID)
 	if err != nil {
 		return fmt.Errorf("eval_status更新失敗: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("アラートID %d が見つかりません", alertID)
+	}
+	return nil
+}
+
+// UpdateSlackMessageTS はSlack通知メッセージのタイムスタンプを保存する
+func (s *Store) UpdateSlackMessageTS(alertID int, ts string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`UPDATE alert_records SET slack_message_ts = ? WHERE id = ?`, ts, alertID)
+	if err != nil {
+		return fmt.Errorf("slack_message_ts更新失敗: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
