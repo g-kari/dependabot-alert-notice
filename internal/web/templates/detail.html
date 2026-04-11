@@ -1,0 +1,41 @@
+{{define "content"}}
+<h1>アラート #{{.Alert.ID}}: {{.Alert.PackageName}}</h1>
+
+<div class="card">
+    <h2 style="margin-bottom:12px">アラート情報</h2>
+    <table>
+        <tr><th style="width:200px">パッケージ</th><td>{{.Alert.PackageName}} ({{.Alert.PackageEcosystem}})</td></tr>
+        <tr><th>リポジトリ</th><td>{{.Alert.Owner}}/{{.Alert.Repo}}</td></tr>
+        <tr><th>重要度</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td></tr>
+        <tr><th>CVE</th><td>{{.Alert.CVEID}}</td></tr>
+        <tr><th>CVSS</th><td>{{printf "%.1f" .Alert.CVSSScore}}</td></tr>
+        <tr><th>概要</th><td>{{.Alert.Summary}}</td></tr>
+        <tr><th>修正バージョン</th><td>{{.Alert.FixedIn}}</td></tr>
+        <tr><th>ステータス</th><td><span class="badge badge-{{.State}}">{{.State}}</span></td></tr>
+        <tr><th>GitHub</th><td><a href="{{.Alert.HTMLURL}}" target="_blank">開く</a></td></tr>
+    </table>
+</div>
+
+{{if .Evaluation}}
+<div class="card">
+    <h2 style="margin-bottom:12px">AI評価</h2>
+    <table>
+        <tr><th style="width:200px">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
+        <tr><th>推奨</th><td>{{.Evaluation.Recommendation}}</td></tr>
+        <tr><th>影響</th><td>{{.Evaluation.Impact}}</td></tr>
+        <tr><th>理由</th><td>{{.Evaluation.Reasoning}}</td></tr>
+    </table>
+</div>
+{{end}}
+
+{{if eq (printf "%s" .State) "pending"}}
+<div style="margin-top:16px">
+    <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
+        <button type="submit" class="btn btn-approve">✅ マージ承認</button>
+    </form>
+    <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline;margin-left:8px">
+        <button type="submit" class="btn btn-reject">❌ 却下</button>
+    </form>
+</div>
+{{end}}
+{{end}}

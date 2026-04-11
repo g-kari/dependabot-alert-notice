@@ -1,0 +1,48 @@
+{{define "content"}}
+<h1>Dependabot アラート一覧</h1>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>パッケージ</th>
+            <th>リポジトリ</th>
+            <th>重要度</th>
+            <th>CVE</th>
+            <th>AI評価</th>
+            <th>ステータス</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Records}}
+        <tr>
+            <td><a href="/alerts/{{.Alert.ID}}">{{.Alert.ID}}</a></td>
+            <td>{{.Alert.PackageName}}</td>
+            <td>{{.Alert.Owner}}/{{.Alert.Repo}}</td>
+            <td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td>
+            <td>{{.Alert.CVEID}}</td>
+            <td>
+                {{if .Evaluation}}
+                <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+                {{else}}
+                <span class="badge badge-pending">評価中</span>
+                {{end}}
+            </td>
+            <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+            <td>
+                {{if eq (printf "%s" .State) "pending"}}
+                <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
+                    <button type="submit" class="btn btn-approve">承認</button>
+                </form>
+                <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline">
+                    <button type="submit" class="btn btn-reject">却下</button>
+                </form>
+                {{end}}
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="8" style="text-align:center;color:#8b949e;">アラートなし</td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

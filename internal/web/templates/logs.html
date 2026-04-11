@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1>ログ</h1>
+
+<div class="card">
+    {{range .Logs}}
+    <div class="log-entry log-{{.Level}}">
+        <span style="color:#8b949e">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
+        <span class="badge badge-{{.Level}}" style="margin:0 8px">{{.Level}}</span>
+        {{if .AlertID}}<span style="color:#8b949e">[#{{.AlertID}}]</span>{{end}}
+        {{.Message}}
+    </div>
+    {{else}}
+    <div style="text-align:center;color:#8b949e;padding:20px;">ログなし</div>
+    {{end}}
+</div>
+{{end}}

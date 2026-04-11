@@ -1,0 +1,26 @@
+poll_interval: 30m
+
+targets:
+  - owner: your-org
+    repo: your-repo
+  - owner: your-org
+    # repo省略でorg全体
+
+slack:
+  channel_id: C0123456789
+  # SLACK_BOT_TOKEN, SLACK_APP_TOKEN は環境変数で設定
+
+claude_path: claude    # claude CLIのパス
+gh_path: gh            # gh CLIのパス
+log_level: info        # debug, info, warn, error
+
+web:
+  port: 8080
+
+evaluator:
+  sandbox:
+    enabled: true
+    image: dependabot-evaluator:latest
+    memory_limit: 512m
+    cpu_limit: "0.5"
+    timeout: 60s
