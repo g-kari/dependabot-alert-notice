@@ -107,10 +107,10 @@
           <th>Bot Token</th>
           <td>
             {{if .EnvBotToken}}
-            <span style="color:#166534;font-weight:500">✅ 環境変数で設定済み</span>
+            <span class="badge badge-info">✅ 環境変数で設定済み</span>
             {{else}}
-            <input type="password" name="slack_bot_token" placeholder="xoxb-… (空白で変更なし)" style="width:320px">
-            {{if .Config.Slack.BotToken}}<span class="badge badge-info" style="margin-left:8px">設定済み</span>{{end}}
+            <input type="password" name="slack_bot_token" placeholder="xoxb-…" style="width:320px">
+            <div class="text-muted" style="font-size:0.8rem;margin-top:4px">{{if .Config.Slack.BotToken}}設定済み（空白のまま保存すると変更なし）{{else}}未設定{{end}}</div>
             {{end}}
           </td>
         </tr>
@@ -118,10 +118,10 @@
           <th>App Token</th>
           <td>
             {{if .EnvAppToken}}
-            <span style="color:#166534;font-weight:500">✅ 環境変数で設定済み</span>
+            <span class="badge badge-info">✅ 環境変数で設定済み</span>
             {{else}}
-            <input type="password" name="slack_app_token" placeholder="xapp-… (空白で変更なし)" style="width:320px">
-            {{if .Config.Slack.AppToken}}<span class="badge badge-info" style="margin-left:8px">設定済み</span>{{end}}
+            <input type="password" name="slack_app_token" placeholder="xapp-…" style="width:320px">
+            <div class="text-muted" style="font-size:0.8rem;margin-top:4px">{{if .Config.Slack.AppToken}}設定済み（空白のまま保存すると変更なし）{{else}}未設定{{end}}</div>
             {{end}}
           </td>
         </tr>
