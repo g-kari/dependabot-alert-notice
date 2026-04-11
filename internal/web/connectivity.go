@@ -41,7 +41,7 @@ func (s *Server) handleConnectivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	s.cfgMu.RLock()
@@ -125,19 +125,25 @@ func testSlack(ctx context.Context, slackCfg config.SlackConfig) toolResult {
 }
 
 func testTargets(ctx context.Context, ghPath string, targets []config.Target) []targetResult {
-	results := make([]targetResult, 0, len(targets))
-	for _, t := range targets {
-		if t.Repo != "" {
-			results = append(results, testRepoTarget(ctx, ghPath, t.Owner, t.Repo))
-			continue
-		}
-		// repo未指定 → org APIを試してダメなら全リポジトリにフォールバック
-		r := testOrgTarget(ctx, ghPath, t.Owner)
-		if !r.OK {
-			r = testUserRepoTarget(ctx, ghPath, t.Owner)
-		}
-		results = append(results, r)
+	results := make([]targetResult, len(targets))
+	var wg sync.WaitGroup
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t config.Target) {
+			defer wg.Done()
+			if t.Repo != "" {
+				results[i] = testRepoTarget(ctx, ghPath, t.Owner, t.Repo)
+				return
+			}
+			// repo未指定 → org APIを試してダメなら全リポジトリにフォールバック
+			r := testOrgTarget(ctx, ghPath, t.Owner)
+			if !r.OK {
+				r = testUserRepoTarget(ctx, ghPath, t.Owner)
+			}
+			results[i] = r
+		}(i, t)
 	}
+	wg.Wait()
 	return results
 }
 
