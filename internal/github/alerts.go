@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
@@ -96,15 +97,26 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]mod
 
 	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos))
 
-	var all []model.Alert
+	var (
+		mu  sync.Mutex
+		all []model.Alert
+		wg  sync.WaitGroup
+	)
 	for _, repo := range repos {
-		alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
-		if err != nil {
-			slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
-			continue
-		}
-		all = append(all, alerts...)
+		wg.Add(1)
+		go func(repo string) {
+			defer wg.Done()
+			alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
+			if err != nil {
+				slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
+				return
+			}
+			mu.Lock()
+			all = append(all, alerts...)
+			mu.Unlock()
+		}(repo)
 	}
+	wg.Wait()
 
 	slog.Info("アラート取得完了（全リポジトリ）", "owner", owner, "repos", len(repos), "alerts", len(all))
 	return all, nil

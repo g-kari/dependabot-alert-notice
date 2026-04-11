@@ -269,17 +269,28 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 		}
 	}
 
-	total := 0
+	var (
+		totalMu sync.Mutex
+		total   int
+		wg      sync.WaitGroup
+	)
 	for _, repo := range repos {
-		endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
-		out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
-		if err != nil {
-			continue
-		}
-		count := 0
-		_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count)
-		total += count
+		wg.Add(1)
+		go func(repo string) {
+			defer wg.Done()
+			endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
+			out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
+			if err != nil {
+				return
+			}
+			count := 0
+			_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count)
+			totalMu.Lock()
+			total += count
+			totalMu.Unlock()
+		}(repo)
 	}
+	wg.Wait()
 	return targetResult{
 		Owner:   owner,
 		OK:      true,
