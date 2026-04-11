@@ -63,7 +63,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		s.server.Shutdown(context.Background())
+		_ = s.server.Shutdown(context.Background())
 	}()
 
 	if err := s.server.ListenAndServe(); err != http.ErrServerClosed {

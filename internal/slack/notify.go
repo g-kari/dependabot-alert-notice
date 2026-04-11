@@ -63,7 +63,7 @@ func (c *SlackClient) Notify(record *model.AlertRecord) error {
 	)
 	if err != nil {
 		slog.Error("Slack通知送信失敗", "error", err)
-		return fmt.Errorf("Slack通知送信失敗: %w", err)
+		return fmt.Errorf("slack通知送信失敗: %w", err)
 	}
 
 	slog.Info("Slack通知送信完了", "alertID", alert.ID, "package", alert.PackageName)

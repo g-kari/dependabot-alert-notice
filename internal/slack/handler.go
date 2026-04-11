@@ -19,7 +19,7 @@ func (c *SlackClient) handleEvents(ctx context.Context) {
 				continue
 			}
 			c.handleInteraction(ctx, &callback)
-			c.socket.Ack(*evt.Request)
+			_ = c.socket.Ack(*evt.Request)
 		}
 	}
 }

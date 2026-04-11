@@ -1,4 +1,4 @@
-.PHONY: build test vet lint run build-evaluator-image
+.PHONY: build test vet lint run build-evaluator-image install-hooks
 
 build:
 	go build -o bin/dependabot-alert-notice .
@@ -20,3 +20,6 @@ run-once:
 
 build-evaluator-image:
 	docker build -f Dockerfile.evaluator -t dependabot-evaluator:latest .
+
+install-hooks:
+	pre-commit install

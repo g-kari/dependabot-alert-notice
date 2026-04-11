@@ -37,12 +37,6 @@ func (m *mockMerger) Merge(_ context.Context, id int) error {
 	return m.mergeErr
 }
 
-// mockPostMessage は Slack PostMessage 呼び出しを記録するスパイ
-type postedMessage struct {
-	channelID string
-	text      string
-}
-
 // newTestSlackClient はSlack APIなしでテスト可能なクライアントを返す。
 // テスト内でpostReplyを直接呼ばないため、api fieldはnilでOK（ただし呼ばれると panic）。
 func newTestSlackClient(m *mockMerger) *SlackClient {
@@ -73,7 +67,7 @@ func TestHandleInteraction_Approve_ValidID(t *testing.T) {
 	c := newTestSlackClient(m)
 
 	// postReplyが呼ばれる前にpanicするのでrecoverで保護
-	defer func() { recover() }()
+	defer func() { _ = recover() }()
 
 	callback := makeCallback("approve", "42", "U123")
 	c.handleInteraction(context.Background(), callback)
@@ -127,7 +121,7 @@ func TestHandleInteraction_Approve_Error(t *testing.T) {
 	m := &mockMerger{approveErr: errors.New("merge failed")}
 	c := newTestSlackClient(m)
 
-	defer func() { recover() }()
+	defer func() { _ = recover() }()
 
 	callback := makeCallback("approve", "1", "U123")
 	c.handleInteraction(context.Background(), callback)
