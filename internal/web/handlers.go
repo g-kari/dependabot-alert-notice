@@ -276,7 +276,7 @@ func (s *Server) handlePollRepo(w http.ResponseWriter, r *http.Request) {
 			Payload: config.Target{Owner: owner, Repo: repo},
 		})
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/?view=repo", http.StatusSeeOther)
 }
 
 // handlePollTarget はWebUIから特定ターゲット1件のFetchJobをエンキューする

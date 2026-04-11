@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -132,6 +133,16 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 
 		alerts, err := ghClient.FetchAlerts(ctx, target)
 		if err != nil {
+			var skipErr *github.SkipError
+			if errors.As(err, &skipErr) {
+				slog.Warn("Dependabotアラートスキップ", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo))
+				s.AddLog(model.LogEntry{
+					Timestamp: time.Now(),
+					Level:     "warn",
+					Message:   fmt.Sprintf("Dependabotアラートスキップ (%s/%s): 未有効または権限なし", target.Owner, target.Repo),
+				})
+				return nil
+			}
 			slog.Error("アラート取得失敗", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "error", err)
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),

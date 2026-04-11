@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -14,6 +15,17 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
+
+// SkipError はDependabot未有効・権限なし等でアラート取得をスキップする場合のエラー型
+type SkipError struct {
+	Owner  string
+	Repo   string
+	Reason string
+}
+
+func (e *SkipError) Error() string {
+	return fmt.Sprintf("Dependabotアラートスキップ (%s/%s): %s", e.Owner, e.Repo, e.Reason)
+}
 
 type Client interface {
 	FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error)
@@ -213,7 +225,11 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			defer func() { <-sem }()
 			alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
 			if err != nil {
-				slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
+				// SkipErrorは静かに無視（Dependabot未有効など）
+				var skipErr *SkipError
+				if !errors.As(err, &skipErr) {
+					slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
+				}
 				return
 			}
 			mu.Lock()
@@ -239,9 +255,7 @@ func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]m
 			strings.Contains(msg, "403") ||
 			strings.Contains(msg, "404") ||
 			strings.Contains(msg, "dependabot alerts are disabled") {
-			slog.Warn("Dependabotアラート取得スキップ（未有効または権限なし）",
-				"owner", owner, "repo", repo, "detail", strings.TrimSpace(string(out)))
-			return nil, nil
+			return nil, &SkipError{Owner: owner, Repo: repo, Reason: strings.TrimSpace(string(out))}
 		}
 		return nil, fmt.Errorf("gh api 実行失敗: %w", err)
 	}
