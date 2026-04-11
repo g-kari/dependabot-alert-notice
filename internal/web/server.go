@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
+	"github.com/yuin/goldmark"
 )
 
 //go:embed templates/*.html
@@ -55,6 +57,16 @@ func (s *Server) SetQueue(q *queue.Queue) {
 // templateFuncs はテンプレートで使用するカスタム関数
 var templateFuncs = template.FuncMap{
 	"mul100": func(v float64) float64 { return v * 100 },
+	"markdown": func(s string) template.HTML {
+		if s == "" {
+			return ""
+		}
+		var buf bytes.Buffer
+		if err := goldmark.Convert([]byte(s), &buf); err != nil {
+			return template.HTML(template.HTMLEscapeString(s))
+		}
+		return template.HTML(buf.String())
+	},
 }
 
 // render はlayout.html + 指定ページテンプレートをペアでパースして実行する。

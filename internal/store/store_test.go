@@ -12,7 +12,7 @@ func TestSaveAndGet(t *testing.T) {
 
 	record := &model.AlertRecord{
 		Alert: model.Alert{
-			ID:          1,
+			Number:      1,
 			PackageName: "lodash",
 			Owner:       "test-org",
 			Repo:        "test-repo",
@@ -23,8 +23,11 @@ func TestSaveAndGet(t *testing.T) {
 	}
 
 	s.Save(record)
+	if record.Alert.ID == 0 {
+		t.Fatal("Save() should assign internal ID")
+	}
 
-	got, err := s.Get(1)
+	got, err := s.Get(record.Alert.ID)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -43,32 +46,33 @@ func TestGetNotFound(t *testing.T) {
 
 func TestHas(t *testing.T) {
 	s := New()
-	if s.Has(1) {
-		t.Error("Has() should return false for empty store")
+	if s.HasByKey("org", "repo", 1) {
+		t.Error("HasByKey() should return false for empty store")
 	}
 
 	s.Save(&model.AlertRecord{
-		Alert: model.Alert{ID: 1},
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1},
 		State: model.AlertStatePending,
 	})
 
-	if !s.Has(1) {
-		t.Error("Has() should return true after Save()")
+	if !s.HasByKey("org", "repo", 1) {
+		t.Error("HasByKey() should return true after Save()")
 	}
 }
 
 func TestUpdateState(t *testing.T) {
 	s := New()
-	s.Save(&model.AlertRecord{
-		Alert: model.Alert{ID: 1},
+	r := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1},
 		State: model.AlertStatePending,
-	})
+	}
+	s.Save(r)
 
-	if err := s.UpdateState(1, model.AlertStateMerged); err != nil {
+	if err := s.UpdateState(r.Alert.ID, model.AlertStateMerged); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
-	got, _ := s.Get(1)
+	got, _ := s.Get(r.Alert.ID)
 	if got.State != model.AlertStateMerged {
 		t.Errorf("State = %q, want %q", got.State, model.AlertStateMerged)
 	}
@@ -87,8 +91,8 @@ func TestUpdateStateNotFound(t *testing.T) {
 
 func TestList(t *testing.T) {
 	s := New()
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, State: model.AlertStatePending})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, State: model.AlertStatePending})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1}, State: model.AlertStatePending})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2}, State: model.AlertStatePending})
 
 	list := s.List()
 	if len(list) != 2 {
@@ -100,14 +104,14 @@ func TestEvalStatusSaveAndGet(t *testing.T) {
 	s := New()
 
 	record := &model.AlertRecord{
-		Alert:      model.Alert{ID: 10, PackageName: "axios"},
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 10, PackageName: "axios"},
 		State:      model.AlertStatePending,
 		EvalStatus: model.EvalStatusEvaluating,
 		NotifiedAt: time.Now(),
 	}
 	s.Save(record)
 
-	got, err := s.Get(10)
+	got, err := s.Get(record.Alert.ID)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -118,17 +122,18 @@ func TestEvalStatusSaveAndGet(t *testing.T) {
 
 func TestUpdateEvalStatus(t *testing.T) {
 	s := New()
-	s.Save(&model.AlertRecord{
-		Alert:      model.Alert{ID: 20},
+	r := &model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 20},
 		State:      model.AlertStatePending,
 		EvalStatus: model.EvalStatusEvaluating,
-	})
+	}
+	s.Save(r)
 
-	if err := s.UpdateEvalStatus(20, model.EvalStatusFailed); err != nil {
+	if err := s.UpdateEvalStatus(r.Alert.ID, model.EvalStatusFailed); err != nil {
 		t.Fatalf("UpdateEvalStatus() error = %v", err)
 	}
 
-	got, _ := s.Get(20)
+	got, _ := s.Get(r.Alert.ID)
 	if got.EvalStatus != model.EvalStatusFailed {
 		t.Errorf("EvalStatus = %q, want %q", got.EvalStatus, model.EvalStatusFailed)
 	}
@@ -146,33 +151,38 @@ func TestNeedsEvaluation(t *testing.T) {
 	s := New()
 
 	// 存在しない → true
-	if !s.NeedsEvaluation(1) {
+	if !s.NeedsEvaluation(9999) {
 		t.Error("NeedsEvaluation() should return true for non-existent alert")
 	}
 
 	// evaluating → false（評価中はスキップ）
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusEvaluating})
-	if s.NeedsEvaluation(1) {
+	r1 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1}, EvalStatus: model.EvalStatusEvaluating}
+	s.Save(r1)
+	if s.NeedsEvaluation(r1.Alert.ID) {
 		t.Error("NeedsEvaluation() should return false for evaluating alert")
 	}
 
 	// done → false
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusDone})
-	if s.NeedsEvaluation(2) {
+	r2 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2}, EvalStatus: model.EvalStatusDone}
+	s.Save(r2)
+	if s.NeedsEvaluation(r2.Alert.ID) {
 		t.Error("NeedsEvaluation() should return false for done alert")
 	}
 
 	// failed → true（再試行対象）
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 3}, EvalStatus: model.EvalStatusFailed})
-	if !s.NeedsEvaluation(3) {
+	r3 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 3}, EvalStatus: model.EvalStatusFailed}
+	s.Save(r3)
+	if !s.NeedsEvaluation(r3.Alert.ID) {
 		t.Error("NeedsEvaluation() should return true for failed alert")
 	}
 }
 
 func TestListIncludesEvalStatus(t *testing.T) {
 	s := New()
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusEvaluating})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusFailed})
+	r1 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1}, EvalStatus: model.EvalStatusEvaluating}
+	r2 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2}, EvalStatus: model.EvalStatusFailed}
+	s.Save(r1)
+	s.Save(r2)
 
 	list := s.List()
 	if len(list) != 2 {
@@ -182,21 +192,21 @@ func TestListIncludesEvalStatus(t *testing.T) {
 	for _, r := range list {
 		statuses[r.Alert.ID] = r.EvalStatus
 	}
-	if statuses[1] != model.EvalStatusEvaluating {
-		t.Errorf("id=1 EvalStatus = %q, want evaluating", statuses[1])
+	if statuses[r1.Alert.ID] != model.EvalStatusEvaluating {
+		t.Errorf("r1 EvalStatus = %q, want evaluating", statuses[r1.Alert.ID])
 	}
-	if statuses[2] != model.EvalStatusFailed {
-		t.Errorf("id=2 EvalStatus = %q, want failed", statuses[2])
+	if statuses[r2.Alert.ID] != model.EvalStatusFailed {
+		t.Errorf("r2 EvalStatus = %q, want failed", statuses[r2.Alert.ID])
 	}
 }
 
 func TestListPendingEvaluation(t *testing.T) {
 	s := New()
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 1}, EvalStatus: model.EvalStatusPending})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 2}, EvalStatus: model.EvalStatusFailed})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 3}, EvalStatus: model.EvalStatusDone})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 4}, EvalStatus: model.EvalStatusEvaluating})
-	s.Save(&model.AlertRecord{Alert: model.Alert{ID: 5}, EvalStatus: model.EvalStatusPending})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1}, EvalStatus: model.EvalStatusPending})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2}, EvalStatus: model.EvalStatusFailed})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 3}, EvalStatus: model.EvalStatusDone})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 4}, EvalStatus: model.EvalStatusEvaluating})
+	s.Save(&model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 5}, EvalStatus: model.EvalStatusPending})
 
 	got := s.ListPendingEvaluation(10)
 	if len(got) != 3 { // pending x2 + failed x1
@@ -207,6 +217,60 @@ func TestListPendingEvaluation(t *testing.T) {
 	got2 := s.ListPendingEvaluation(2)
 	if len(got2) != 2 {
 		t.Errorf("ListPendingEvaluation(2) len = %d, want 2", len(got2))
+	}
+}
+
+// TestSave_SameNumberDifferentRepos は同じアラート番号でも別リポジトリなら別レコードとして保存されることを確認
+func TestSave_SameNumberDifferentRepos(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repoA", Number: 6},
+		State: model.AlertStatePending,
+	})
+	s.Save(&model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repoB", Number: 6},
+		State: model.AlertStatePending,
+	})
+	list := s.List()
+	if len(list) != 2 {
+		t.Errorf("List() len = %d, want 2 (同番号でも別リポは別レコード)", len(list))
+	}
+}
+
+// TestHasByKey は HasByKey が (owner, repo, number) の組み合わせで重複チェックすることを確認
+func TestHasByKey(t *testing.T) {
+	s := New()
+	if s.HasByKey("org", "repo", 1) {
+		t.Error("HasByKey() should return false for empty store")
+	}
+	record := &model.AlertRecord{
+		Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1},
+		State: model.AlertStatePending,
+	}
+	s.Save(record)
+	if !s.HasByKey("org", "repo", 1) {
+		t.Error("HasByKey() should return true after Save()")
+	}
+	if s.HasByKey("org", "other-repo", 1) {
+		t.Error("HasByKey() should return false for different repo with same number")
+	}
+}
+
+// TestSave_AssignsInternalID は Save後にAuto-increment内部IDが record.Alert.ID にセットされることを確認
+func TestSave_AssignsInternalID(t *testing.T) {
+	s := New()
+	r1 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 1}, State: model.AlertStatePending}
+	r2 := &model.AlertRecord{Alert: model.Alert{Owner: "org", Repo: "repo", Number: 2}, State: model.AlertStatePending}
+	s.Save(r1)
+	s.Save(r2)
+	if r1.Alert.ID == 0 {
+		t.Error("Save() should assign internal ID to r1.Alert.ID")
+	}
+	if r2.Alert.ID == 0 {
+		t.Error("Save() should assign internal ID to r2.Alert.ID")
+	}
+	if r1.Alert.ID == r2.Alert.ID {
+		t.Error("Save() should assign distinct internal IDs")
 	}
 }
 

@@ -74,23 +74,32 @@ func NewWithPath(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	// 旧スキーマ検出: numberカラムが存在しない場合は再作成
+	var numberColCount int
+	_ = s.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('alert_records') WHERE name = 'number'`,
+	).Scan(&numberColCount)
+	if numberColCount == 0 {
+		// 旧テーブルを削除して再作成（個人ツールなのでデータは再fetchで復元）
+		if _, err := s.db.Exec(`DROP TABLE IF EXISTS alert_records`); err != nil {
+			return fmt.Errorf("旧テーブル削除失敗: %w", err)
+		}
+	}
+
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS alert_records (
-		id            INTEGER PRIMARY KEY,
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
 		owner         TEXT NOT NULL,
 		repo          TEXT NOT NULL,
+		number        INTEGER NOT NULL,
 		alert_json    TEXT NOT NULL,
 		eval_json     TEXT,
 		state         TEXT NOT NULL,
 		eval_status   TEXT NOT NULL DEFAULT 'done',
 		notified_at   DATETIME NOT NULL,
-		merged_at     DATETIME
+		merged_at     DATETIME,
+		UNIQUE(owner, repo, number)
 	)`)
-	if err != nil {
-		return err
-	}
-	// 既存DBへのカラム追加（エラーは無視: すでに存在する場合）
-	_, _ = s.db.Exec(`ALTER TABLE alert_records ADD COLUMN eval_status TEXT NOT NULL DEFAULT 'done'`)
-	return nil
+	return err
 }
 
 func (s *Store) Save(record *model.AlertRecord) {
@@ -115,12 +124,19 @@ func (s *Store) Save(record *model.AlertRecord) {
 		evalStatus = string(model.EvalStatusDone)
 	}
 
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO alert_records
-		(id, owner, repo, alert_json, eval_json, state, eval_status, notified_at, merged_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.Alert.ID,
+	res, err := s.db.Exec(`INSERT INTO alert_records
+		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(owner, repo, number) DO UPDATE SET
+			alert_json   = excluded.alert_json,
+			eval_json    = excluded.eval_json,
+			state        = excluded.state,
+			eval_status  = excluded.eval_status,
+			notified_at  = excluded.notified_at,
+			merged_at    = excluded.merged_at`,
 		record.Alert.Owner,
 		record.Alert.Repo,
+		record.Alert.Number,
 		string(alertJSON),
 		evalJSON,
 		string(record.State),
@@ -129,7 +145,18 @@ func (s *Store) Save(record *model.AlertRecord) {
 		mergedAt,
 	)
 	if err != nil {
-		slog.Error("レコード保存失敗", "id", record.Alert.ID, "error", err)
+		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
+		return
+	}
+	if id, err := res.LastInsertId(); err == nil && id > 0 {
+		record.Alert.ID = int(id)
+	} else {
+		// ON CONFLICT UPDATE の場合、LastInsertId が 0 になる → 既存IDを取得
+		var dbID int
+		if err2 := s.db.QueryRow(`SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
+			record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 == nil {
+			record.Alert.ID = dbID
+		}
 	}
 }
 
@@ -140,9 +167,10 @@ func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
 }
 
 func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
-	row := s.db.QueryRow(`SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at
+	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at
 		FROM alert_records WHERE id = ?`, alertID)
 
+	var dbID int
 	var alertJSON string
 	var evalJSON sql.NullString
 	var state string
@@ -150,7 +178,7 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	var notifiedAt time.Time
 	var mergedAt sql.NullTime
 
-	if err := row.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("アラートID %d が見つかりません", alertID)
 		}
@@ -159,6 +187,7 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 
 	var alert model.Alert
 	_ = json.Unmarshal([]byte(alertJSON), &alert)
+	alert.ID = dbID
 
 	var eval *model.Evaluation
 	if evalJSON.Valid {
@@ -184,7 +213,7 @@ func (s *Store) List() []*model.AlertRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at FROM alert_records`)
+	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at FROM alert_records`)
 	if err != nil {
 		slog.Error("レコード一覧取得失敗", "error", err)
 		return nil
@@ -193,6 +222,7 @@ func (s *Store) List() []*model.AlertRecord {
 
 	var records []*model.AlertRecord
 	for rows.Next() {
+		var dbID int
 		var alertJSON string
 		var evalJSON sql.NullString
 		var state string
@@ -200,12 +230,13 @@ func (s *Store) List() []*model.AlertRecord {
 		var notifiedAt time.Time
 		var mergedAt sql.NullTime
 
-		if err := rows.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
 			continue
 		}
 
 		var alert model.Alert
 		_ = json.Unmarshal([]byte(alertJSON), &alert)
+		alert.ID = dbID
 
 		var eval *model.Evaluation
 		if evalJSON.Valid {
@@ -229,12 +260,14 @@ func (s *Store) List() []*model.AlertRecord {
 	return records
 }
 
-func (s *Store) Has(alertID int) bool {
+// HasByKey は (owner, repo, number) の組み合わせでレコードが存在するか確認する
+func (s *Store) HasByKey(owner, repo string, number int) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var count int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alert_records WHERE id = ?`, alertID).Scan(&count)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
+		owner, repo, number).Scan(&count)
 	return count > 0
 }
 
@@ -265,7 +298,7 @@ func (s *Store) ListPendingEvaluation(limit int) []*model.AlertRecord {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT alert_json, eval_json, state, eval_status, notified_at, merged_at
+		SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at
 		FROM alert_records
 		WHERE eval_status IN ('pending', 'failed')
 		LIMIT ?`, limit)
@@ -277,17 +310,19 @@ func (s *Store) ListPendingEvaluation(limit int) []*model.AlertRecord {
 
 	var records []*model.AlertRecord
 	for rows.Next() {
+		var dbID int
 		var alertJSON string
 		var evalJSON sql.NullString
 		var state, evalStatus string
 		var notifiedAt time.Time
 		var mergedAt sql.NullTime
 
-		if err := rows.Scan(&alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
+		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt); err != nil {
 			continue
 		}
 		var alert model.Alert
 		_ = json.Unmarshal([]byte(alertJSON), &alert)
+		alert.ID = dbID
 
 		record := &model.AlertRecord{
 			Alert:      alert,

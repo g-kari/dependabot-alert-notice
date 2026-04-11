@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,10 +54,10 @@ func newTestServer(t *testing.T) (*Server, *store.Store, *mockMerger) {
 	return srv, s, m
 }
 
-func saveAlert(s *store.Store, id int, pkg string, sev model.Severity) {
+func saveAlert(s *store.Store, number int, pkg string, sev model.Severity) {
 	s.Save(&model.AlertRecord{
 		Alert: model.Alert{
-			ID:          id,
+			Number:      number,
 			PackageName: pkg,
 			Owner:       "testorg",
 			Repo:        "testrepo",
@@ -409,6 +411,93 @@ func TestTargetDelete(t *testing.T) {
 	}
 	if srv.cfg.Targets[0].Owner != "org2" {
 		t.Errorf("Targets[0].Owner = %q, want org2", srv.cfg.Targets[0].Owner)
+	}
+}
+
+// TestMarkdownFunc はmarkdownテンプレート関数の動作を確認
+func TestMarkdownFunc(t *testing.T) {
+	markdownFn, ok := templateFuncs["markdown"].(func(string) template.HTML)
+	if !ok {
+		t.Fatal("markdown関数がtemplateFuncsに定義されていない")
+	}
+
+	tests := []struct {
+		name        string
+		input       string
+		contains    string
+		notContains string
+	}{
+		{
+			name:     "見出し変換",
+			input:    "## Hello\n\nworld",
+			contains: "<h2>",
+		},
+		{
+			name:     "太字変換",
+			input:    "**bold** text",
+			contains: "<strong>bold</strong>",
+		},
+		{
+			name:     "空文字列",
+			input:    "",
+			contains: "",
+		},
+		{
+			name:        "XSS防止（raw HTML非許可）",
+			input:       "<script>alert('xss')</script>",
+			notContains: "<script>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := string(markdownFn(tt.input))
+			if tt.contains != "" && !strings.Contains(got, tt.contains) {
+				t.Errorf("got %q, want to contain %q", got, tt.contains)
+			}
+			if tt.notContains != "" && strings.Contains(got, tt.notContains) {
+				t.Errorf("got %q, want NOT to contain %q", got, tt.notContains)
+			}
+		})
+	}
+}
+
+// TestDetail_RendersMarkdownDescription はMarkdown形式のDescriptionがHTMLとしてレンダリングされることを確認
+func TestDetail_RendersMarkdownDescription(t *testing.T) {
+	srv, s, _ := newTestServer(t)
+	r := &model.AlertRecord{
+		Alert: model.Alert{
+			Number:      10,
+			PackageName: "lodash",
+			Owner:       "testorg",
+			Repo:        "testrepo",
+			Severity:    model.SeverityHigh,
+			Description: "## 脆弱性の説明\n\nこれは **重要な** 脆弱性です。\n\n- 項目1\n- 項目2",
+			CreatedAt:   time.Now(),
+		},
+		State:      model.AlertStatePending,
+		NotifiedAt: time.Now(),
+	}
+	s.Save(r)
+
+	idStr := fmt.Sprintf("%d", r.Alert.ID)
+	req := httptest.NewRequest(http.MethodGet, "/alerts/"+idStr, nil)
+	req.SetPathValue("id", idStr)
+	w := httptest.NewRecorder()
+	srv.handleDetail(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "<h2>") {
+		t.Error("Markdown見出しがHTMLに変換されていない: <h2>が見つからない")
+	}
+	if !strings.Contains(body, "<strong>") {
+		t.Error("Markdown太字がHTMLに変換されていない: <strong>が見つからない")
+	}
+	if !strings.Contains(body, "<ul>") {
+		t.Error("Markdownリストがイに変換されていない: <ul>が見つからない")
 	}
 }
 

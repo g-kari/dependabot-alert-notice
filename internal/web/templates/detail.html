@@ -12,7 +12,7 @@
       <tbody>
         <tr><th class="detail-th">エラータイプ</th><td><code>{{.Alert.UpdateError.ErrorType}}</code></td></tr>
         <tr><th class="detail-th">タイトル</th><td>{{.Alert.UpdateError.Title}}</td></tr>
-        <tr><th class="detail-th">詳細</th><td class="pre-wrap">{{.Alert.UpdateError.Body}}</td></tr>
+        <tr><th class="detail-th">詳細</th><td class="markdown-body">{{.Alert.UpdateError.Body | markdown}}</td></tr>
       </tbody>
     </table>
   </div>
@@ -53,7 +53,7 @@
 {{if .Alert.Description}}
 <div class="card">
   <h2>詳細説明</h2>
-  <div class="pre-wrap description-body">{{.Alert.Description}}</div>
+  <div class="markdown-body description-body">{{.Alert.Description | markdown}}</div>
 </div>
 {{end}}
 

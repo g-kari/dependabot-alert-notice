@@ -143,20 +143,21 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 
 		newCount := 0
 		for _, alert := range alerts {
-			if s.Has(alert.ID) {
+			if s.HasByKey(alert.Owner, alert.Repo, alert.Number) {
 				continue
 			}
-			s.Save(&model.AlertRecord{
+			record := &model.AlertRecord{
 				Alert:      alert,
 				State:      model.AlertStatePending,
 				EvalStatus: model.EvalStatusPending,
 				NotifiedAt: time.Now(),
-			})
+			}
+			s.Save(record)
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),
 				Level:     "info",
 				Message:   fmt.Sprintf("新規アラート: %s (%s) in %s/%s", alert.PackageName, alert.Severity, alert.Owner, alert.Repo),
-				AlertID:   alert.ID,
+				AlertID:   record.Alert.ID,
 			})
 			newCount++
 		}

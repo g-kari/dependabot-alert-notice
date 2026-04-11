@@ -322,7 +322,6 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 		}
 
 		alerts = append(alerts, model.Alert{
-			ID:               r.Number,
 			Number:           r.Number,
 			State:            r.State,
 			Owner:            owner,
