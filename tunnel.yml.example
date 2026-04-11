@@ -1,13 +1,18 @@
 # Cloudflare 名前付きトンネル設定
-# 初回セットアップ:
-#   just tunnel-setup
-# 実行:
-#   just tunnel-named
+# 使い方:
+#   just tunnel-setup  # 初回のみ
+#   cp tunnel.yml.example tunnel.yml
+#   # TUNNEL_ID と USER を書き換える
+#   just tunnel
 
-tunnel: <TUNNEL_ID>   # just tunnel-setup 後に表示されるID
+tunnel: <TUNNEL_ID>   # cloudflared tunnel list で確認
 credentials-file: /home/<USER>/.cloudflared/<TUNNEL_ID>.json
 
 ingress:
   - hostname: security.0g0.xyz
     service: http://localhost:8999
+    # Cloudflare Access による認証はダッシュボードで設定
+    # Zero Trust > Access > Applications > Add an application
+    # Type: Self-hosted, Domain: security.0g0.xyz
+    # Policy: Allow / Email ends with your-domain / or One-time PIN
   - service: http_status:404

@@ -211,6 +211,40 @@ just tunnel
 just tunnel-quick   # ランダムな *.trycloudflare.com URL が発行される
 ```
 
+### 5. Cloudflare Access で認証制限
+
+Tunnelで公開したURLをCloudflare Accessで保護する。
+
+```mermaid
+sequenceDiagram
+    participant User as ブラウザ
+    participant Access as Cloudflare Access
+    participant Tunnel as Cloudflare Tunnel
+    participant App as WebUI :8999
+
+    User->>Access: https://security.0g0.xyz にアクセス
+    Access->>User: 認証ページ（OTP / IdP）
+    User->>Access: メール or SSO でログイン
+    Access-->>User: JWT Cookie 発行
+    User->>Tunnel: JWT付きリクエスト
+    Tunnel->>App: 認証済みリクエストを転送
+    App-->>User: ダッシュボード表示
+```
+
+**ダッシュボードでの設定手順（Zero Trust > Access > Applications）:**
+
+1. **Add an application** → `Self-hosted` を選択
+2. **Application name**: `dependabot-alert-notice`
+3. **Session Duration**: `24h`（推奨）
+4. **Application domain**: `security.0g0.xyz`
+5. **Add a policy**:
+   - Policy name: `Allow team`
+   - Action: `Allow`
+   - Rule: `Emails ending in` → `@your-domain.com`（またはOne-time PIN）
+6. **Save**
+
+これ以降、`security.0g0.xyz` へのアクセスはCloudflare Accessの認証を通過した場合のみ許可される。
+
 ## Slack アプリ設定
 
 Slack アプリに以下の設定が必要:
