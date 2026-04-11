@@ -28,55 +28,143 @@ func New(cfg *config.Config) Client {
 }
 
 type ghAlert struct {
-	Number           int    `json:"number"`
-	State            string `json:"state"`
-	HTMLURL          string `json:"html_url"`
-	CreatedAt        string `json:"created_at"`
+	Number    int    `json:"number"`
+	State     string `json:"state"`
+	HTMLURL   string `json:"html_url"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+
+	Repository struct {
+		Name string `json:"name"`
+	} `json:"repository"`
+
+	Dependency struct {
+		Package struct {
+			Ecosystem string `json:"ecosystem"`
+			Name      string `json:"name"`
+		} `json:"package"`
+		ManifestPath string `json:"manifest_path"`
+		Scope        string `json:"scope"`
+		Relationship string `json:"relationship"`
+	} `json:"dependency"`
+
 	SecurityAdvisory struct {
-		Summary string `json:"summary"`
-		CVEs    []struct {
-			ID string `json:"cve_id"`
+		GHSAID      string `json:"ghsa_id"`
+		CVEID       string `json:"cve_id"`
+		Summary     string `json:"summary"`
+		Description string `json:"description"`
+		Severity    string `json:"severity"`
+
+		Identifiers []struct {
+			Type  string `json:"type"`
+			Value string `json:"value"`
 		} `json:"identifiers"`
+
+		References []struct {
+			URL string `json:"url"`
+		} `json:"references"`
+
+		CWEs []struct {
+			CWEID string `json:"cwe_id"`
+			Name  string `json:"name"`
+		} `json:"cwes"`
+
+		PublishedAt string `json:"published_at"`
+		UpdatedAt   string `json:"updated_at"`
+
+		CVSS struct {
+			Score        float64 `json:"score"`
+			VectorString string  `json:"vector_string"`
+		} `json:"cvss"`
+
+		CVSSSeverities struct {
+			V3 struct {
+				Score        float64 `json:"score"`
+				VectorString string  `json:"vector_string"`
+			} `json:"cvss_v3"`
+			V4 struct {
+				Score        float64 `json:"score"`
+				VectorString string  `json:"vector_string"`
+			} `json:"cvss_v4"`
+		} `json:"cvss_severities"`
+
+		EPSS *struct {
+			Percentage float64 `json:"percentage"`
+			Percentile float64 `json:"percentile"`
+		} `json:"epss"`
 	} `json:"security_advisory"`
+
 	SecurityVulnerability struct {
 		Package struct {
 			Name      string `json:"name"`
 			Ecosystem string `json:"ecosystem"`
 		} `json:"package"`
-		Severity            string `json:"severity"`
-		FirstPatchedVersion struct {
+		Severity               string `json:"severity"`
+		VulnerableVersionRange string `json:"vulnerable_version_range"`
+		FirstPatchedVersion    struct {
 			Identifier string `json:"identifier"`
 		} `json:"first_patched_version"`
 	} `json:"security_vulnerability"`
 }
 
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
-	// リポジトリ指定あり → 直接取得
+	// リポジトリ指定あり → 直接取得（exclude対象の場合は空を返す）
 	if target.Repo != "" {
+		if target.IsExcluded(target.Repo) {
+			slog.Debug("リポジトリ除外スキップ", "owner", target.Owner, "repo", target.Repo)
+			return nil, nil
+		}
 		return c.fetchRepoAlerts(ctx, target.Owner, target.Repo)
 	}
 
 	// リポジトリ指定なし → org API を試してダメなら全repoにフォールバック
-	alerts, err := c.fetchOrgAlerts(ctx, target.Owner)
+	alerts, err := c.fetchOrgAlerts(ctx, target.Owner, target.Excludes)
 	if err != nil {
 		slog.Debug("org APIが失敗、ユーザーリポジトリにフォールバック", "owner", target.Owner, "error", err)
-		return c.fetchUserRepoAlerts(ctx, target.Owner)
+		return c.fetchUserRepoAlerts(ctx, target.Owner, target.Excludes)
 	}
 	return alerts, nil
 }
 
-func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string) ([]model.Alert, error) {
+func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("org API 失敗: %w", err)
 	}
-	return c.parseAlerts(out, owner, "")
+	alerts, err := c.parseAlerts(out, owner, "", excludes)
+	if err != nil {
+		return nil, err
+	}
+
+	// リポジトリ別にGraphQL APIでdependabotUpdateエラー情報を補完
+	c.enrichUpdateErrors(ctx, owner, alerts)
+
+	return alerts, nil
+}
+
+// enrichUpdateErrors はアラートをリポジトリ別にグループ化し、各リポジトリのdependabotUpdateエラーを補完する
+func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts []model.Alert) {
+	repoSet := make(map[string]struct{})
+	for _, a := range alerts {
+		repoSet[a.Repo] = struct{}{}
+	}
+
+	for repo := range repoSet {
+		updateErrors := c.fetchUpdateErrors(ctx, owner, repo)
+		for i := range alerts {
+			if alerts[i].Repo == repo {
+				if e, ok := updateErrors[alerts[i].Number]; ok {
+					alerts[i].UpdateError = e
+				}
+			}
+		}
+	}
 }
 
 // fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
-func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]model.Alert, error) {
+func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	// リポジトリ一覧取得
 	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
 		"--json", "name",
@@ -88,14 +176,24 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string) ([]mod
 		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
 	}
 
-	var repos []string
-	for _, line := range splitLines(string(out)) {
-		if line != "" {
-			repos = append(repos, line)
-		}
+	excludeSet := make(map[string]struct{}, len(excludes))
+	for _, ex := range excludes {
+		excludeSet[ex] = struct{}{}
 	}
 
-	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos))
+	var repos []string
+	for _, line := range splitLines(string(out)) {
+		if line == "" {
+			continue
+		}
+		if _, skip := excludeSet[line]; skip {
+			slog.Debug("リポジトリ除外", "owner", owner, "repo", line)
+			continue
+		}
+		repos = append(repos, line)
+	}
+
+	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos), "excluded", len(excludes))
 
 	// GitHub secondary rate limit: 最大100並列。余裕を持って10に制限
 	const concurrency = 10
@@ -135,27 +233,92 @@ func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("gh api 実行失敗: %w", err)
 	}
-	alerts, err := c.parseAlerts(out, owner, repo)
+	alerts, err := c.parseAlerts(out, owner, repo, nil)
 	if err != nil {
 		return nil, err
 	}
+
+	// GraphQL APIでdependabotUpdateエラー情報を補完
+	if len(alerts) > 0 {
+		updateErrors := c.fetchUpdateErrors(ctx, owner, repo)
+		for i := range alerts {
+			if e, ok := updateErrors[alerts[i].Number]; ok {
+				alerts[i].UpdateError = e
+			}
+		}
+	}
+
 	slog.Info("アラート取得完了", "target", fmt.Sprintf("%s/%s", owner, repo), "count", len(alerts))
 	return alerts, nil
 }
 
-func (c *ghClient) parseAlerts(out []byte, owner, repo string) ([]model.Alert, error) {
+func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string) ([]model.Alert, error) {
 	var raw []ghAlert
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("JSONパース失敗: %w", err)
 	}
 
+	excludeSet := make(map[string]struct{}, len(excludes))
+	for _, ex := range excludes {
+		excludeSet[ex] = struct{}{}
+	}
+
 	alerts := make([]model.Alert, 0, len(raw))
 	for _, r := range raw {
-		createdAt, _ := time.Parse(time.RFC3339, r.CreatedAt)
+		// org API ではレスポンスにリポジトリ名が含まれる。除外リストをチェック
+		repoName := repo
+		if repoName == "" {
+			repoName = r.Repository.Name
+		}
+		if _, skip := excludeSet[repoName]; skip {
+			continue
+		}
 
-		var cveID string
-		if len(r.SecurityAdvisory.CVEs) > 0 {
-			cveID = r.SecurityAdvisory.CVEs[0].ID
+		createdAt, _ := time.Parse(time.RFC3339, r.CreatedAt)
+		updatedAt, _ := time.Parse(time.RFC3339, r.UpdatedAt)
+		publishedAt, _ := time.Parse(time.RFC3339, r.SecurityAdvisory.PublishedAt)
+
+		// CVSS: v4 > v3 > legacy の優先順位で取得
+		cvss := r.SecurityAdvisory.CVSS.Score
+		cvssVector := r.SecurityAdvisory.CVSS.VectorString
+		if r.SecurityAdvisory.CVSSSeverities.V4.Score > 0 {
+			cvss = r.SecurityAdvisory.CVSSSeverities.V4.Score
+			cvssVector = r.SecurityAdvisory.CVSSSeverities.V4.VectorString
+		} else if r.SecurityAdvisory.CVSSSeverities.V3.Score > 0 {
+			cvss = r.SecurityAdvisory.CVSSSeverities.V3.Score
+			cvssVector = r.SecurityAdvisory.CVSSSeverities.V3.VectorString
+		}
+
+		// CVE ID: top-level cve_id を優先し、なければ identifiers 配列から取得
+		cveID := r.SecurityAdvisory.CVEID
+		if cveID == "" {
+			for _, id := range r.SecurityAdvisory.Identifiers {
+				if id.Type == "CVE" {
+					cveID = id.Value
+					break
+				}
+			}
+		}
+
+		// References
+		refs := make([]string, 0, len(r.SecurityAdvisory.References))
+		for _, ref := range r.SecurityAdvisory.References {
+			refs = append(refs, ref.URL)
+		}
+
+		// CWEs
+		cwes := make([]model.CWE, 0, len(r.SecurityAdvisory.CWEs))
+		for _, cwe := range r.SecurityAdvisory.CWEs {
+			cwes = append(cwes, model.CWE{ID: cwe.CWEID, Name: cwe.Name})
+		}
+
+		// EPSS
+		var epss *model.EPSS
+		if r.SecurityAdvisory.EPSS != nil {
+			epss = &model.EPSS{
+				Percentage: r.SecurityAdvisory.EPSS.Percentage,
+				Percentile: r.SecurityAdvisory.EPSS.Percentile,
+			}
 		}
 
 		alerts = append(alerts, model.Alert{
@@ -163,18 +326,102 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string) ([]model.Alert, e
 			Number:           r.Number,
 			State:            r.State,
 			Owner:            owner,
-			Repo:             repo,
+			Repo:             repoName,
 			PackageName:      r.SecurityVulnerability.Package.Name,
 			PackageEcosystem: r.SecurityVulnerability.Package.Ecosystem,
 			Severity:         model.Severity(r.SecurityVulnerability.Severity),
 			CVEID:            cveID,
+			GHSAID:           r.SecurityAdvisory.GHSAID,
+			CVSSScore:        cvss,
+			CVSSVector:       cvssVector,
 			Summary:          r.SecurityAdvisory.Summary,
+			Description:      r.SecurityAdvisory.Description,
 			FixedIn:          r.SecurityVulnerability.FirstPatchedVersion.Identifier,
 			HTMLURL:          r.HTMLURL,
 			CreatedAt:        createdAt,
+			UpdatedAt:        updatedAt,
+			PublishedAt:      publishedAt,
+
+			VulnerableVersionRange: r.SecurityVulnerability.VulnerableVersionRange,
+			ManifestPath:           r.Dependency.ManifestPath,
+			DependencyScope:        r.Dependency.Scope,
+			DependencyRelationship: r.Dependency.Relationship,
+			EPSS:                   epss,
+			CWEs:                   cwes,
+			References:             refs,
 		})
 	}
 	return alerts, nil
+}
+
+// graphqlUpdateResponse はGraphQL APIのdependabotUpdate応答を表す
+type graphqlUpdateResponse struct {
+	Data struct {
+		Repository struct {
+			VulnerabilityAlerts struct {
+				Nodes []struct {
+					Number           int `json:"number"`
+					DependabotUpdate *struct {
+						Error *struct {
+							ErrorType string `json:"errorType"`
+							Title     string `json:"title"`
+							Body      string `json:"body"`
+						} `json:"error"`
+						PullRequest *struct {
+							Number int `json:"number"`
+						} `json:"pullRequest"`
+					} `json:"dependabotUpdate"`
+				} `json:"nodes"`
+			} `json:"vulnerabilityAlerts"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+// parseUpdateErrors はGraphQL応答からdependabotUpdateエラーをパースする
+func parseUpdateErrors(data []byte) map[int]*model.DependabotUpdateError {
+	var resp graphqlUpdateResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		slog.Debug("GraphQLレスポンスパース失敗", "error", err)
+		return nil
+	}
+
+	errors := make(map[int]*model.DependabotUpdateError)
+	for _, node := range resp.Data.Repository.VulnerabilityAlerts.Nodes {
+		if node.DependabotUpdate != nil && node.DependabotUpdate.Error != nil {
+			e := node.DependabotUpdate.Error
+			errors[node.Number] = &model.DependabotUpdateError{
+				ErrorType: e.ErrorType,
+				Title:     e.Title,
+				Body:      e.Body,
+			}
+		}
+	}
+	return errors
+}
+
+// fetchUpdateErrors はGraphQL APIでdependabotUpdateエラー情報を取得する
+func (c *ghClient) fetchUpdateErrors(ctx context.Context, owner, repo string) map[int]*model.DependabotUpdateError {
+	query := fmt.Sprintf(`query {
+		repository(owner: %q, name: %q) {
+			vulnerabilityAlerts(first: 100, states: OPEN) {
+				nodes {
+					number
+					dependabotUpdate {
+						error { errorType title body }
+						pullRequest { number }
+					}
+				}
+			}
+		}
+	}`, owner, repo)
+
+	cmd := exec.CommandContext(ctx, c.ghPath, "api", "graphql", "-f", "query="+query)
+	out, err := cmd.Output()
+	if err != nil {
+		slog.Debug("GraphQL API失敗（dependabotUpdate取得）", "owner", owner, "repo", repo, "error", err)
+		return nil
+	}
+	return parseUpdateErrors(out)
 }
 
 func splitLines(s string) []string {

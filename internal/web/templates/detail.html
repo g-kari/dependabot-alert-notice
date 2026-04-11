@@ -1,62 +1,136 @@
 {{define "content"}}
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.25rem">
-  <a href="/" class="btn btn-ghost" style="padding:5px 12px;font-size:0.82rem">← 戻る</a>
-  <h1 style="margin:0">アラート #{{.Alert.ID}}: {{.Alert.PackageName}}</h1>
+<div class="detail-header">
+  <a href="/" class="btn btn-ghost btn-sm">← 戻る</a>
+  <h1>アラート #{{.Alert.Number}}: {{.Alert.PackageName}}</h1>
 </div>
 
-<div class="card">
-  <h2 style="margin-bottom:14px">アラート情報</h2>
+{{if .Alert.UpdateError}}
+<div class="card card-warning">
+  <h2>⚠️ Dependabot 更新エラー</h2>
   <div class="table-wrap">
     <table>
       <tbody>
-        <tr><th style="width:160px">パッケージ</th><td>{{.Alert.PackageName}} <span style="color:var(--color-muted)">({{.Alert.PackageEcosystem}})</span></td></tr>
-        <tr><th>リポジトリ</th><td>{{.Alert.Owner}}/{{.Alert.Repo}}</td></tr>
-        <tr><th>重要度</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td></tr>
-        <tr><th>CVE</th><td style="font-family:monospace">{{.Alert.CVEID}}</td></tr>
-        <tr><th>CVSS</th><td>{{printf "%.1f" .Alert.CVSSScore}}</td></tr>
-        <tr><th>概要</th><td>{{.Alert.Summary}}</td></tr>
-        <tr><th>修正バージョン</th><td>{{.Alert.FixedIn}}</td></tr>
-        <tr><th>ステータス</th><td><span class="badge badge-{{.State}}">{{.State}}</span></td></tr>
-        <tr><th>GitHub</th><td><a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener">↗ 開く</a></td></tr>
+        <tr><th class="detail-th">エラータイプ</th><td><code>{{.Alert.UpdateError.ErrorType}}</code></td></tr>
+        <tr><th class="detail-th">タイトル</th><td>{{.Alert.UpdateError.Title}}</td></tr>
+        <tr><th class="detail-th">詳細</th><td class="pre-wrap">{{.Alert.UpdateError.Body}}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+<div class="card">
+  <h2>アラート情報</h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th class="detail-th">パッケージ</th><td>{{.Alert.PackageName}} <span class="text-muted">({{.Alert.PackageEcosystem}})</span></td></tr>
+        <tr><th class="detail-th">リポジトリ</th><td>{{.Alert.Owner}}/{{.Alert.Repo}}</td></tr>
+        <tr><th class="detail-th">重要度</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td></tr>
+        <tr><th class="detail-th">ステータス</th><td><span class="badge badge-{{.State}}">{{.State}}</span></td></tr>
+        {{if .Alert.CVEID}}<tr><th class="detail-th">CVE</th><td><code>{{.Alert.CVEID}}</code></td></tr>{{end}}
+        {{if .Alert.GHSAID}}<tr><th class="detail-th">GHSA</th><td><code>{{.Alert.GHSAID}}</code></td></tr>{{end}}
+        <tr><th class="detail-th">CVSS スコア</th><td>{{printf "%.1f" .Alert.CVSSScore}}</td></tr>
+        {{if .Alert.CVSSVector}}<tr><th class="detail-th">CVSS ベクトル</th><td><code class="cvss-vector">{{.Alert.CVSSVector}}</code></td></tr>{{end}}
+        {{if .Alert.EPSS}}
+        <tr><th class="detail-th">EPSS</th><td>悪用確率: {{printf "%.1f%%" (mul100 .Alert.EPSS.Percentage)}} ・ パーセンタイル: {{printf "%.1f%%" (mul100 .Alert.EPSS.Percentile)}}</td></tr>
+        {{end}}
+        <tr><th class="detail-th">概要</th><td>{{.Alert.Summary}}</td></tr>
+        {{if .Alert.FixedIn}}<tr><th class="detail-th">修正バージョン</th><td><code>{{.Alert.FixedIn}}</code></td></tr>{{end}}
+        {{if .Alert.VulnerableVersionRange}}<tr><th class="detail-th">脆弱バージョン</th><td><code>{{.Alert.VulnerableVersionRange}}</code></td></tr>{{end}}
+        {{if .Alert.ManifestPath}}<tr><th class="detail-th">マニフェスト</th><td><code>{{.Alert.ManifestPath}}</code></td></tr>{{end}}
+        {{if .Alert.DependencyScope}}<tr><th class="detail-th">スコープ</th><td>{{.Alert.DependencyScope}}</td></tr>{{end}}
+        {{if .Alert.DependencyRelationship}}<tr><th class="detail-th">依存関係</th><td>{{.Alert.DependencyRelationship}}</td></tr>{{end}}
+        <tr><th class="detail-th">検出日</th><td>{{.Alert.CreatedAt.Format "2006-01-02 15:04"}}</td></tr>
+        {{if not .Alert.UpdatedAt.IsZero}}<tr><th class="detail-th">更新日</th><td>{{.Alert.UpdatedAt.Format "2006-01-02 15:04"}}</td></tr>{{end}}
+        {{if not .Alert.PublishedAt.IsZero}}<tr><th class="detail-th">公開日</th><td>{{.Alert.PublishedAt.Format "2006-01-02 15:04"}}</td></tr>{{end}}
+        <tr><th class="detail-th">GitHub</th><td><a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener">↗ 開く</a></td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
+{{if .Alert.Description}}
+<div class="card">
+  <h2>詳細説明</h2>
+  <div class="pre-wrap description-body">{{.Alert.Description}}</div>
+</div>
+{{end}}
+
+{{if .Alert.CWEs}}
+<div class="card">
+  <h2>CWE (Common Weakness Enumeration)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>CWE ID</th><th>名称</th></tr></thead>
+      <tbody>
+        {{range .Alert.CWEs}}
+        <tr><td><code>{{.ID}}</code></td><td>{{.Name}}</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+{{if .Alert.References}}
+<div class="card">
+  <h2>参照リンク</h2>
+  <ul class="ref-list">
+    {{range .Alert.References}}
+    <li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>
+    {{end}}
+  </ul>
+</div>
+{{end}}
+
 {{if .Evaluation}}
 <div class="card">
-  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <h2>🤖 AI評価</h2>
   <div class="table-wrap">
     <table>
       <tbody>
-        <tr><th style="width:160px">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
-        <tr><th>推奨アクション</th><td><strong>{{.Evaluation.Recommendation}}</strong></td></tr>
-        <tr><th>影響</th><td>{{.Evaluation.Impact}}</td></tr>
-        <tr><th>理由</th><td>{{.Evaluation.Reasoning}}</td></tr>
+        <tr><th class="detail-th">リスク</th><td><span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Risk}}</span></td></tr>
+        <tr><th class="detail-th">推奨アクション</th><td><strong>{{.Evaluation.Recommendation}}</strong></td></tr>
+        <tr><th class="detail-th">影響</th><td>{{.Evaluation.Impact}}</td></tr>
+        <tr><th class="detail-th">理由</th><td>{{.Evaluation.Reasoning}}</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
 <div class="card">
-  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <h2>🤖 AI評価</h2>
   <div class="msg">
     <span class="badge badge-pending eval-spinning">⏳ AI評価中...</span>
-    <span style="margin-left:8px;color:var(--color-muted);font-size:0.88rem">しばらくお待ちください（自動更新されます）</span>
+    <span class="text-muted eval-waiting-msg">しばらくお待ちください（自動更新されます）</span>
   </div>
 </div>
 <script>setTimeout(function(){ location.reload(); }, 5000);</script>
 {{else if eq (printf "%s" .EvalStatus) "failed"}}
 <div class="card">
-  <h2 style="margin-bottom:14px">🤖 AI評価</h2>
+  <h2>🤖 AI評価</h2>
   <div class="msg msg-error">
-    ❌ AI評価に失敗しました。次回のポーリングで再試行されます。
+    ❌ AI評価に失敗しました。
   </div>
+  <form method="POST" action="/api/evaluate/{{.Alert.ID}}">
+    <button type="submit" class="btn btn-primary">🔁 再評価</button>
+  </form>
+</div>
+{{else}}
+<div class="card">
+  <h2>🤖 AI評価</h2>
+  <div class="msg">
+    <span class="badge badge-pending">未評価</span>
+  </div>
+  <form method="POST" action="/api/evaluate/{{.Alert.ID}}">
+    <button type="submit" class="btn btn-primary">▶️ 評価開始</button>
+  </form>
 </div>
 {{end}}
 
 {{if eq (printf "%s" .State) "pending"}}
-<div style="display:flex;gap:10px;margin-top:4px">
+<div class="detail-actions">
   <form method="POST" action="/alerts/{{.Alert.ID}}/approve">
     <button type="submit" class="btn btn-approve">✅ マージ承認</button>
   </form>

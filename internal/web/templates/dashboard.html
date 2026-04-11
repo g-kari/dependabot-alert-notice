@@ -1,26 +1,62 @@
 {{define "content"}}
+<script>
+// details 展開状態を sessionStorage で保持する
+(function() {
+  function getOpenKeys() {
+    try { return JSON.parse(sessionStorage.getItem('openDetails') || '[]'); } catch(e) { return []; }
+  }
+  function saveOpenKeys(keys) {
+    try { sessionStorage.setItem('openDetails', JSON.stringify(keys)); } catch(e) {}
+  }
+
+  // ページロード時に状態を復元
+  document.addEventListener('DOMContentLoaded', function() {
+    var openKeys = getOpenKeys();
+    document.querySelectorAll('details.cve-group[data-key]').forEach(function(d) {
+      if (openKeys.indexOf(d.dataset.key) !== -1) d.open = true;
+      d.addEventListener('toggle', function() {
+        var keys = [];
+        document.querySelectorAll('details.cve-group[data-key]').forEach(function(el) {
+          if (el.open) keys.push(el.dataset.key);
+        });
+        saveOpenKeys(keys);
+      });
+    });
+  });
+
+  // 自動リロード時に状態は sessionStorage 経由で引き継がれる（追加保存不要）
+  window.__reloadWithState = function() { location.reload(); };
+})();
+</script>
+
 {{if .HasEvaluating}}
-<script>setTimeout(function(){ location.reload(); }, 5000);</script>
+<script>setTimeout(function(){ window.__reloadWithState(); }, 5000);</script>
 {{end}}
 <div class="dashboard-header">
   <h1>Dependabot アラート一覧</h1>
   <div class="dashboard-actions">
     {{if .IsPolling}}
     <span class="badge badge-pending polling-badge">⏳ 取得中...</span>
-    <a href="/" class="btn btn-ghost">🔄 更新</a>
+    <span class="btn btn-ghost btn-disabled">🔄 更新</span>
     {{else}}
-    <form method="POST" action="/api/poll" style="display:inline">
+    <form method="POST" action="/api/poll" class="inline-form">
       <button type="submit" class="btn btn-primary">⬇️ 今すぐ取得</button>
     </form>
-    <a href="/" class="btn btn-ghost">🔄 更新</a>
+    <a href="javascript:window.__reloadWithState()" class="btn btn-ghost">🔄 更新</a>
     {{end}}
   </div>
 </div>
 
-{{if .Groups}}
+<div class="view-tabs">
+  <a href="/?view=cve" class="view-tab{{if eq .ViewMode "cve"}} view-tab-active{{end}}">CVE別</a>
+  <a href="/?view=repo" class="view-tab{{if eq .ViewMode "repo"}} view-tab-active{{end}}">リポジトリ別</a>
+</div>
+
+{{if eq .ViewMode "cve"}}
+{{if .CVEGroups}}
 <div class="cve-list">
-  {{range .Groups}}
-  <details class="cve-group">
+  {{range .CVEGroups}}
+  <details class="cve-group" data-key="cve:{{.CVEID}}:{{.PackageName}}">
     <summary class="cve-summary">
       <div class="cve-summary-main">
         <span class="badge badge-{{.Severity}}">{{.Severity}}</span>
@@ -47,6 +83,7 @@
           <tr>
             <td>
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.Owner}}/{{.Alert.Repo}}</a>
+              {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>
             <td>
               {{if .Evaluation}}
@@ -62,10 +99,10 @@
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
             <td class="action-cell">
               {{if eq (printf "%s" .State) "pending"}}
-              <form method="POST" action="/alerts/{{.Alert.ID}}/approve" style="display:inline">
+              <form method="POST" action="/alerts/{{.Alert.ID}}/approve" class="inline-form">
                 <button type="submit" class="btn btn-approve btn-sm">承認</button>
               </form>
-              <form method="POST" action="/alerts/{{.Alert.ID}}/reject" style="display:inline">
+              <form method="POST" action="/alerts/{{.Alert.ID}}/reject" class="inline-form">
                 <button type="submit" class="btn btn-reject btn-sm">却下</button>
               </form>
               {{end}}
@@ -82,5 +119,79 @@
 <div class="card empty-card">
   <p class="empty-msg">アラートなし</p>
 </div>
+{{end}}
+
+{{else}}
+
+{{if .RepoGroups}}
+<div class="cve-list">
+  {{range .RepoGroups}}
+  <details class="cve-group" data-key="repo:{{.Owner}}/{{.Repo}}">
+    <summary class="cve-summary">
+      <div class="cve-summary-main">
+        <span class="badge badge-{{.MaxSeverity}}">{{.MaxSeverity}}</span>
+        <span class="cve-pkg">{{.Owner}}/{{.Repo}}</span>
+      </div>
+      <div class="cve-summary-meta">
+        <span class="badge badge-info">{{len .Records}} アラート</span>
+      </div>
+    </summary>
+    <div class="cve-repos-wrap">
+      <table class="cve-repos cve-repos-repo">
+        <thead>
+          <tr>
+            <th>パッケージ</th>
+            <th>CVE</th>
+            <th>AI評価</th>
+            <th>ステータス</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Records}}
+          <tr>
+            <td>
+              <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.PackageName}}</a>
+              {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
+            </td>
+            <td>
+              {{if .Alert.CVEID}}<span class="cve-id">{{.Alert.CVEID}}</span>{{else}}<span class="text-muted">—</span>{{end}}
+            </td>
+            <td>
+              {{if .Evaluation}}
+              <span class="badge badge-{{.Evaluation.Risk}}">{{.Evaluation.Recommendation}}</span>
+              {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
+              <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
+              {{else if eq (printf "%s" .EvalStatus) "failed"}}
+              <span class="badge badge-error">❌ 評価失敗</span>
+              {{else}}
+              <span class="badge badge-pending">未評価</span>
+              {{end}}
+            </td>
+            <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+            <td class="action-cell">
+              {{if eq (printf "%s" .State) "pending"}}
+              <form method="POST" action="/alerts/{{.Alert.ID}}/approve" class="inline-form">
+                <button type="submit" class="btn btn-approve btn-sm">承認</button>
+              </form>
+              <form method="POST" action="/alerts/{{.Alert.ID}}/reject" class="inline-form">
+                <button type="submit" class="btn btn-reject btn-sm">却下</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {{end}}
+</div>
+{{else}}
+<div class="card empty-card">
+  <p class="empty-msg">アラートなし</p>
+</div>
+{{end}}
+
 {{end}}
 {{end}}

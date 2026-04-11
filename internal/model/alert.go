@@ -11,6 +11,25 @@ const (
 	SeverityLow      Severity = "low"
 )
 
+// CWE はCommon Weakness Enumeration情報
+type CWE struct {
+	ID   string `json:"cwe_id"`
+	Name string `json:"name"`
+}
+
+// EPSS はExploit Prediction Scoring System情報
+type EPSS struct {
+	Percentage float64 `json:"percentage"` // 悪用される確率 (0.0-1.0)
+	Percentile float64 `json:"percentile"` // パーセンタイル順位 (0.0-1.0)
+}
+
+// DependabotUpdateError はDependabotの更新試行エラー情報（GraphQL API由来）
+type DependabotUpdateError struct {
+	ErrorType string `json:"error_type"` // e.g. "security_update_not_possible"
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+}
+
 type Alert struct {
 	ID               int
 	Number           int
@@ -21,11 +40,36 @@ type Alert struct {
 	PackageEcosystem string
 	Severity         Severity
 	CVEID            string
+	GHSAID           string
 	CVSSScore        float64
+	CVSSVector       string
 	Summary          string
+	Description      string
 	FixedIn          string
 	HTMLURL          string
 	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	PublishedAt      time.Time
+
+	// 脆弱性バージョン情報
+	VulnerableVersionRange string
+
+	// 依存関係情報
+	ManifestPath           string
+	DependencyScope        string // "runtime", "development"
+	DependencyRelationship string // "direct", "transitive", "unknown", "inconclusive"
+
+	// EPSS (Exploit Prediction Scoring System)
+	EPSS *EPSS
+
+	// CWE一覧
+	CWEs []CWE
+
+	// 参照URL一覧
+	References []string
+
+	// Dependabot更新エラー情報（GraphQL API由来）
+	UpdateError *DependabotUpdateError
 }
 
 type Evaluation struct {

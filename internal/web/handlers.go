@@ -11,6 +11,7 @@ import (
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 )
 
 // CVEGroup はCVE ID単位でアラートをまとめたグループ
@@ -21,6 +22,69 @@ type CVEGroup struct {
 	PackageName string
 	CVSSScore   float64
 	Records     []*model.AlertRecord
+}
+
+// RepoGroup はリポジトリ単位でアラートをまとめたグループ
+type RepoGroup struct {
+	Owner       string
+	Repo        string
+	MaxSeverity model.Severity
+	MaxCVSS     float64
+	Records     []*model.AlertRecord
+}
+
+// groupByRepo はAlertRecordのリストをリポジトリ単位でグルーピングする。
+// グループはMaxSeverity降順 → MaxCVSS降順でソートされる。
+// グループ内のRecordsはCreatedAt降順でソートされる。
+func groupByRepo(records []*model.AlertRecord) []RepoGroup {
+	if len(records) == 0 {
+		return []RepoGroup{}
+	}
+
+	type groupKey = string
+	groupMap := make(map[groupKey]*RepoGroup)
+	var keys []string
+
+	for _, r := range records {
+		key := r.Alert.Owner + "/" + r.Alert.Repo
+		if g, ok := groupMap[key]; ok {
+			g.Records = append(g.Records, r)
+			if severityOrder[r.Alert.Severity] > severityOrder[g.MaxSeverity] {
+				g.MaxSeverity = r.Alert.Severity
+				g.MaxCVSS = r.Alert.CVSSScore
+			} else if r.Alert.Severity == g.MaxSeverity && r.Alert.CVSSScore > g.MaxCVSS {
+				g.MaxCVSS = r.Alert.CVSSScore
+			}
+		} else {
+			groupMap[key] = &RepoGroup{
+				Owner:       r.Alert.Owner,
+				Repo:        r.Alert.Repo,
+				MaxSeverity: r.Alert.Severity,
+				MaxCVSS:     r.Alert.CVSSScore,
+				Records:     []*model.AlertRecord{r},
+			}
+			keys = append(keys, key)
+		}
+	}
+
+	groups := make([]RepoGroup, 0, len(keys))
+	for _, k := range keys {
+		g := groupMap[k]
+		sort.Slice(g.Records, func(i, j int) bool {
+			return g.Records[i].Alert.CreatedAt.After(g.Records[j].Alert.CreatedAt)
+		})
+		groups = append(groups, *g)
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		si, sj := severityOrder[groups[i].MaxSeverity], severityOrder[groups[j].MaxSeverity]
+		if si != sj {
+			return si > sj
+		}
+		return groups[i].MaxCVSS > groups[j].MaxCVSS
+	})
+
+	return groups
 }
 
 // severityOrder はSeverity降順ソート用の優先度マップ
@@ -137,21 +201,33 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.pollingMu.Unlock()
 
 	records := filterByConfig(s.store.List(), cfg)
-	groups := groupByCVE(records)
 
 	hasEvaluating := false
-	for _, r := range records {
-		if r.EvalStatus == model.EvalStatusEvaluating {
+	for _, rec := range records {
+		if rec.EvalStatus == model.EvalStatusEvaluating {
 			hasEvaluating = true
 			break
 		}
 	}
 
+	viewMode := r.URL.Query().Get("view")
+	if viewMode != "repo" {
+		viewMode = "cve"
+	}
+
 	s.render(w, "dashboard.html", struct {
-		Groups        []CVEGroup
+		CVEGroups     []CVEGroup
+		RepoGroups    []RepoGroup
+		ViewMode      string
 		IsPolling     bool
 		HasEvaluating bool
-	}{Groups: groups, IsPolling: polling, HasEvaluating: hasEvaluating})
+	}{
+		CVEGroups:     groupByCVE(records),
+		RepoGroups:    groupByRepo(records),
+		ViewMode:      viewMode,
+		IsPolling:     polling,
+		HasEvaluating: hasEvaluating,
+	})
 }
 
 // handlePoll はWebUIから手動でDependabotアラートのポーリングをトリガーする
@@ -178,6 +254,28 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		}()
 		s.pollFn()
 	}()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleEnqueueEvaluate は指定アラートのAI評価をJobQueueに積む
+func (s *Server) handleEnqueueEvaluate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "不正なID", http.StatusBadRequest)
+		return
+	}
+
+	if s.jobQueue == nil {
+		http.Error(w, "JobQueueが設定されていません", http.StatusServiceUnavailable)
+		return
+	}
+
+	// 評価ジョブをキューに積む
+	s.jobQueue.Enqueue(queue.Job{
+		Type:    queue.JobEvaluateAlert,
+		Payload: id,
+	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

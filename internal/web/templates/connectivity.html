@@ -1,21 +1,21 @@
 {{define "content"}}
 <h1>🔌 疎通テスト</h1>
 
-<div class="card">
-  <p style="color:#8b949e;margin-bottom:16px">gh CLI・Claude CLI・Slack API・監視ターゲットへの接続を確認します。</p>
-  <button id="runBtn" class="btn btn-approve" style="padding:8px 24px;font-size:1em" onclick="runTests()">
-    ▶ テスト実行
-  </button>
-  <span id="spinner" style="display:none;margin-left:12px;color:#8b949e">実行中...</span>
+<div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+  <p style="color:var(--color-muted);font-size:0.9rem;flex:1">gh CLI・Claude CLI・Slack API・監視ターゲットへの接続を確認します。</p>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button id="runBtn" class="btn btn-approve interactive-scale" onclick="runTests()">▶ テスト実行</button>
+    <span id="spinner" style="display:none;color:var(--color-muted);font-size:0.88rem">実行中...</span>
+  </div>
 </div>
 
-<div id="results" style="margin-top:16px"></div>
+<div id="results" style="margin-top:1rem"></div>
 
 <script>
 const TOOLS = [
-  { type: 'gh',     label: '🐙 gh CLI',     },
-  { type: 'claude', label: '🤖 Claude CLI', },
-  { type: 'slack',  label: '💬 Slack API',  },
+  { type: 'gh',     label: '🐙 gh CLI' },
+  { type: 'claude', label: '🤖 Claude CLI' },
+  { type: 'slack',  label: '💬 Slack API' },
 ];
 
 function escHtml(s) {
@@ -25,38 +25,45 @@ function escHtml(s) {
 }
 
 function badge(ok, pending) {
-  if (pending) return '<span style="color:#8b949e">⏳ 確認中...</span>';
+  if (pending) return '<span style="color:var(--color-muted);font-size:0.82rem">⏳ 確認中...</span>';
   return ok
-    ? '<span style="color:#3fb950;font-weight:bold">✅ OK</span>'
-    : '<span style="color:#f85149;font-weight:bold">❌ NG</span>';
+    ? '<span class="badge badge-approved">✅ OK</span>'
+    : '<span class="badge badge-rejected">❌ NG</span>';
 }
 
 function initUI() {
   const results = document.getElementById('results');
   results.innerHTML = `
-    <div class="card">
-      <h2 style="margin-bottom:16px">ツール</h2>
-      <table id="tools-table">
-        <tbody>
-          ${TOOLS.map(t => `
-            <tr id="row-${t.type}">
-              <th style="width:160px">${t.label}</th>
-              <td style="width:80px">${badge(false, true)}</td>
-              <td style="color:#8b949e;white-space:pre-wrap;font-size:0.85em"></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:1rem">
+      <div style="padding:1rem 1.5rem;border-bottom:1px solid var(--color-border)">
+        <h2>ツール</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ツール</th><th>状態</th><th>メッセージ</th></tr></thead>
+          <tbody>
+            ${TOOLS.map(t => `
+              <tr id="row-${t.type}">
+                <th style="width:160px;font-weight:600;color:var(--color-text);font-size:0.875rem;text-transform:none;letter-spacing:0">${t.label}</th>
+                <td style="width:100px">${badge(false, true)}</td>
+                <td style="color:var(--color-muted);white-space:pre-wrap;font-size:0.82rem"></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="card" style="margin-top:16px">
-      <h2 style="margin-bottom:16px">📌 監視ターゲット</h2>
-      <table id="targets-table">
-        <thead><tr>
-          <th>Owner</th><th>Repo</th><th>状態</th><th>アラート数</th><th>メッセージ</th>
-        </tr></thead>
-        <tbody id="targets-body">
-          <tr id="targets-placeholder"><td colspan="5" style="color:#8b949e;text-align:center">確認中...</td></tr>
-        </tbody>
-      </table>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:1rem 1.5rem;border-bottom:1px solid var(--color-border)">
+        <h2>📌 監視ターゲット</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Owner</th><th>Repo</th><th>状態</th><th style="text-align:right">アラート数</th><th>メッセージ</th></tr></thead>
+          <tbody id="targets-body">
+            <tr id="targets-placeholder"><td colspan="5" style="text-align:center;color:var(--color-muted);padding:1.5rem">確認中...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>`;
 }
 
@@ -77,11 +84,11 @@ function addTarget(ev) {
   const count = ev.ok ? (ev.count ?? 0) : '-';
   const tr = document.createElement('tr');
   tr.innerHTML = `
-    <td>${escHtml(ev.owner)}</td>
-    <td>${escHtml(repo)}</td>
+    <td style="font-weight:500">${escHtml(ev.owner)}</td>
+    <td style="color:var(--color-muted);font-size:0.85rem">${escHtml(repo)}</td>
     <td>${badge(ev.ok, false)}</td>
-    <td style="text-align:right">${count}</td>
-    <td style="color:#8b949e;font-size:0.85em">${escHtml(ev.message)}</td>`;
+    <td style="text-align:right;font-variant-numeric:tabular-nums">${count}</td>
+    <td style="color:var(--color-muted);font-size:0.82rem">${escHtml(ev.message)}</td>`;
   tbody.appendChild(tr);
 }
 

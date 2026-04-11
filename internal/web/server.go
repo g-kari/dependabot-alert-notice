@@ -11,6 +11,7 @@ import (
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
+	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
 )
 
@@ -28,6 +29,7 @@ type Server struct {
 	pollFn    func()
 	isPolling bool
 	pollingMu sync.Mutex
+	jobQueue  *queue.Queue
 }
 
 func New(cfg *config.Config, cfgPath string, s *store.Store, m merger.Interface) *Server {
@@ -45,10 +47,20 @@ func (s *Server) SetPollFn(fn func()) {
 	s.pollFn = fn
 }
 
+// SetQueue はJobQueueをサーバーにセットする
+func (s *Server) SetQueue(q *queue.Queue) {
+	s.jobQueue = q
+}
+
+// templateFuncs はテンプレートで使用するカスタム関数
+var templateFuncs = template.FuncMap{
+	"mul100": func(v float64) float64 { return v * 100 },
+}
+
 // render はlayout.html + 指定ページテンプレートをペアでパースして実行する。
 // 全ページを一度にParseすると{{define "content"}}が上書きされるため、ページごとに個別にパースする。
 func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	tmpl, err := template.ParseFS(templateFS, "templates/layout.html", "templates/"+page)
+	tmpl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "templates/layout.html", "templates/"+page)
 	if err != nil {
 		slog.Error("テンプレートパース失敗", "page", page, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -78,6 +90,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/connectivity-test", s.handleConnectivityTest)
 	mux.HandleFunc("GET /api/connectivity-stream", s.handleConnectivityStream)
 	mux.HandleFunc("POST /api/poll", s.handlePoll)
+	mux.HandleFunc("POST /api/evaluate/{id}", s.handleEnqueueEvaluate)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),

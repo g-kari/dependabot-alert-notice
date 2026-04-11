@@ -93,7 +93,8 @@ func (e *DockerEvaluator) Evaluate(ctx context.Context, alert model.Alert) (*mod
 
 func buildPrompt(alert model.Alert) string {
 	return fmt.Sprintf(`以下のDependabotセキュリティアラートを評価してください。
-JSONで回答してください。フィールド: risk (critical/high/medium/low), impact (影響の説明), recommendation (approve/reject/manual-review), reasoning (判断理由)
+回答は必ず以下のJSON形式のみで出力してください。JSON以外のテキスト（説明文、前置き、コードブロックなど）は含めないでください。
+フィールド: risk (critical/high/medium/low), impact (影響の説明), recommendation (approve/reject/manual-review), reasoning (判断理由)
 
 アラート情報:
 - パッケージ: %s (%s)
@@ -104,7 +105,7 @@ JSONで回答してください。フィールド: risk (critical/high/medium/lo
 - 修正バージョン: %s
 - リポジトリ: %s/%s
 
-JSONのみを出力してください:`,
+{"risk":"...","impact":"...","recommendation":"...","reasoning":"..."}`,
 		alert.PackageName, alert.PackageEcosystem,
 		alert.Severity,
 		alert.CVEID,
@@ -127,17 +128,21 @@ func parseEvaluation(data []byte) (*model.Evaluation, error) {
 	}
 
 	// JSON部分を抽出（前後のテキストを除去）
-	data = extractJSON(data)
+	extracted, found := extractJSON(data)
+	if !found {
+		slog.Error("評価結果にJSONが含まれていません", "raw", string(data))
+		return nil, fmt.Errorf("評価結果にJSONが含まれていません: %.200s", string(data))
+	}
 
 	var eval model.Evaluation
-	if err := json.Unmarshal(data, &eval); err != nil {
-		slog.Error("評価結果パース失敗", "raw", string(data), "error", err)
+	if err := json.Unmarshal(extracted, &eval); err != nil {
+		slog.Error("評価結果パース失敗", "raw", string(data), "extracted", string(extracted), "error", err)
 		return nil, fmt.Errorf("評価結果パース失敗: %w", err)
 	}
 	return &eval, nil
 }
 
-func extractJSON(data []byte) []byte {
+func extractJSON(data []byte) ([]byte, bool) {
 	// 最初の { から最後の } までを抽出
 	start := -1
 	end := -1
@@ -150,7 +155,7 @@ func extractJSON(data []byte) []byte {
 		}
 	}
 	if start >= 0 && end > start {
-		return data[start : end+1]
+		return data[start : end+1], true
 	}
-	return data
+	return data, false
 }

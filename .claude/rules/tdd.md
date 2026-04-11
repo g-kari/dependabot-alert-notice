@@ -1,20 +1,26 @@
----
-paths:
-  - "**/*.go"
----
-
 # TDD（テスト駆動開発）方針
 
-## 基本ルール
+**このルールはGoコードを書くすべての作業に適用する。**
 
-- **新機能・バグ修正は必ずテストを先に書く**
-- テストが失敗することを確認してから実装する（Red → Green → Refactor）
-- テストなしのコードはコミットしない
+## 絶対ルール
+
+- **実装より先にテストを書く** — 例外なし
+- Red → Green → Refactor サイクルを守る
+- テストが失敗することを確認してから実装に入る
+- テストなしのGoコードはコミットしない
+
+## テスト作成の手順
+
+1. `_test.go` ファイルに期待する振る舞いをテストとして書く
+2. `just test` を実行してRedになることを確認する
+3. テストを通す最小限の実装を書く
+4. `just test` でGreenになることを確認する
+5. リファクタリングして再度Greenを確認する
 
 ## テスト配置
 
 - 各パッケージと同じディレクトリに `_test.go` を置く
-- パッケージ名は `package xxx_test` ではなく `package xxx`（ホワイトボックステスト）
+- パッケージ名は `package xxx`（ホワイトボックステスト）
 
 ## モック方針
 
@@ -26,14 +32,7 @@ paths:
 ## 実行コマンド
 
 ```bash
-just test          # go test ./... -v -race -count=1
-go test ./...      # 全パッケージ
-go test ./internal/web/... -run TestSettings  # 特定のテスト
-```
-
-## カバレッジ確認
-
-```bash
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
+just test                                              # 全テスト（-v -race -count=1）
+go test ./internal/xxx/... -run TestFuncName -v       # 特定テストのみ
+go test ./... -coverprofile=coverage.out && go tool cover -html=coverage.out  # カバレッジ
 ```
