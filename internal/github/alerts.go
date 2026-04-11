@@ -48,7 +48,8 @@ type ghAlert struct {
 	UpdatedAt string `json:"updated_at"`
 
 	Repository struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		Archived bool   `json:"archived"`
 	} `json:"repository"`
 
 	Dependency struct {
@@ -154,16 +155,33 @@ func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
 	}, nil
 }
 
+// isRepoArchived はリポジトリがアーカイブ済みかを返す。取得失敗時は false（続行）。
+func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool {
+	out, err := exec.CommandContext(ctx, c.ghPath, "repo", "view",
+		fmt.Sprintf("%s/%s", owner, repo),
+		"--json", "isArchived",
+		"--jq", ".isArchived",
+	).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
 	// レート制限チェック（残り200未満はスキップ）
 	if info, _ := c.checkRateLimit(ctx); info.Remaining < 200 {
 		return nil, &RateLimitError{Remaining: info.Remaining, ResetAt: info.ResetAt}
 	}
 
-	// リポジトリ指定あり → 直接取得（exclude対象の場合は空を返す）
+	// リポジトリ指定あり → 直接取得（exclude対象・アーカイブ済みの場合は空を返す）
 	if target.Repo != "" {
 		if target.IsExcluded(target.Repo) {
 			slog.Debug("リポジトリ除外スキップ", "owner", target.Owner, "repo", target.Repo)
+			return nil, nil
+		}
+		if c.isRepoArchived(ctx, target.Owner, target.Repo) {
+			slog.Debug("アーカイブリポジトリをスキップ", "owner", target.Owner, "repo", target.Repo)
 			return nil, nil
 		}
 		return c.fetchRepoAlerts(ctx, target.Owner, target.Repo)
@@ -217,10 +235,10 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 
 // fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
 func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
-	// リポジトリ一覧取得
+	// リポジトリ一覧取得（アーカイブ済みを除外）
 	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
-		"--json", "name",
-		"--jq", ".[].name",
+		"--json", "name,isArchived",
+		"--jq", "[.[] | select(.isArchived == false) | .name][]",
 		"--limit", "1000",
 	)
 	out, err := cmd.Output()
@@ -336,6 +354,11 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 			repoName = r.Repository.Name
 		}
 		if _, skip := excludeSet[repoName]; skip {
+			continue
+		}
+		// アーカイブ済みリポジトリはスキップ
+		if r.Repository.Archived {
+			slog.Debug("アーカイブリポジトリをスキップ", "repo", repoName)
 			continue
 		}
 

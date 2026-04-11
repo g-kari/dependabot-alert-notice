@@ -4,6 +4,61 @@ import (
 	"testing"
 )
 
+func TestParseAlerts_SkipsArchivedRepository(t *testing.T) {
+	c := &ghClient{ghPath: "gh"}
+	jsonData := `[
+		{
+			"number": 1,
+			"state": "open",
+			"html_url": "https://github.com/owner/archived-repo/security/dependabot/1",
+			"created_at": "2024-01-01T00:00:00Z",
+			"repository": {"name": "archived-repo", "archived": true},
+			"security_advisory": {
+				"cve_id": "CVE-2024-0001",
+				"summary": "Archived repo vuln",
+				"identifiers": [],
+				"cvss": {"score": 7.0},
+				"cvss_severities": {}
+			},
+			"security_vulnerability": {
+				"package": {"name": "pkg-a", "ecosystem": "npm"},
+				"severity": "high",
+				"first_patched_version": {"identifier": "1.0.1"}
+			}
+		},
+		{
+			"number": 2,
+			"state": "open",
+			"html_url": "https://github.com/owner/active-repo/security/dependabot/2",
+			"created_at": "2024-01-01T00:00:00Z",
+			"repository": {"name": "active-repo", "archived": false},
+			"security_advisory": {
+				"cve_id": "CVE-2024-0002",
+				"summary": "Active repo vuln",
+				"identifiers": [],
+				"cvss": {"score": 5.0},
+				"cvss_severities": {}
+			},
+			"security_vulnerability": {
+				"package": {"name": "pkg-b", "ecosystem": "npm"},
+				"severity": "medium",
+				"first_patched_version": {"identifier": "2.0.0"}
+			}
+		}
+	]`
+	// org alert (repo="" → repository.name から取得) でアーカイブリポジトリをスキップ
+	alerts, err := c.parseAlerts([]byte(jsonData), "owner", "", nil)
+	if err != nil {
+		t.Fatalf("parseAlerts() error = %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want 1 (archived repo should be skipped)", len(alerts))
+	}
+	if alerts[0].Repo != "active-repo" {
+		t.Errorf("Repo = %q, want %q", alerts[0].Repo, "active-repo")
+	}
+}
+
 func TestParseAlerts_CVEFromTopLevel(t *testing.T) {
 	c := &ghClient{ghPath: "gh"}
 	jsonData := `[{
