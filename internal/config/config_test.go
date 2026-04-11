@@ -44,8 +44,8 @@ targets:
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, "info")
 	}
-	if cfg.Web.Port != 8080 {
-		t.Errorf("Web.Port = %d, want 8080", cfg.Web.Port)
+	if cfg.Web.Port != 8999 {
+		t.Errorf("Web.Port = %d, want 8999", cfg.Web.Port)
 	}
 	if !cfg.Evaluator.Sandbox.Enabled {
 		t.Error("Evaluator.Sandbox.Enabled should be true by default")

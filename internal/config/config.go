@@ -58,7 +58,7 @@ func Load(path string) (*Config, error) {
 		ClaudePath:   "claude",
 		GhPath:       "gh",
 		LogLevel:     "info",
-		Web:          WebConfig{Port: 8080},
+		Web:          WebConfig{Port: 8999},
 		Evaluator: EvaluatorConfig{
 			Sandbox: SandboxConfig{
 				Enabled:     true,

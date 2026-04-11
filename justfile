@@ -21,6 +21,28 @@ run-once:
 build-evaluator-image:
     docker build -f Dockerfile.evaluator -t dependabot-evaluator:latest .
 
+TUNNEL_NAME := "dependabot-alert-notice"
+TUNNEL_HOSTNAME := "security.0g0.xyz"
+
+# 初回セットアップ: ログイン→トンネル作成→DNS登録→tunnel.yml生成
+tunnel-setup:
+    cloudflared login
+    cloudflared tunnel create {{TUNNEL_NAME}}
+    cloudflared tunnel route dns {{TUNNEL_NAME}} {{TUNNEL_HOSTNAME}}
+    @echo ""
+    @echo "tunnel.yml を作成してください:"
+    @echo "  cp tunnel.yml.example tunnel.yml"
+    @echo "  # TUNNEL_ID と USER を書き換える"
+    @echo "  cloudflared tunnel list  # TUNNEL_IDを確認"
+
+# トンネル実行（tunnel.yml が必要）
+tunnel:
+    cloudflared tunnel --config tunnel.yml run {{TUNNEL_NAME}}
+
+# クイックトンネル（一時URL・設定不要）
+tunnel-quick:
+    cloudflared tunnel --url http://localhost:8999
+
 install-hooks:
     pre-commit install
 

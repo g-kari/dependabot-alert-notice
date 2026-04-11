@@ -176,7 +176,7 @@ export SLACK_APP_TOKEN=xapp-...
 
 ```bash
 eval "$(devbox shellenv)"
-make build-evaluator-image
+just build-evaluator-image
 ```
 
 ### 3. 実行
@@ -188,7 +188,27 @@ go run . -once -config config.yaml
 # 常駐実行
 go run . -config config.yaml
 
-# WebUI: http://localhost:8080
+# WebUI: http://localhost:8999
+```
+
+### 4. Cloudflare Tunnel で公開（security.0g0.xyz）
+
+```bash
+# 初回のみ: ログイン・トンネル作成・DNS登録
+just tunnel-setup
+
+# tunnel.yml を作成（TUNNEL_ID と USER を書き換え）
+cp tunnel.yml.example tunnel.yml
+cloudflared tunnel list   # TUNNEL_ID を確認してtunnel.ymlに記入
+
+# トンネル起動（WebUIが https://security.0g0.xyz で公開される）
+just tunnel
+```
+
+一時URLで試したい場合（アカウント不要）:
+
+```bash
+just tunnel-quick   # ランダムな *.trycloudflare.com URL が発行される
 ```
 
 ## Slack アプリ設定

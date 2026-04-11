@@ -1,0 +1,13 @@
+# Cloudflare 名前付きトンネル設定
+# 初回セットアップ:
+#   just tunnel-setup
+# 実行:
+#   just tunnel-named
+
+tunnel: <TUNNEL_ID>   # just tunnel-setup 後に表示されるID
+credentials-file: /home/<USER>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: security.0g0.xyz
+    service: http://localhost:8999
+  - service: http_status:404

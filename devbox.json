@@ -3,7 +3,8 @@
   "packages": [
     "go@latest",
     "golangci-lint@latest",
-    "pre-commit@latest"
+    "pre-commit@latest",
+    "cloudflared@latest"
   ],
   "shell": {
     "init_hook": [

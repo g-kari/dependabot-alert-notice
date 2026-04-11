@@ -15,7 +15,7 @@ gh_path: gh            # gh CLIのパス
 log_level: info        # debug, info, warn, error
 
 web:
-  port: 8080
+  port: 8999
 
 evaluator:
   sandbox:
