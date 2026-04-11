@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
@@ -79,9 +80,13 @@ func (e *DockerEvaluator) Evaluate(ctx context.Context, alert model.Alert) (*mod
 
 // buildDockerArgs はDockerコンテナ実行用のコマンド引数を生成する（テスト可能にするため分離）
 func (e *DockerEvaluator) buildDockerArgs(prompt, claudeHome string) []string {
+	// claudeHome は ~/.claude ディレクトリのパス。その親がホームディレクトリ
+	homeDir := filepath.Dir(claudeHome)
+	claudeJSON := homeDir + "/.claude.json"
 	return []string{
 		"run", "--rm",
 		"-v", claudeHome + ":/home/node/.claude:ro",
+		"-v", claudeJSON + ":/home/node/.claude.json:ro",
 		"--read-only",
 		"--tmpfs", "/tmp",
 		"--security-opt=no-new-privileges",

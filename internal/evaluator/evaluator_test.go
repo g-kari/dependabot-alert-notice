@@ -130,6 +130,39 @@ func TestDockerEvaluator_SecurityOptFlag(t *testing.T) {
 	}
 }
 
+// TestDockerEvaluator_MountsClaudeJSON は ~/.claude.json もマウントされることを確認
+func TestDockerEvaluator_MountsClaudeJSON(t *testing.T) {
+	cfg := config.EvaluatorConfig{
+		Sandbox: config.SandboxConfig{
+			Image:       "test-image:latest",
+			MemoryLimit: "512m",
+			CPULimit:    "0.5",
+		},
+	}
+	e := &DockerEvaluator{cfg: cfg}
+	args := e.buildDockerArgs("test prompt", "/home/test/.claude")
+
+	hasDirMount := false
+	hasJSONMount := false
+	for i, arg := range args {
+		if arg == "-v" && i+1 < len(args) {
+			v := args[i+1]
+			if v == "/home/test/.claude:/home/node/.claude:ro" {
+				hasDirMount = true
+			}
+			if v == "/home/test/.claude.json:/home/node/.claude.json:ro" {
+				hasJSONMount = true
+			}
+		}
+	}
+	if !hasDirMount {
+		t.Error("args should mount ~/.claude directory")
+	}
+	if !hasJSONMount {
+		t.Error("args should mount ~/.claude.json file")
+	}
+}
+
 func TestParseEvaluationClaudeFormat(t *testing.T) {
 	// claude --output-format json の出力形式
 	input := `{"result":"{\"risk\":\"medium\",\"impact\":\"test\",\"recommendation\":\"manual-review\",\"reasoning\":\"needs review\"}"}`
