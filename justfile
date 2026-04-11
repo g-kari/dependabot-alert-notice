@@ -23,3 +23,9 @@ build-evaluator-image:
 
 install-hooks:
     pre-commit install
+
+# Go依存関係を最新に更新してテストを通す
+update:
+    go get -u ./...
+    go mod tidy
+    go test ./... -count=1 -race
