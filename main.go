@@ -347,9 +347,6 @@ func setupLogger(level string) {
 func pollLoop(ctx context.Context, cfg *config.Config, q *queue.Queue) {
 	slog.Info("ポーリング開始", "interval", cfg.PollInterval)
 
-	// 初回即実行
-	enqueueFetchAll(cfg, q)
-
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 
