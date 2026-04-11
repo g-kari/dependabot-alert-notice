@@ -179,7 +179,7 @@
     /* --- フォーム --- */
     .field { display: flex; flex-direction: column; gap: 5px; }
     .field label { font-size: 0.8rem; font-weight: 600; color: var(--color-muted); }
-    input[type=text], select, textarea {
+    input[type=text], input[type=password], select, textarea {
       padding: 8px 12px;
       background: var(--color-surface);
       border: 1px solid var(--color-border);
@@ -190,7 +190,7 @@
       outline: none;
       transition: border-color 0.2s;
     }
-    input[type=text]:focus, select:focus, textarea:focus {
+    input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
       border-color: var(--color-accent);
     }
 
