@@ -63,6 +63,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /settings", s.handleSettingsSave)
 	mux.HandleFunc("POST /settings/targets/add", s.handleTargetAdd)
 	mux.HandleFunc("POST /settings/targets/{i}/delete", s.handleTargetDelete)
+	mux.HandleFunc("GET /settings/connectivity", s.handleConnectivity)
+	mux.HandleFunc("POST /api/connectivity-test", s.handleConnectivityTest)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),

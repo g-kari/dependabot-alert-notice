@@ -1,0 +1,90 @@
+{{define "content"}}
+<h1>🔌 疎通テスト</h1>
+
+<div class="card">
+  <p style="color:#8b949e;margin-bottom:16px">gh CLI・Claude CLI・Slack API・監視ターゲットへの接続を確認します。</p>
+  <button id="runBtn" class="btn btn-approve" style="padding:8px 24px;font-size:1em" onclick="runTests()">
+    ▶ テスト実行
+  </button>
+  <span id="spinner" style="display:none;margin-left:12px;color:#8b949e">実行中...</span>
+</div>
+
+<div id="results" style="margin-top:16px"></div>
+
+<script>
+async function runTests() {
+  const btn = document.getElementById('runBtn');
+  const spinner = document.getElementById('spinner');
+  const results = document.getElementById('results');
+
+  btn.disabled = true;
+  spinner.style.display = 'inline';
+  results.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/connectivity-test', { method: 'POST' });
+    const data = await res.json();
+    results.innerHTML = renderResults(data);
+  } catch (e) {
+    results.innerHTML = `<div style="color:#f85149">エラー: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  }
+}
+
+function statusBadge(ok) {
+  return ok
+    ? '<span style="color:#3fb950;font-weight:bold">✅ OK</span>'
+    : '<span style="color:#f85149;font-weight:bold">❌ NG</span>';
+}
+
+function renderResults(data) {
+  const tools = [
+    { label: 'gh CLI',      key: 'gh',     icon: '🐙' },
+    { label: 'Claude CLI',  key: 'claude', icon: '🤖' },
+    { label: 'Slack API',   key: 'slack',  icon: '💬' },
+  ];
+
+  let html = '<div class="card"><h2 style="margin-bottom:16px">ツール</h2><table>';
+  for (const t of tools) {
+    const r = data[t.key];
+    html += `
+      <tr>
+        <th style="width:160px">${t.icon} ${t.label}</th>
+        <td style="width:80px">${statusBadge(r.ok)}</td>
+        <td style="color:#8b949e;white-space:pre-wrap;font-size:0.85em">${escHtml(r.message)}</td>
+      </tr>`;
+  }
+  html += '</table></div>';
+
+  if (data.targets && data.targets.length > 0) {
+    html += '<div class="card" style="margin-top:16px"><h2 style="margin-bottom:16px">📌 監視ターゲット</h2><table>';
+    html += '<thead><tr><th>Owner</th><th>Repo</th><th>状態</th><th>アラート数</th><th>メッセージ</th></tr></thead><tbody>';
+    for (const t of data.targets) {
+      html += `
+        <tr>
+          <td>${escHtml(t.owner)}</td>
+          <td>${escHtml(t.repo || '（org全体）')}</td>
+          <td>${statusBadge(t.ok)}</td>
+          <td style="text-align:right">${t.ok ? t.count : '-'}</td>
+          <td style="color:#8b949e;font-size:0.85em">${escHtml(t.message)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+  } else {
+    html += '<div class="card" style="margin-top:16px"><p style="color:#8b949e">監視ターゲットが未設定です。<a href="/settings">設定</a>から追加してください。</p></div>';
+  }
+
+  return html;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+{{end}}
