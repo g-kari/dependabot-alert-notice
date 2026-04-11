@@ -270,6 +270,14 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			if _, ok := openByRepo[key]; !ok {
 				openByRepo[key] = nil
 			}
+		} else {
+			// org レベルターゲット: DB に存在するすべてのリポを対象に含める（全解決済みリポの漏れ防止）
+			for _, repo := range s.ListReposByOwner(target.Owner) {
+				key := target.Owner + "/" + repo
+				if _, ok := openByRepo[key]; !ok {
+					openByRepo[key] = nil
+				}
+			}
 		}
 		for key, numbers := range openByRepo {
 			parts := strings.SplitN(key, "/", 2)
@@ -385,13 +393,19 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 			}
 		}
 
-		// Discord: eval付きで通知
+		// Discord: 既存メッセージがあれば編集、なければ新規投稿
 		if discordClient != nil {
-			if msgID, err := discordClient.NotifyEval(record); err != nil {
-				slog.Error("Discord通知失敗（AI評価完了）", "alertID", alert.ID, "error", err)
-			} else if msgID != "" {
-				if err := s.UpdateDiscordMessageID(alert.ID, msgID); err != nil {
-					slog.Error("DiscordMessageID保存失敗（AI評価後）", "alertID", alert.ID, "error", err)
+			if record.DiscordMessageID != "" {
+				if err := discordClient.UpdateEvalMessage(record); err != nil {
+					slog.Error("Discordメッセージ更新失敗（AI評価完了）", "alertID", alert.ID, "error", err)
+				}
+			} else {
+				if msgID, err := discordClient.Notify(record); err != nil {
+					slog.Error("Discord通知失敗（AI評価完了）", "alertID", alert.ID, "error", err)
+				} else if msgID != "" {
+					if err := s.UpdateDiscordMessageID(alert.ID, msgID); err != nil {
+						slog.Error("DiscordMessageID保存失敗（AI評価後）", "alertID", alert.ID, "error", err)
+					}
 				}
 			}
 		}

@@ -442,6 +442,8 @@ func (s *Store) FindEvalByCVE(cveID string) *model.Evaluation {
 		SELECT eval_json FROM alert_records
 		WHERE json_extract(alert_json, '$.CVEID') = ?
 		  AND eval_json IS NOT NULL
+		  AND eval_status = 'done'
+		ORDER BY id DESC
 		LIMIT 1`, cveID).Scan(&evalJSON)
 	if err != nil || !evalJSON.Valid {
 		return nil
@@ -493,6 +495,7 @@ func (s *Store) RemoveResolvedAlerts(owner, repo string, openNumbers []int) []*m
 		var slackTS, discordMsgID string
 
 		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
+			slog.Error("resolvedレコードスキャン失敗", "error", err)
 			continue
 		}
 		var alert model.Alert
@@ -540,6 +543,39 @@ func (s *Store) RemoveResolvedAlerts(owner, repo string, openNumbers []int) []*m
 	}
 
 	return removed
+}
+
+// ListReposByOwner はオーナー配下のリポジトリ名一覧をDBから取得する
+func (s *Store) ListReposByOwner(owner string) []string {
+	if owner == "" {
+		return []string{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT DISTINCT json_extract(alert_json, '$.Repo')
+		FROM alert_records
+		WHERE json_extract(alert_json, '$.Owner') = ?`, owner)
+	if err != nil {
+		slog.Error("ListReposByOwner クエリ失敗", "owner", owner, "error", err)
+		return []string{}
+	}
+	defer func() { _ = rows.Close() }()
+
+	var repos []string
+	for rows.Next() {
+		var repo string
+		if err := rows.Scan(&repo); err != nil {
+			slog.Error("ListReposByOwner スキャン失敗", "error", err)
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	if repos == nil {
+		return []string{}
+	}
+	return repos
 }
 
 // UpdateDiscordMessageID はDiscord通知メッセージのIDを保存する

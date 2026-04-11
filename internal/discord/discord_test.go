@@ -135,7 +135,8 @@ func TestNotify_EmbedFieldsContainImpactAndReasoning(t *testing.T) {
 	var received []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusNoContent)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg-impact"}`))
 	}))
 	defer srv.Close()
 
@@ -273,5 +274,66 @@ func TestNotifyResolved_NoMessageID(t *testing.T) {
 
 	if err := c.NotifyResolved(record); err != nil {
 		t.Errorf("NotifyResolved with empty messageID should not error: %v", err)
+	}
+}
+
+// TestUpdateEvalMessage_PatchesExistingMessage はAI評価完了時に既存メッセージをPATCHすることを確認
+func TestUpdateEvalMessage_PatchesExistingMessage(t *testing.T) {
+	var patchMethod string
+	var patchPath string
+	var patchBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		patchMethod = r.Method
+		patchPath = r.URL.Path
+		patchBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg-eval"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	record := makeRecord(model.SeverityHigh, "CVE-2024-0001")
+	record.DiscordMessageID = "discord-msg-eval-99"
+	record.Evaluation.Impact = "• Data exposure"
+	record.Evaluation.Reasoning = "• Using with untrusted input"
+
+	if err := c.UpdateEvalMessage(record); err != nil {
+		t.Fatalf("UpdateEvalMessage returned error: %v", err)
+	}
+
+	if patchMethod != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", patchMethod)
+	}
+	if patchPath != "/messages/discord-msg-eval-99" {
+		t.Errorf("path = %q, want /messages/discord-msg-eval-99", patchPath)
+	}
+
+	var payload webhookPayload
+	if err := json.Unmarshal(patchBody, &payload); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(payload.Embeds) == 0 {
+		t.Fatal("eval payload should have embeds")
+	}
+
+	// 侵害される内容フィールドが含まれること
+	fieldNames := make(map[string]bool)
+	for _, f := range payload.Embeds[0].Fields {
+		fieldNames[f.Name] = true
+	}
+	if !fieldNames["侵害される内容"] {
+		t.Error("embed should contain '侵害される内容' field")
+	}
+}
+
+// TestUpdateEvalMessage_NoMessageID はDiscordMessageIDが空のときno-opであることを確認
+func TestUpdateEvalMessage_NoMessageID(t *testing.T) {
+	c := New("https://example.com/webhook")
+	record := makeRecord(model.SeverityHigh, "CVE-2024-0001")
+	record.DiscordMessageID = ""
+
+	if err := c.UpdateEvalMessage(record); err != nil {
+		t.Errorf("UpdateEvalMessage with empty messageID should not error: %v", err)
 	}
 }

@@ -146,6 +146,80 @@ func (c *Client) Notify(record *model.AlertRecord) (string, error) {
 	return msgResp.ID, nil
 }
 
+// UpdateEvalMessage はAI評価完了後に既存Discord Webhookメッセージをeval結果でPATCH編集する
+func (c *Client) UpdateEvalMessage(record *model.AlertRecord) error {
+	if record.DiscordMessageID == "" {
+		return nil
+	}
+
+	if err := c.limiter.Wait(context.Background()); err != nil {
+		return fmt.Errorf("discord eval更新レート制限待機失敗: %w", err)
+	}
+
+	alert := record.Alert
+	eval := record.Evaluation
+
+	title := fmt.Sprintf("%s %s in %s/%s",
+		severityToEmoji(alert.Severity), alert.PackageName, alert.Owner, alert.Repo)
+
+	fields := []embedField{
+		{Name: "Severity", Value: string(alert.Severity), Inline: true},
+		{Name: "CVE", Value: nonEmpty(alert.CVEID, "N/A"), Inline: true},
+		{Name: "CVSS", Value: fmt.Sprintf("%.1f", alert.CVSSScore), Inline: true},
+		{Name: "Fixed in", Value: nonEmpty(alert.FixedIn, "N/A"), Inline: true},
+	}
+
+	if alert.Summary != "" {
+		fields = append([]embedField{{Name: "タイトル", Value: alert.Summary, Inline: false}}, fields...)
+	}
+
+	if eval != nil {
+		fields = append(fields,
+			embedField{Name: "Recommendation", Value: nonEmpty(eval.Recommendation, "N/A"), Inline: true},
+			embedField{Name: "侵害される内容", Value: nonEmpty(eval.Impact, "N/A"), Inline: false},
+			embedField{Name: "侵害される使い方", Value: nonEmpty(eval.Reasoning, "N/A"), Inline: false},
+		)
+	}
+
+	payload := webhookPayload{
+		Embeds: []embed{
+			{
+				Title:  title,
+				Color:  severityToColor(alert.Severity),
+				URL:    alert.HTMLURL,
+				Fields: fields,
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("discord eval更新 payload JSONシリアライズ失敗: %w", err)
+	}
+
+	patchURL := c.webhookURL + "/messages/" + record.DiscordMessageID
+	req, err := http.NewRequest(http.MethodPatch, patchURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("discord eval更新 PATCHリクエスト作成失敗: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("discord eval更新 PATCH送信失敗: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	c.applyRateLimitHeaders(resp)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord eval更新 PATCHエラー: %d", resp.StatusCode)
+	}
+
+	slog.Info("DiscordメッセージにAI評価を反映", "alertID", alert.ID, "messageID", record.DiscordMessageID)
+	return nil
+}
+
 // NotifyResolved は対応済みアラートをDiscord Webhookメッセージに反映する（PATCHで編集）
 func (c *Client) NotifyResolved(record *model.AlertRecord) error {
 	if record.DiscordMessageID == "" {

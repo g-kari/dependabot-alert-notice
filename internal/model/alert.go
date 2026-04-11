@@ -39,7 +39,7 @@ type Alert struct {
 	PackageName      string
 	PackageEcosystem string
 	Severity         Severity
-	CVEID            string
+	CVEID            string `json:"CVEID"`
 	GHSAID           string
 	CVSSScore        float64
 	CVSSVector       string

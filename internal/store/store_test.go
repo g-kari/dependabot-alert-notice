@@ -364,6 +364,44 @@ func TestFindEvalByCVE_SameCVEMultipleRepos(t *testing.T) {
 	}
 }
 
+func TestFindEvalByCVE_SkipsFailedStatus(t *testing.T) {
+	s := New()
+	// eval_json はあるが eval_status = 'failed' のレコード
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "CVE-2024-9999"},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusFailed,
+	})
+
+	eval := s.FindEvalByCVE("CVE-2024-9999")
+	if eval != nil {
+		t.Error("FindEvalByCVE() should return nil for failed eval_status")
+	}
+}
+
+func TestFindEvalByCVE_ReturnsNewestWhenMultiple(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "CVE-2024-1111"},
+		Evaluation: &model.Evaluation{Recommendation: "reject"},
+		EvalStatus: model.EvalStatusDone,
+	})
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo2", Number: 1, CVEID: "CVE-2024-1111"},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	eval := s.FindEvalByCVE("CVE-2024-1111")
+	if eval == nil {
+		t.Fatal("FindEvalByCVE() should return an eval")
+	}
+	// ORDER BY id DESC で最新（repo2のapprove）が返るはず
+	if eval.Recommendation != "approve" {
+		t.Errorf("Recommendation = %q, want approve (newest)", eval.Recommendation)
+	}
+}
+
 func saveTestAlert(s *Store, owner, repo string, number int) *model.AlertRecord {
 	rec := &model.AlertRecord{
 		Alert: model.Alert{
@@ -482,5 +520,52 @@ func TestAddLogAndListLogs(t *testing.T) {
 	logs := s.ListLogs()
 	if len(logs) != 2 {
 		t.Errorf("ListLogs() len = %d, want 2", len(logs))
+	}
+}
+
+// TestListReposByOwner はオーナー配下のリポジトリ一覧を返すことを確認
+func TestListReposByOwner(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org1", "repo-a", 1)
+	saveTestAlert(s, "org1", "repo-b", 1)
+	saveTestAlert(s, "org1", "repo-b", 2) // 重複リポ（DISTINCT確認用）
+	saveTestAlert(s, "org2", "repo-c", 1) // 別オーナー（含まれないこと確認）
+
+	repos := s.ListReposByOwner("org1")
+	if len(repos) != 2 {
+		t.Errorf("ListReposByOwner(org1) len = %d, want 2", len(repos))
+	}
+	repoSet := make(map[string]bool)
+	for _, r := range repos {
+		repoSet[r] = true
+	}
+	if !repoSet["repo-a"] {
+		t.Error("expected repo-a in result")
+	}
+	if !repoSet["repo-b"] {
+		t.Error("expected repo-b in result")
+	}
+}
+
+// TestListReposByOwner_EmptyOwner はオーナーが空のとき空スライスを返すことを確認
+func TestListReposByOwner_EmptyOwner(t *testing.T) {
+	s := New()
+	saveTestAlert(s, "org1", "repo-a", 1)
+
+	repos := s.ListReposByOwner("")
+	if len(repos) != 0 {
+		t.Errorf("ListReposByOwner(\"\") should return empty, got %d items", len(repos))
+	}
+}
+
+// TestListReposByOwner_NoRecords はレコードがないとき空スライスを返すことを確認
+func TestListReposByOwner_NoRecords(t *testing.T) {
+	s := New()
+	repos := s.ListReposByOwner("org1")
+	if repos == nil {
+		t.Error("expected non-nil slice")
+	}
+	if len(repos) != 0 {
+		t.Errorf("expected 0 repos, got %d", len(repos))
 	}
 }
