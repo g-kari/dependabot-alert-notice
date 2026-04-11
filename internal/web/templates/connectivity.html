@@ -74,7 +74,7 @@ function addTarget(ev) {
   if (placeholder) placeholder.remove();
 
   const repo = ev.repo || '（org全体）';
-  const count = ev.ok ? ev.count : '-';
+  const count = ev.ok ? (ev.count ?? 0) : '-';
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>${escHtml(ev.owner)}</td>

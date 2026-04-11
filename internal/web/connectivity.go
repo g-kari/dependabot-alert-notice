@@ -22,7 +22,7 @@ type streamEvent struct {
 	Message string `json:"message"`
 	Owner   string `json:"owner,omitempty"`
 	Repo    string `json:"repo,omitempty"`
-	Count   int    `json:"count,omitempty"`
+	Count   int    `json:"count"`
 }
 
 type toolResult struct {
