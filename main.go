@@ -175,10 +175,12 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 		newCount := 0
 		for _, alert := range alerts {
 			if s.HasByKey(alert.Owner, alert.Repo, alert.Number) {
-				// 既存レコードでも DefaultBranch/Contributors/Homepage 等の
-				// GitHub から取得するアラートデータは常に更新する
-				if err := s.UpdateAlertJSON(alert.Owner, alert.Repo, alert.Number, alert); err != nil {
-					slog.Warn("alert_json 更新失敗", "owner", alert.Owner, "repo", alert.Repo, "number", alert.Number, "error", err)
+				// 既存レコードでも、今回のポーリングでメタデータが取得できた場合のみ更新する。
+				// 取得失敗（空/nil）の場合はスキップし、以前の良いデータを上書きしない。
+				if alert.DefaultBranch != "" || len(alert.Contributors) > 0 || alert.Homepage != "" {
+					if err := s.UpdateAlertJSON(alert.Owner, alert.Repo, alert.Number, alert); err != nil {
+						slog.Warn("alert_json 更新失敗", "owner", alert.Owner, "repo", alert.Repo, "number", alert.Number, "error", err)
+					}
 				}
 				continue
 			}
