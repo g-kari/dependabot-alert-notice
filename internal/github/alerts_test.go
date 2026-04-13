@@ -619,6 +619,40 @@ func TestIsRateLimitMessage(t *testing.T) {
 	}
 }
 
+// TestParseAlerts_Homepage はorgAPIレスポンスのrepository.homepageが正しく取得されることを確認
+func TestParseAlerts_Homepage(t *testing.T) {
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
+	jsonData := `[{
+		"number": 1,
+		"state": "open",
+		"html_url": "https://github.com/owner/my-repo/security/dependabot/1",
+		"created_at": "2024-01-01T00:00:00Z",
+		"repository": {"name": "my-repo", "archived": false, "default_branch": "main", "homepage": "https://example.com"},
+		"security_advisory": {
+			"cve_id": "CVE-2024-1234",
+			"summary": "Test",
+			"identifiers": [],
+			"cvss": {"score": 7.0},
+			"cvss_severities": {}
+		},
+		"security_vulnerability": {
+			"package": {"name": "lodash", "ecosystem": "npm"},
+			"severity": "high",
+			"first_patched_version": {"identifier": "1.0.1"}
+		}
+	}]`
+	alerts, err := c.parseAlerts([]byte(jsonData), "owner", "", nil)
+	if err != nil {
+		t.Fatalf("parseAlerts() error = %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want 1", len(alerts))
+	}
+	if alerts[0].Homepage != "https://example.com" {
+		t.Errorf("Homepage = %q, want %q", alerts[0].Homepage, "https://example.com")
+	}
+}
+
 // TestParseContributorLogins はGitHub contributors APIレスポンスのJSONパースを確認
 func TestParseContributorLogins(t *testing.T) {
 	tests := []struct {

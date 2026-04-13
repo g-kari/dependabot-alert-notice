@@ -37,6 +37,7 @@ type Alert struct {
 	Owner            string
 	Repo             string
 	DefaultBranch    string   // Dependabotアラートの対象ブランチ（通常デフォルトブランチ）
+	Homepage         string   // リポジトリに設定されている公開URL（Settings > Website）
 	Contributors     []string // コントリビューター login 一覧（貢献数降順）
 	PackageName      string
 	PackageEcosystem string

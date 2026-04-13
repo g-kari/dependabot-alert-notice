@@ -44,7 +44,7 @@ window.__copyGroupCSV = function(btn) {
   var csvRows = Array.from(rows).map(function(row) {
     return [
       csvCell(row.dataset.repo),
-      csvCell(row.dataset.advisoryUrl),
+      csvCell(row.dataset.publicUrl),
       csvCell(row.dataset.repoUrl),
       csvCell(row.dataset.branch),
       csvCell(row.dataset.topContributor),
@@ -118,7 +118,7 @@ window.__copyGroupCSV = function(btn) {
         <tbody>
           {{range .Records}}
           <tr data-repo="{{.Alert.Repo}}"
-              data-advisory-url="{{if .Alert.GHSAID}}https://github.com/advisories/{{.Alert.GHSAID}}{{else if .Alert.CVEID}}https://nvd.nist.gov/vuln/detail/{{.Alert.CVEID}}{{end}}"
+              data-public-url="{{.Alert.Homepage}}"
               data-repo-url="https://github.com/{{.Alert.Owner}}/{{.Alert.Repo}}"
               data-branch="{{.Alert.DefaultBranch}}"
               data-top-contributor="{{topContributor .Alert.Contributors}}"
@@ -226,7 +226,7 @@ window.__copyGroupCSV = function(btn) {
         <tbody>
           {{range .Records}}
           <tr data-repo="{{.Alert.Repo}}"
-              data-advisory-url="{{if .Alert.GHSAID}}https://github.com/advisories/{{.Alert.GHSAID}}{{else if .Alert.CVEID}}https://nvd.nist.gov/vuln/detail/{{.Alert.CVEID}}{{end}}"
+              data-public-url="{{.Alert.Homepage}}"
               data-repo-url="https://github.com/{{.Alert.Owner}}/{{.Alert.Repo}}"
               data-branch="{{.Alert.DefaultBranch}}"
               data-top-contributor="{{topContributor .Alert.Contributors}}"

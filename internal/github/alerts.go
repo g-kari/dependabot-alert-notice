@@ -139,6 +139,7 @@ type ghAlert struct {
 		Name          string `json:"name"`
 		Archived      bool   `json:"archived"`
 		DefaultBranch string `json:"default_branch"`
+		Homepage      string `json:"homepage"`
 	} `json:"repository"`
 
 	Dependency struct {
@@ -244,6 +245,19 @@ func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
 	}, nil
 }
 
+// fetchHomepage はリポジトリに設定されている公開URL（Settings > Website）を返す。取得失敗時は空文字列。
+func (c *ghClient) fetchHomepage(ctx context.Context, owner, repo string) string {
+	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
+		fmt.Sprintf("%s/%s", owner, repo),
+		"--json", "homepageUrl",
+		"--jq", ".homepageUrl",
+	).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // fetchDefaultBranch はリポジトリのデフォルトブランチ名を返す。取得失敗時は空文字列。
 func (c *ghClient) fetchDefaultBranch(ctx context.Context, owner, repo string) string {
 	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
@@ -295,9 +309,11 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 		}
 		if len(alerts) > 0 {
 			branch := c.fetchDefaultBranch(ctx, target.Owner, target.Repo)
+			homepage := c.fetchHomepage(ctx, target.Owner, target.Repo)
 			contributors := c.fetchContributors(ctx, target.Owner, target.Repo)
 			for i := range alerts {
 				alerts[i].DefaultBranch = branch
+				alerts[i].Homepage = homepage
 				alerts[i].Contributors = contributors
 			}
 		}
@@ -401,7 +417,7 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 // fetchRepoList は gh repo list でリポジトリ一覧（名前・アーカイブ状態・pushedAt）を取得する
 func (c *ghClient) fetchRepoList(ctx context.Context, owner string) ([]repoListItem, error) {
 	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "list", owner,
-		"--json", "name,isArchived,pushedAt,defaultBranchRef",
+		"--json", "name,isArchived,pushedAt,defaultBranchRef,homepageUrl",
 		"--limit", "1000",
 	)
 	out, err := cmd.Output()
@@ -474,6 +490,7 @@ type repoListItem struct {
 	Name             string    `json:"name"`
 	IsArchived       bool      `json:"isArchived"`
 	PushedAt         time.Time `json:"pushedAt"`
+	HomepageUrl      string    `json:"homepageUrl"`
 	DefaultBranchRef struct {
 		Name string `json:"name"`
 	} `json:"defaultBranchRef"`
@@ -491,10 +508,12 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 		excludeSet[ex] = struct{}{}
 	}
 
-	// リポジトリ名 → デフォルトブランチ名のマップを作成
+	// リポジトリ名 → デフォルトブランチ名 / 公開URL のマップを作成
 	branchMap := make(map[string]string, len(repoItems))
+	homepageMap := make(map[string]string, len(repoItems))
 	for _, item := range repoItems {
 		branchMap[item.Name] = item.DefaultBranchRef.Name
+		homepageMap[item.Name] = item.HomepageUrl
 	}
 
 	var repos []string
@@ -554,12 +573,14 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			completed++
 			done := completed
 			if err == nil {
-				// per-repo APIはdefault_branchを返さないのでrepoListItemから補完
+				// per-repo APIはdefault_branch/homepageを返さないのでrepoListItemから補完
 				branch := branchMap[repo]
+				homepage := homepageMap[repo]
 				for i := range alerts {
 					if alerts[i].DefaultBranch == "" {
 						alerts[i].DefaultBranch = branch
 					}
+					alerts[i].Homepage = homepage
 					alerts[i].Contributors = contributors
 				}
 				all = append(all, alerts...)
@@ -725,6 +746,7 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 			Owner:            owner,
 			Repo:             repoName,
 			DefaultBranch:    r.Repository.DefaultBranch,
+			Homepage:         r.Repository.Homepage,
 			PackageName:      r.SecurityVulnerability.Package.Name,
 			PackageEcosystem: r.SecurityVulnerability.Package.Ecosystem,
 			Severity:         model.Severity(r.SecurityVulnerability.Severity),
