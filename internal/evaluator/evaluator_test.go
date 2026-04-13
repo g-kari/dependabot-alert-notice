@@ -164,7 +164,7 @@ func TestDockerEvaluator_MountsClaudeJSON(t *testing.T) {
 }
 
 func TestParseEvaluationClaudeFormat(t *testing.T) {
-	// claude --output-format json の出力形式
+	// claude --output-format json の旧出力形式: {"result":"..."}
 	input := `{"result":"{\"risk\":\"medium\",\"impact\":\"test\",\"recommendation\":\"manual-review\",\"reasoning\":\"needs review\"}"}`
 	eval, err := parseEvaluation([]byte(input))
 	if err != nil {
@@ -172,5 +172,29 @@ func TestParseEvaluationClaudeFormat(t *testing.T) {
 	}
 	if eval.Risk != "medium" {
 		t.Errorf("Risk = %q, want %q", eval.Risk, "medium")
+	}
+}
+
+func TestParseEvaluation_ArrayFormat(t *testing.T) {
+	// claude --output-format json の新しいストリーム形式（JSON配列）
+	input := `[{"type":"system","subtype":"init"},{"type":"assistant","message":{"content":[{"type":"text","text":"thinking..."}]}},{"type":"result","subtype":"success","is_error":false,"result":"{\"risk\":\"high\",\"impact\":\"RCE\",\"recommendation\":\"approve\",\"reasoning\":\"critical patch needed\"}","stop_reason":"end_turn"}]`
+	eval, err := parseEvaluation([]byte(input))
+	if err != nil {
+		t.Fatalf("parseEvaluation() error = %v", err)
+	}
+	if eval.Risk != "high" {
+		t.Errorf("Risk = %q, want high", eval.Risk)
+	}
+	if eval.Recommendation != "approve" {
+		t.Errorf("Recommendation = %q, want approve", eval.Recommendation)
+	}
+}
+
+func TestParseEvaluation_ArrayFormat_ErrorResult(t *testing.T) {
+	// is_error=true の場合はエラーを返す
+	input := `[{"type":"result","subtype":"error","is_error":true,"result":""}]`
+	_, err := parseEvaluation([]byte(input))
+	if err == nil {
+		t.Fatal("parseEvaluation() should return error for is_error=true result")
 	}
 }

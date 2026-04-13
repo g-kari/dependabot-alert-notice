@@ -133,11 +133,32 @@ type claudeJSONOutput struct {
 	Result string `json:"result"`
 }
 
+// claudeStreamEvent は claude --output-format json の新しいストリーム形式の各イベント
+type claudeStreamEvent struct {
+	Type    string `json:"type"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+}
+
 func parseEvaluation(data []byte) (*model.Evaluation, error) {
-	// claude --output-format json の出力は {"result": "..."} 形式
+	// 旧形式: {"result": "..."} オブジェクト
 	var cOut claudeJSONOutput
 	if err := json.Unmarshal(data, &cOut); err == nil && cOut.Result != "" {
 		data = []byte(cOut.Result)
+	} else {
+		// 新形式: [{"type":"system",...},{"type":"result","result":"..."},...] 配列
+		var events []claudeStreamEvent
+		if err := json.Unmarshal(data, &events); err == nil {
+			for _, e := range events {
+				if e.Type == "result" {
+					if e.IsError || e.Result == "" {
+						return nil, fmt.Errorf("claude評価がエラー終了しました")
+					}
+					data = []byte(e.Result)
+					break
+				}
+			}
+		}
 	}
 
 	// JSON部分を抽出（前後のテキストを除去）

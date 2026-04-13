@@ -49,6 +49,11 @@
 
 {{if eq .ViewMode "cve"}}
 {{if .CVEGroups}}
+{{if gt .Pagination.TotalItems 0}}
+<div class="pagination-info" style="text-align:right;margin-bottom:4px;">
+  {{.Pagination.TotalItems}} 件 / {{.Pagination.TotalPages}} ページ
+</div>
+{{end}}
 <div class="cve-list">
   {{range .CVEGroups}}
   <details class="cve-group" data-key="cve:{{if .CVEID}}{{.CVEID}}{{else}}{{.GHSAID}}{{end}}:{{.PackageName}}">
@@ -110,6 +115,21 @@
   </details>
   {{end}}
 </div>
+{{if gt .Pagination.TotalPages 1}}
+<div class="pagination">
+  {{if .Pagination.HasPrev}}
+  <a href="/?view=cve&page={{.Pagination.Prev}}" class="btn btn-ghost btn-sm">← 前へ</a>
+  {{else}}
+  <span class="btn btn-ghost btn-sm btn-disabled">← 前へ</span>
+  {{end}}
+  <span class="pagination-info">{{.Pagination.Page}} / {{.Pagination.TotalPages}} ページ</span>
+  {{if .Pagination.HasNext}}
+  <a href="/?view=cve&page={{.Pagination.Next}}" class="btn btn-ghost btn-sm">次へ →</a>
+  {{else}}
+  <span class="btn btn-ghost btn-sm btn-disabled">次へ →</span>
+  {{end}}
+</div>
+{{end}}
 {{else}}
 <div class="card empty-card">
   <p class="empty-msg">アラートなし</p>
@@ -187,6 +207,21 @@
   </details>
   {{end}}
 </div>
+{{if gt .Pagination.TotalPages 1}}
+<div class="pagination">
+  {{if .Pagination.HasPrev}}
+  <a href="/?view=repo&page={{.Pagination.Prev}}" class="btn btn-ghost btn-sm">← 前へ</a>
+  {{else}}
+  <span class="btn btn-ghost btn-sm btn-disabled">← 前へ</span>
+  {{end}}
+  <span class="pagination-info">{{.Pagination.Page}} / {{.Pagination.TotalPages}} ページ</span>
+  {{if .Pagination.HasNext}}
+  <a href="/?view=repo&page={{.Pagination.Next}}" class="btn btn-ghost btn-sm">次へ →</a>
+  {{else}}
+  <span class="btn btn-ghost btn-sm btn-disabled">次へ →</span>
+  {{end}}
+</div>
+{{end}}
 {{else}}
 <div class="card empty-card">
   <p class="empty-msg">アラートなし</p>

@@ -15,6 +15,71 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 )
 
+// dashboardPageSize はダッシュボード1ページあたりの表示グループ数
+const dashboardPageSize = 25
+
+// PaginationInfo はページネーション情報を保持する
+type PaginationInfo struct {
+	Page       int
+	TotalPages int
+	TotalItems int
+	PageSize   int
+}
+
+// HasPrev は前のページが存在するか返す
+func (p PaginationInfo) HasPrev() bool { return p.Page > 1 }
+
+// HasNext は次のページが存在するか返す
+func (p PaginationInfo) HasNext() bool { return p.Page < p.TotalPages }
+
+// Prev は前ページ番号を返す
+func (p PaginationInfo) Prev() int { return p.Page - 1 }
+
+// Next は次ページ番号を返す
+func (p PaginationInfo) Next() int { return p.Page + 1 }
+
+// paginateCVE はCVEグループスライスをページ単位に切り出す
+func paginateCVE(groups []CVEGroup, page int) ([]CVEGroup, PaginationInfo) {
+	total := len(groups)
+	totalPages := (total + dashboardPageSize - 1) / dashboardPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * dashboardPageSize
+	end := start + dashboardPageSize
+	if end > total {
+		end = total
+	}
+	return groups[start:end], PaginationInfo{Page: page, TotalPages: totalPages, TotalItems: total, PageSize: dashboardPageSize}
+}
+
+// paginateRepo はRepoグループスライスをページ単位に切り出す
+func paginateRepo(groups []RepoGroup, page int) ([]RepoGroup, PaginationInfo) {
+	total := len(groups)
+	totalPages := (total + dashboardPageSize - 1) / dashboardPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * dashboardPageSize
+	end := start + dashboardPageSize
+	if end > total {
+		end = total
+	}
+	return groups[start:end], PaginationInfo{Page: page, TotalPages: totalPages, TotalItems: total, PageSize: dashboardPageSize}
+}
+
 // CVEGroup はCVE ID（またはGHSA ID）単位でアラートをまとめたグループ
 type CVEGroup struct {
 	CVEID       string
@@ -222,18 +287,35 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		viewMode = "cve"
 	}
 
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	allCVE := groupByCVE(records)
+	allRepo := groupByRepo(records)
+	pagedCVE, cvePagination := paginateCVE(allCVE, page)
+	pagedRepo, repoPagination := paginateRepo(allRepo, page)
+
+	pagination := cvePagination
+	if viewMode == "repo" {
+		pagination = repoPagination
+	}
+
 	s.render(w, "dashboard.html", struct {
 		CVEGroups     []CVEGroup
 		RepoGroups    []RepoGroup
 		ViewMode      string
 		IsPolling     bool
 		HasEvaluating bool
+		Pagination    PaginationInfo
 	}{
-		CVEGroups:     groupByCVE(records),
-		RepoGroups:    groupByRepo(records),
+		CVEGroups:     pagedCVE,
+		RepoGroups:    pagedRepo,
 		ViewMode:      viewMode,
 		IsPolling:     polling,
 		HasEvaluating: hasEvaluating,
+		Pagination:    pagination,
 	})
 }
 
