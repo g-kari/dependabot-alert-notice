@@ -34,10 +34,18 @@ window.__copyGroupCSV = function(btn) {
   var table = details && details.querySelector('table');
   if (!table) return;
 
-  // 操作列（data-csv-skip属性付き）のインデックスを収集
   var ths = Array.from(table.querySelectorAll('thead th'));
   var skip = {};
   ths.forEach(function(th, i) { if (th.dataset.csvSkip !== undefined) skip[i] = true; });
+
+  // data-gh-url 付きのセルがある列インデックスを最初の行で検出
+  var ghUrlAfter = {};
+  var firstRow = table.querySelector('tbody tr');
+  if (firstRow) {
+    Array.from(firstRow.querySelectorAll('td')).forEach(function(td, i) {
+      if (!skip[i] && td.dataset.ghUrl !== undefined) ghUrlAfter[i] = true;
+    });
+  }
 
   function cellText(td) {
     var clone = td.cloneNode(true);
@@ -49,15 +57,26 @@ window.__copyGroupCSV = function(btn) {
       ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
-  var header = ths.filter(function(_, i) { return !skip[i]; })
-                  .map(function(th) { return csvCell(th.textContent.trim()); }).join(',');
-  var rows = Array.from(table.querySelectorAll('tbody tr')).map(function(tr) {
-    return Array.from(tr.querySelectorAll('td'))
-      .filter(function(_, i) { return !skip[i]; })
-      .map(function(td) { return csvCell(cellText(td)); }).join(',');
+  // ヘッダー（gh-url列の直後に "GitHub URL" を挿入）
+  var headers = [];
+  ths.forEach(function(th, i) {
+    if (skip[i]) return;
+    headers.push(csvCell(th.textContent.trim()));
+    if (ghUrlAfter[i]) headers.push('GitHub URL');
   });
 
-  var csv = [header].concat(rows).join('\n');
+  // 行（gh-url列の直後にURL値を挿入）
+  var rows = Array.from(table.querySelectorAll('tbody tr')).map(function(tr) {
+    var cols = [];
+    Array.from(tr.querySelectorAll('td')).forEach(function(td, i) {
+      if (skip[i]) return;
+      cols.push(csvCell(cellText(td)));
+      if (ghUrlAfter[i]) cols.push(csvCell(td.dataset.ghUrl || ''));
+    });
+    return cols.join(',');
+  });
+
+  var csv = [headers.join(',')].concat(rows).join('\n');
   navigator.clipboard.writeText(csv).then(function() {
     var orig = btn.textContent;
     btn.textContent = '✅';
@@ -121,7 +140,7 @@ window.__copyGroupCSV = function(btn) {
         <tbody>
           {{range .Records}}
           <tr>
-            <td>
+            <td data-gh-url="{{.Alert.HTMLURL}}">
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.Owner}}/{{.Alert.Repo}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>
@@ -215,7 +234,7 @@ window.__copyGroupCSV = function(btn) {
         <tbody>
           {{range .Records}}
           <tr>
-            <td>
+            <td data-gh-url="{{.Alert.HTMLURL}}">
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.PackageName}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>
