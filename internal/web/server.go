@@ -116,9 +116,14 @@ func (s *Server) Start(ctx context.Context) error {
 		_, _ = w.Write(data)
 	})
 
+	loggedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slog.Debug("HTTP", "method", r.Method, "path", r.URL.Path)
+		mux.ServeHTTP(w, r)
+	})
+
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: mux,
+		Handler: loggedHandler,
 	}
 
 	slog.Info("WebUIサーバー開始", "port", s.port)

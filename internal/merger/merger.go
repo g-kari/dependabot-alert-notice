@@ -33,15 +33,19 @@ func (m *Merger) Merge(ctx context.Context, alertID int) error {
 	}
 
 	alert := record.Alert
+	slog.Info("マージ処理開始", "alertID", alertID, "pkg", alert.PackageName, "repo", fmt.Sprintf("%s/%s", alert.Owner, alert.Repo), "prNumber", alert.PRNumber)
 
 	// PRNumberが既知ならそれを使う。なければ従来のPR検索にフォールバック（grouped PR以外）
 	prNum := alert.PRNumber
 	if prNum == 0 {
+		slog.Debug("PRNumber未設定、PR検索実行", "alertID", alertID, "pkg", alert.PackageName)
 		var err error
 		prNum, err = m.ghClient.FindDependabotPR(ctx, alert.Owner, alert.Repo, alert.PackageName)
 		if err != nil {
 			return fmt.Errorf("PR検索失敗: %w", err)
 		}
+	} else {
+		slog.Debug("PRNumber既知、FindDependabotPRスキップ", "alertID", alertID, "prNumber", prNum)
 	}
 
 	// PRをマージ
@@ -83,6 +87,7 @@ func (m *Merger) Merge(ctx context.Context, alertID int) error {
 }
 
 func (m *Merger) Approve(ctx context.Context, alertID int) error {
+	slog.Info("承認処理開始", "alertID", alertID)
 	if err := m.store.UpdateState(alertID, model.AlertStateApproved); err != nil {
 		return fmt.Errorf("承認ステート更新失敗: %w", err)
 	}
@@ -90,5 +95,6 @@ func (m *Merger) Approve(ctx context.Context, alertID int) error {
 }
 
 func (m *Merger) Reject(alertID int) error {
+	slog.Info("却下処理", "alertID", alertID)
 	return m.store.UpdateState(alertID, model.AlertStateRejected)
 }

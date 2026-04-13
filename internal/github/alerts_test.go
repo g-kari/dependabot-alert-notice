@@ -3,6 +3,8 @@ package github
 import (
 	"testing"
 	"time"
+
+	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
 func TestParseAlerts_SkipsArchivedRepository(t *testing.T) {
@@ -491,6 +493,49 @@ func TestIsRepoActive(t *testing.T) {
 				t.Errorf("isRepoActive(%v, %d) = %v, want %v", tt.pushedAt, tt.activeMonths, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFilterAlertsByActiveRepos は非活動リポジトリのアラートが除外されることを確認
+func TestFilterAlertsByActiveRepos(t *testing.T) {
+	now := time.Now()
+
+	repoList := []repoListItem{
+		{Name: "active-repo", IsArchived: false, PushedAt: now.AddDate(0, -1, 0)},  // 1か月前 → active
+		{Name: "old-repo", IsArchived: false, PushedAt: now.AddDate(0, -13, 0)},    // 13か月前 → inactive
+		{Name: "archived-repo", IsArchived: true, PushedAt: now.AddDate(0, -1, 0)}, // アーカイブ → inactive
+	}
+
+	alerts := []model.Alert{
+		{Repo: "active-repo"},
+		{Repo: "old-repo"},
+		{Repo: "archived-repo"},
+		{Repo: "unknown-repo"}, // リポ一覧にないもの → 除外
+	}
+
+	got := filterAlertsByActiveRepos(alerts, repoList, 12)
+	if len(got) != 1 {
+		t.Fatalf("got %d alerts, want 1 (only active-repo)", len(got))
+	}
+	if got[0].Repo != "active-repo" {
+		t.Errorf("Repo = %q, want %q", got[0].Repo, "active-repo")
+	}
+}
+
+// TestFilterAlertsByActiveRepos_DisabledFilter はactiveMonths=0でフィルタ無効を確認
+func TestFilterAlertsByActiveRepos_DisabledFilter(t *testing.T) {
+	now := time.Now()
+	repoList := []repoListItem{
+		{Name: "old-repo", IsArchived: false, PushedAt: now.AddDate(-2, 0, 0)},
+	}
+	alerts := []model.Alert{
+		{Repo: "old-repo"},
+		{Repo: "other-repo"},
+	}
+	// activeMonths=0 → フィルタなし、全件返却
+	got := filterAlertsByActiveRepos(alerts, repoList, 0)
+	if len(got) != 2 {
+		t.Fatalf("got %d alerts, want 2 (filter disabled)", len(got))
 	}
 }
 

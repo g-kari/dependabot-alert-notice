@@ -120,6 +120,7 @@ func main() {
 
 // enqueueFetchAll は全ターゲットのFetchAlertsジョブをキューに積む
 func enqueueFetchAll(cfg *config.Config, q *queue.Queue) {
+	slog.Info("FetchAlertsジョブ投入", "targets", len(cfg.Targets))
 	for _, target := range cfg.Targets {
 		q.Enqueue(queue.Job{
 			Type:    queue.JobFetchAlerts,
@@ -136,6 +137,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			return fmt.Errorf("FetchAlertsペイロード型エラー")
 		}
 
+		slog.Info("FetchAlerts開始", "owner", target.Owner, "repo", target.Repo)
 		alerts, err := ghClient.FetchAlerts(ctx, target)
 		if err != nil {
 			var rateLimitErr *github.RateLimitError
@@ -279,6 +281,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				}
 			}
 		}
+		slog.Debug("クリーンアップ対象リポ", "count", len(openByRepo))
 		for key, numbers := range openByRepo {
 			parts := strings.SplitN(key, "/", 2)
 			removed := s.RemoveResolvedAlerts(parts[0], parts[1], numbers)
@@ -441,6 +444,7 @@ func pollLoop(ctx context.Context, cfg *config.Config, q *queue.Queue) {
 			slog.Info("シャットダウン")
 			return
 		case <-ticker.C:
+			slog.Debug("ポーリング実行", "interval", cfg.PollInterval)
 			enqueueFetchAll(cfg, q)
 		}
 	}

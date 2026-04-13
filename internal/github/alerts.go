@@ -186,12 +186,15 @@ func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool 
 
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
 	// レート制限チェック（残り200未満はスキップ）
-	if info, _ := c.checkRateLimit(ctx); info.Remaining < 200 {
+	info, _ := c.checkRateLimit(ctx)
+	slog.Debug("レート制限確認", "remaining", info.Remaining, "resetAt", info.ResetAt.Format("15:04:05"))
+	if info.Remaining < 200 {
 		return nil, &RateLimitError{Remaining: info.Remaining, ResetAt: info.ResetAt}
 	}
 
 	// リポジトリ指定あり → 直接取得（exclude対象・アーカイブ済みの場合は空を返す）
 	if target.Repo != "" {
+		slog.Info("アラート取得開始（リポジトリ指定）", "owner", target.Owner, "repo", target.Repo)
 		if target.IsExcluded(target.Repo) {
 			slog.Debug("リポジトリ除外スキップ", "owner", target.Owner, "repo", target.Repo)
 			return nil, nil
@@ -204,6 +207,7 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 	}
 
 	// リポジトリ指定なし → org API を試してダメなら全repoにフォールバック
+	slog.Info("アラート取得開始（org全体）", "owner", target.Owner)
 	alerts, err := c.fetchOrgAlerts(ctx, target.Owner, target.Excludes)
 	if err != nil {
 		slog.Debug("org APIが失敗、ユーザーリポジトリにフォールバック", "owner", target.Owner, "error", err)
@@ -214,6 +218,7 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
+	slog.Debug("gh api実行（org）", "endpoint", endpoint)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.Output()
 	if err != nil {
@@ -224,10 +229,69 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 		return nil, err
 	}
 
+	// activeMonths > 0 のとき: リポ一覧を取得して非活動リポのアラートをフィルタ
+	if c.activeMonths > 0 && len(alerts) > 0 {
+		repoList, err := c.fetchRepoList(ctx, owner)
+		if err != nil {
+			slog.Warn("リポ一覧取得失敗（activeMonthsフィルタをスキップ）", "owner", owner, "error", err)
+		} else {
+			before := len(alerts)
+			alerts = filterAlertsByActiveRepos(alerts, repoList, c.activeMonths)
+			slog.Info("直近活動フィルタ適用（org）", "owner", owner, "before", before, "after", len(alerts), "activeMonths", c.activeMonths)
+		}
+	}
+
 	// リポジトリ別にGraphQL APIでdependabotUpdateエラー情報を補完
 	c.enrichUpdateErrors(ctx, owner, alerts)
 
+	repoCount := 0
+	repoSet := make(map[string]struct{})
+	for _, a := range alerts {
+		repoSet[a.Repo] = struct{}{}
+	}
+	repoCount = len(repoSet)
+	slog.Info("org APIアラート取得完了", "owner", owner, "count", len(alerts), "repos", repoCount)
+
 	return alerts, nil
+}
+
+// fetchRepoList は gh repo list でリポジトリ一覧（名前・アーカイブ状態・pushedAt）を取得する
+func (c *ghClient) fetchRepoList(ctx context.Context, owner string) ([]repoListItem, error) {
+	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
+		"--json", "name,isArchived,pushedAt",
+		"--limit", "1000",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
+	}
+	var items []repoListItem
+	if err := json.Unmarshal(out, &items); err != nil {
+		return nil, fmt.Errorf("リポジトリ一覧JSONパース失敗: %w", err)
+	}
+	slog.Debug("リポジトリ一覧取得", "owner", owner, "count", len(items))
+	return items, nil
+}
+
+// filterAlertsByActiveRepos は非活動リポジトリ（アーカイブ・pushedAt古い・リポ一覧にない）のアラートを除外する。
+// activeMonths=0 のときはフィルタなしで全件返す。
+func filterAlertsByActiveRepos(alerts []model.Alert, repoList []repoListItem, activeMonths int) []model.Alert {
+	if activeMonths <= 0 {
+		return alerts
+	}
+	activeSet := make(map[string]struct{}, len(repoList))
+	for _, r := range repoList {
+		if !r.IsArchived && isRepoActive(r.PushedAt, activeMonths) {
+			activeSet[r.Name] = struct{}{}
+		}
+	}
+	result := alerts[:0]
+	for _, a := range alerts {
+		if _, ok := activeSet[a.Repo]; ok {
+			result = append(result, a)
+		}
+	}
+	return result
 }
 
 // enrichUpdateErrors はアラートをリポジトリ別にグループ化し、各リポジトリのdependabotUpdate情報（エラー + PR番号）を補完する
@@ -236,6 +300,7 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 	for _, a := range alerts {
 		repoSet[a.Repo] = struct{}{}
 	}
+	slog.Debug("GraphQL補完開始", "owner", owner, "repos", len(repoSet))
 
 	for repo := range repoSet {
 		info := c.fetchGraphQLUpdates(ctx, owner, repo)
@@ -250,6 +315,7 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 			}
 		}
 	}
+	slog.Debug("GraphQL補完完了", "owner", owner, "repos", len(repoSet))
 }
 
 // repoListItem は `gh repo list --json name,isArchived,pushedAt` の各要素
@@ -261,19 +327,9 @@ type repoListItem struct {
 
 // fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
 func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
-	// リポジトリ一覧取得（pushedAt含む）
-	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
-		"--json", "name,isArchived,pushedAt",
-		"--limit", "1000",
-	)
-	out, err := cmd.Output()
+	repoItems, err := c.fetchRepoList(ctx, owner)
 	if err != nil {
-		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
-	}
-
-	var repoItems []repoListItem
-	if err := json.Unmarshal(out, &repoItems); err != nil {
-		return nil, fmt.Errorf("リポジトリ一覧JSONパース失敗: %w", err)
+		return nil, err
 	}
 
 	excludeSet := make(map[string]struct{}, len(excludes))
@@ -342,6 +398,7 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 
 func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", owner, repo)
+	slog.Debug("gh api実行（リポジトリ）", "endpoint", endpoint)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -390,6 +447,7 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 	}
 
 	alerts := make([]model.Alert, 0, len(raw))
+	excluded, archived := 0, 0
 	for _, r := range raw {
 		// org API ではレスポンスにリポジトリ名が含まれる。除外リストをチェック
 		repoName := repo
@@ -397,11 +455,13 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 			repoName = r.Repository.Name
 		}
 		if _, skip := excludeSet[repoName]; skip {
+			excluded++
 			continue
 		}
 		// アーカイブ済みリポジトリはスキップ
 		if r.Repository.Archived {
 			slog.Debug("アーカイブリポジトリをスキップ", "repo", repoName)
+			archived++
 			continue
 		}
 
@@ -481,6 +541,7 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 			References:             refs,
 		})
 	}
+	slog.Debug("アラートパース完了", "total", len(raw), "valid", len(alerts), "excluded", excluded, "archived", archived)
 	return alerts, nil
 }
 
@@ -573,7 +634,9 @@ func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) 
 			PRNumbers: make(map[int]int),
 		}
 	}
-	return parseGraphQLUpdates(out)
+	info := parseGraphQLUpdates(out)
+	slog.Debug("GraphQL取得完了", "owner", owner, "repo", repo, "errors", len(info.Errors), "prs", len(info.PRNumbers))
+	return info
 }
 
 func (c *ghClient) FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error) {
