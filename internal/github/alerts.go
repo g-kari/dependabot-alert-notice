@@ -1,10 +1,12 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strconv"
@@ -216,35 +218,49 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 	return alerts, nil
 }
 
+// alertNumberMarker は gh api --paginate の出力から取得件数を数えるためのマーカー
+var alertNumberMarker = []byte(`"number":`)
+
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
-	slog.Info("org APIアラート取得中（全ページ取得）", "owner", owner)
-
-	// --paginate は全ページ分ブロックするため、15秒ごとに進捗ログを出す
-	heartbeatDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		elapsed := 15
-		for {
-			select {
-			case <-ticker.C:
-				slog.Info("org APIアラート取得継続中", "owner", owner, "elapsed_sec", elapsed)
-				elapsed += 15
-			case <-heartbeatDone:
-				return
-			}
-		}
-	}()
+	slog.Info("org APIアラート取得開始", "owner", owner)
 
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
-	out, err := cmd.Output()
-	close(heartbeatDone)
-
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, fmt.Errorf("stdout pipe 失敗: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("org API 起動失敗: %w", err)
+	}
+
+	// ストリームを読みながら取得件数をカウント（100件≒1ページごとにログ）
+	var buf bytes.Buffer
+	fetched := 0
+	chunk := make([]byte, 32*1024)
+	for {
+		n, readErr := stdout.Read(chunk)
+		if n > 0 {
+			buf.Write(chunk[:n])
+			prev := fetched / 100
+			fetched += bytes.Count(chunk[:n], alertNumberMarker)
+			if fetched/100 > prev {
+				slog.Info("org APIアラート取得中", "owner", owner, "fetched", fetched)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("stdout 読み込み失敗: %w", readErr)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
 		return nil, fmt.Errorf("org API 失敗: %w", err)
 	}
-	alerts, err := c.parseAlerts(out, owner, "", excludes)
+
+	alerts, err := c.parseAlerts(buf.Bytes(), owner, "", excludes)
 	if err != nil {
 		return nil, err
 	}
