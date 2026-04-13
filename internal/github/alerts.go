@@ -219,8 +219,28 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
 	slog.Info("org APIアラート取得中（全ページ取得）", "owner", owner)
+
+	// --paginate は全ページ分ブロックするため、15秒ごとに進捗ログを出す
+	heartbeatDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		elapsed := 15
+		for {
+			select {
+			case <-ticker.C:
+				slog.Info("org APIアラート取得継続中", "owner", owner, "elapsed_sec", elapsed)
+				elapsed += 15
+			case <-heartbeatDone:
+				return
+			}
+		}
+	}()
+
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.Output()
+	close(heartbeatDone)
+
 	if err != nil {
 		return nil, fmt.Errorf("org API 失敗: %w", err)
 	}
