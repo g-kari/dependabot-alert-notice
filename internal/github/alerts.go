@@ -218,7 +218,7 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
-	slog.Debug("gh api実行（org）", "endpoint", endpoint)
+	slog.Info("org APIアラート取得中（全ページ取得）", "owner", owner)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.Output()
 	if err != nil {
@@ -228,6 +228,7 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("org APIアラートパース完了", "owner", owner, "count", len(alerts))
 
 	// activeMonths > 0 のとき: リポ一覧を取得して非活動リポのアラートをフィルタ
 	if c.activeMonths > 0 && len(alerts) > 0 {
@@ -300,8 +301,12 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 	for _, a := range alerts {
 		repoSet[a.Repo] = struct{}{}
 	}
-	slog.Debug("GraphQL補完開始", "owner", owner, "repos", len(repoSet))
+	if len(repoSet) == 0 {
+		return
+	}
+	slog.Info("GraphQL補完開始（PR番号・エラー情報）", "owner", owner, "repos", len(repoSet))
 
+	done := 0
 	for repo := range repoSet {
 		info := c.fetchGraphQLUpdates(ctx, owner, repo)
 		for i := range alerts {
@@ -314,8 +319,12 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 				}
 			}
 		}
+		done++
+		if done%10 == 0 || done == len(repoSet) {
+			slog.Info("GraphQL補完進捗", "owner", owner, "done", done, "total", len(repoSet))
+		}
 	}
-	slog.Debug("GraphQL補完完了", "owner", owner, "repos", len(repoSet))
+	slog.Info("GraphQL補完完了", "owner", owner, "repos", len(repoSet))
 }
 
 // repoListItem は `gh repo list --json name,isArchived,pushedAt` の各要素
@@ -359,17 +368,19 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	if skippedInactive > 0 {
 		slog.Info("直近活動なしリポジトリをスキップ", "owner", owner, "skipped", skippedInactive, "activeMonths", c.activeMonths)
 	}
-	slog.Debug("ユーザーリポジトリ一覧取得", "owner", owner, "count", len(repos), "excluded", len(excludes))
+	slog.Info("リポジトリ別アラート取得開始", "owner", owner, "repos", len(repos))
 
 	// GitHub secondary rate limit: 最大100並列。余裕を持って10に制限
 	const concurrency = 10
 	sem := make(chan struct{}, concurrency)
 
 	var (
-		mu  sync.Mutex
-		all []model.Alert
-		wg  sync.WaitGroup
+		mu        sync.Mutex
+		all       []model.Alert
+		wg        sync.WaitGroup
+		completed int
 	)
+	total := len(repos)
 	for _, repo := range repos {
 		wg.Add(1)
 		go func(repo string) {
@@ -377,22 +388,29 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
-			if err != nil {
-				// SkipErrorは静かに無視（Dependabot未有効など）
+
+			mu.Lock()
+			completed++
+			done := completed
+			if err == nil {
+				all = append(all, alerts...)
+			} else {
 				var skipErr *SkipError
 				if !errors.As(err, &skipErr) {
 					slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
 				}
-				return
 			}
-			mu.Lock()
-			all = append(all, alerts...)
 			mu.Unlock()
+
+			// 10件ごと、または最後の1件で進捗をログ
+			if done%10 == 0 || done == total {
+				slog.Info("リポジトリ別アラート取得進捗", "owner", owner, "done", done, "total", total)
+			}
 		}(repo)
 	}
 	wg.Wait()
 
-	slog.Info("アラート取得完了（全リポジトリ）", "owner", owner, "repos", len(repos), "alerts", len(all))
+	slog.Info("アラート取得完了（全リポジトリ）", "owner", owner, "repos", total, "alerts", len(all))
 	return all, nil
 }
 

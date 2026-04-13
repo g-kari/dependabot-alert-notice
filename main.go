@@ -221,9 +221,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 
 			newCount++
 		}
-		if newCount > 0 {
-			slog.Info("新規アラート登録", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "count", newCount)
-		}
+		slog.Info("新規アラート登録", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "new", newCount, "total", len(alerts))
 
 		// AI自動評価が有効な場合のみ pending/failed をEvaluateJobとして積む
 		if cfg.Evaluator.AutoEval {
