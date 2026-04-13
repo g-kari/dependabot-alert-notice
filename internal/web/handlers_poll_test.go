@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/model"
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 )
 
@@ -189,6 +190,46 @@ func TestPollRepo_MissingParams(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// TestEnqueueEvaluate_RedirectsToReferer はRefererがある場合そこへリダイレクトすることを確認
+func TestEnqueueEvaluate_RedirectsToReferer(t *testing.T) {
+	srv, s, _ := newTestServer(t)
+	srv.jobQueue = queue.New(10, 1)
+	saveAlert(s, 1, "lodash", model.SeverityHigh)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate/1", nil)
+	req.SetPathValue("id", "1")
+	req.Header.Set("Referer", "http://localhost:8999/alerts/1?view=cve&page=2")
+	w := httptest.NewRecorder()
+	srv.handleEnqueueEvaluate(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	loc := w.Header().Get("Location")
+	if loc != "http://localhost:8999/alerts/1?view=cve&page=2" {
+		t.Errorf("Location = %q, want referer URL", loc)
+	}
+}
+
+// TestEnqueueEvaluate_FallsBackToRootWhenNoReferer はRefererがない場合 / にリダイレクトすることを確認
+func TestEnqueueEvaluate_FallsBackToRootWhenNoReferer(t *testing.T) {
+	srv, s, _ := newTestServer(t)
+	srv.jobQueue = queue.New(10, 1)
+	saveAlert(s, 1, "lodash", model.SeverityHigh)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate/1", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	srv.handleEnqueueEvaluate(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("Location = %q, want /", loc)
 	}
 }
 

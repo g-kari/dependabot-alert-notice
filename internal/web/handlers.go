@@ -410,6 +410,10 @@ func (s *Server) handleEnqueueEvaluate(w http.ResponseWriter, r *http.Request) {
 		Payload: id,
 	})
 
+	if ref := r.Referer(); ref != "" {
+		http.Redirect(w, r, ref, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
