@@ -4,11 +4,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
 func TestParseAlerts_SkipsArchivedRepository(t *testing.T) {
-	c := &ghClient{ghPath: "gh"}
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
 	jsonData := `[
 		{
 			"number": 1,
@@ -63,7 +64,7 @@ func TestParseAlerts_SkipsArchivedRepository(t *testing.T) {
 }
 
 func TestParseAlerts_CVEFromTopLevel(t *testing.T) {
-	c := &ghClient{ghPath: "gh"}
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
 	jsonData := `[{
 		"number": 1,
 		"state": "open",
@@ -95,7 +96,7 @@ func TestParseAlerts_CVEFromTopLevel(t *testing.T) {
 }
 
 func TestParseAlerts_CVEFromIdentifiers(t *testing.T) {
-	c := &ghClient{ghPath: "gh"}
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
 	jsonData := `[{
 		"number": 2,
 		"state": "open",
@@ -130,7 +131,7 @@ func TestParseAlerts_CVEFromIdentifiers(t *testing.T) {
 }
 
 func TestParseAlerts_NoCVE(t *testing.T) {
-	c := &ghClient{ghPath: "gh"}
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
 	jsonData := `[{
 		"number": 3,
 		"state": "open",
@@ -164,7 +165,7 @@ func TestParseAlerts_NoCVE(t *testing.T) {
 }
 
 func TestParseAlerts_AllFields(t *testing.T) {
-	c := &ghClient{ghPath: "gh"}
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
 	jsonData := `[{
 		"number": 10,
 		"state": "open",

@@ -35,17 +35,11 @@ type Client interface {
 }
 
 type ghClient struct {
-	ghPath           string
-	activeMonths     int    // 0=無効、N=直近Nか月以内にpushがあったリポのみ対象
-	fetchMinSeverity string // 取得する最低重要度 (low/medium/high/critical)、空=無制限
+	cfg *config.Config // 設定への参照（動的変更をリアルタイムに反映するためポインタ保持）
 }
 
 func New(cfg *config.Config) Client {
-	return &ghClient{
-		ghPath:           cfg.GhPath,
-		activeMonths:     cfg.ActiveMonths,
-		fetchMinSeverity: cfg.FetchMinSeverity,
-	}
+	return &ghClient{cfg: cfg}
 }
 
 // buildSeverityParam は最低重要度から GitHub API の severity クエリパラメータ文字列を生成する。
@@ -179,7 +173,7 @@ type rateLimitInfo struct {
 
 // checkRateLimit はREST APIの残りリクエスト数とリセット時刻を返す
 func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
-	out, err := exec.CommandContext(ctx, c.ghPath, "api", "rate_limit", "--jq", "[.rate.remaining, .rate.reset] | @tsv").Output()
+	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "api", "rate_limit", "--jq", "[.rate.remaining, .rate.reset] | @tsv").Output()
 	if err != nil {
 		return rateLimitInfo{Remaining: 5000}, nil // 取得失敗時は続行
 	}
@@ -197,7 +191,7 @@ func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
 
 // isRepoArchived はリポジトリがアーカイブ済みかを返す。取得失敗時は false（続行）。
 func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool {
-	out, err := exec.CommandContext(ctx, c.ghPath, "repo", "view",
+	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
 		fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "isArchived",
 		"--jq", ".isArchived",
@@ -245,12 +239,12 @@ var alertNumberMarker = []byte(`"number":`)
 
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
-	if sev := buildSeverityParam(c.fetchMinSeverity); sev != "" {
+	if sev := buildSeverityParam(c.cfg.FetchMinSeverity); sev != "" {
 		endpoint += "&severity=" + sev
 	}
-	slog.Info("org APIアラート取得開始", "owner", owner, "fetchMinSeverity", c.fetchMinSeverity)
+	slog.Info("org APIアラート取得開始", "owner", owner, "fetchMinSeverity", c.cfg.FetchMinSeverity)
 
-	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
+	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", endpoint, "--paginate")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe 失敗: %w", err)
@@ -292,14 +286,14 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	slog.Info("org APIアラートパース完了", "owner", owner, "count", len(alerts))
 
 	// activeMonths > 0 のとき: リポ一覧を取得して非活動リポのアラートをフィルタ
-	if c.activeMonths > 0 && len(alerts) > 0 {
+	if c.cfg.ActiveMonths > 0 && len(alerts) > 0 {
 		repoList, err := c.fetchRepoList(ctx, owner)
 		if err != nil {
 			slog.Warn("リポ一覧取得失敗（activeMonthsフィルタをスキップ）", "owner", owner, "error", err)
 		} else {
 			before := len(alerts)
-			alerts = filterAlertsByActiveRepos(alerts, repoList, c.activeMonths)
-			slog.Info("直近活動フィルタ適用（org）", "owner", owner, "before", before, "after", len(alerts), "activeMonths", c.activeMonths)
+			alerts = filterAlertsByActiveRepos(alerts, repoList, c.cfg.ActiveMonths)
+			slog.Info("直近活動フィルタ適用（org）", "owner", owner, "before", before, "after", len(alerts), "activeMonths", c.cfg.ActiveMonths)
 		}
 	}
 
@@ -319,7 +313,7 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 
 // fetchRepoList は gh repo list でリポジトリ一覧（名前・アーカイブ状態・pushedAt）を取得する
 func (c *ghClient) fetchRepoList(ctx context.Context, owner string) ([]repoListItem, error) {
-	cmd := exec.CommandContext(ctx, c.ghPath, "repo", "list", owner,
+	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "list", owner,
 		"--json", "name,isArchived,pushedAt",
 		"--limit", "1000",
 	)
@@ -417,9 +411,9 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			slog.Debug("リポジトリ除外", "owner", owner, "repo", item.Name)
 			continue
 		}
-		if !isRepoActive(item.PushedAt, c.activeMonths) {
+		if !isRepoActive(item.PushedAt, c.cfg.ActiveMonths) {
 			slog.Debug("直近活動なしリポジトリをスキップ",
-				"owner", owner, "repo", item.Name, "pushedAt", item.PushedAt, "activeMonths", c.activeMonths)
+				"owner", owner, "repo", item.Name, "pushedAt", item.PushedAt, "activeMonths", c.cfg.ActiveMonths)
 			skippedInactive++
 			continue
 		}
@@ -427,7 +421,7 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	}
 
 	if skippedInactive > 0 {
-		slog.Info("直近活動なしリポジトリをスキップ", "owner", owner, "skipped", skippedInactive, "activeMonths", c.activeMonths)
+		slog.Info("直近活動なしリポジトリをスキップ", "owner", owner, "skipped", skippedInactive, "activeMonths", c.cfg.ActiveMonths)
 	}
 	slog.Info("リポジトリ別アラート取得開始", "owner", owner, "repos", len(repos))
 
@@ -492,11 +486,11 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 
 func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", owner, repo)
-	if sev := buildSeverityParam(c.fetchMinSeverity); sev != "" {
+	if sev := buildSeverityParam(c.cfg.FetchMinSeverity); sev != "" {
 		endpoint += "&severity=" + sev
 	}
 	slog.Debug("gh api実行（リポジトリ）", "endpoint", endpoint)
-	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
+	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", endpoint, "--paginate")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.ToLower(strings.TrimSpace(string(out)))
@@ -728,7 +722,7 @@ func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) 
 		}
 	}`, owner, repo)
 
-	cmd := exec.CommandContext(ctx, c.ghPath, "api", "graphql", "-f", "query="+query)
+	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", "graphql", "-f", "query="+query)
 	out, err := cmd.Output()
 	if err != nil {
 		slog.Debug("GraphQL API失敗（dependabotUpdate取得）", "owner", owner, "repo", repo, "error", err)
@@ -744,7 +738,7 @@ func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) 
 
 func (c *ghClient) FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error) {
 	// dependabot PRを検索
-	cmd := exec.CommandContext(ctx, c.ghPath, "pr", "list",
+	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--author", "app/dependabot",
 		"--state", "open",
