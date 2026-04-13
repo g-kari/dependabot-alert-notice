@@ -41,15 +41,37 @@ window.__copyGroupCSV = function(btn) {
   }
 
   var headers = ['リポジトリ', '公開URL', 'リポジトリURL', 'ブランチ', 'トップコントリビューター', 'DependabotURL', 'コントリビューター一覧'];
-  var csvRows = Array.from(rows).map(function(row) {
+  // 同一リポジトリの行をマージ（DependabotURLは空白区切りで結合）
+  var repoMap = {};
+  var repoOrder = [];
+  Array.from(rows).forEach(function(row) {
+    var repo = row.dataset.repo || '';
+    if (!repoMap[repo]) {
+      repoMap[repo] = {
+        repo: repo,
+        publicUrl: row.dataset.publicUrl || '',
+        repoUrl: row.dataset.repoUrl || '',
+        branch: row.dataset.branch || '',
+        topContributor: row.dataset.topContributor || '',
+        dependabotUrls: [],
+        contributors: row.dataset.contributors || '',
+      };
+      repoOrder.push(repo);
+    }
+    if (row.dataset.dependabotUrl) {
+      repoMap[repo].dependabotUrls.push(row.dataset.dependabotUrl);
+    }
+  });
+  var csvRows = repoOrder.map(function(repo) {
+    var d = repoMap[repo];
     return [
-      csvCell(row.dataset.repo),
-      csvCell(row.dataset.publicUrl),
-      csvCell(row.dataset.repoUrl),
-      csvCell(row.dataset.branch),
-      csvCell(row.dataset.topContributor),
-      csvCell(row.dataset.dependabotUrl),
-      csvCell(row.dataset.contributors),
+      csvCell(d.repo),
+      csvCell(d.publicUrl),
+      csvCell(d.repoUrl),
+      csvCell(d.branch),
+      csvCell(d.topContributor),
+      csvCell(d.dependabotUrls.join(' ')),
+      csvCell(d.contributors),
     ].join(',');
   });
 
