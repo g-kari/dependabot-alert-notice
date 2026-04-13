@@ -41,14 +41,23 @@ window.__copyGroupCSV = function(btn) {
   }
 
   var headers = ['リポジトリ', '公開URL', 'リポジトリURL', 'ブランチ', 'トップコントリビューター', 'DependabotURL', 'コントリビューター一覧'];
-  // 同一リポジトリの行をマージ（DependabotURLは空白区切りで結合）
-  var repoMap = {};
-  var repoOrder = [];
+  // ビュー種別を判定して重複排除キーを切り替える
+  // CVEビュー（data-key="cve:..."）: 同一リポジトリをマージ
+  // リポビュー（data-key="repo:..."）: 同一CVEをマージ（CVE未設定はそのまま）
+  var isRepoView = (details.dataset.key || '').indexOf('repo:') === 0;
+  var keyMap = {};
+  var keyOrder = [];
   Array.from(rows).forEach(function(row) {
-    var repo = row.dataset.repo || '';
-    if (!repoMap[repo]) {
-      repoMap[repo] = {
-        repo: repo,
+    var groupKey;
+    if (isRepoView) {
+      // CVE IDがあればCVEキー、なければDependabotURL（マージしない）
+      groupKey = row.dataset.cve || row.dataset.dependabotUrl || '';
+    } else {
+      groupKey = row.dataset.repo || '';
+    }
+    if (!keyMap[groupKey]) {
+      keyMap[groupKey] = {
+        repo: row.dataset.repo || '',
         publicUrl: row.dataset.publicUrl || '',
         repoUrl: row.dataset.repoUrl || '',
         branch: row.dataset.branch || '',
@@ -56,14 +65,14 @@ window.__copyGroupCSV = function(btn) {
         dependabotUrls: [],
         contributors: row.dataset.contributors || '',
       };
-      repoOrder.push(repo);
+      keyOrder.push(groupKey);
     }
     if (row.dataset.dependabotUrl) {
-      repoMap[repo].dependabotUrls.push(row.dataset.dependabotUrl);
+      keyMap[groupKey].dependabotUrls.push(row.dataset.dependabotUrl);
     }
   });
-  var csvRows = repoOrder.map(function(repo) {
-    var d = repoMap[repo];
+  var csvRows = keyOrder.map(function(key) {
+    var d = keyMap[key];
     return [
       csvCell(d.repo),
       csvCell(d.publicUrl),
@@ -261,7 +270,8 @@ window.__copyGroupCSV = function(btn) {
               data-branch="{{.Alert.DefaultBranch}}"
               data-top-contributor="{{topContributor .Alert.Contributors}}"
               data-dependabot-url="{{.Alert.HTMLURL}}"
-              data-contributors="{{joinStrings .Alert.Contributors ", "}}">
+              data-contributors="{{joinStrings .Alert.Contributors ", "}}"
+              data-cve="{{.Alert.CVEID}}">
             <td>
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.PackageName}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
