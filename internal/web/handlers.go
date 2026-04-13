@@ -305,19 +305,21 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.render(w, "dashboard.html", struct {
-		CVEGroups     []CVEGroup
-		RepoGroups    []RepoGroup
-		ViewMode      string
-		IsPolling     bool
-		HasEvaluating bool
-		Pagination    PaginationInfo
+		CVEGroups       []CVEGroup
+		RepoGroups      []RepoGroup
+		ViewMode        string
+		IsPolling       bool
+		HasEvaluating   bool
+		Pagination      PaginationInfo
+		DisableApproval bool
 	}{
-		CVEGroups:     pagedCVE,
-		RepoGroups:    pagedRepo,
-		ViewMode:      viewMode,
-		IsPolling:     polling,
-		HasEvaluating: hasEvaluating,
-		Pagination:    pagination,
+		CVEGroups:       pagedCVE,
+		RepoGroups:      pagedRepo,
+		ViewMode:        viewMode,
+		IsPolling:       polling,
+		HasEvaluating:   hasEvaluating,
+		DisableApproval: s.cfg.DisableApproval,
+		Pagination:      pagination,
 	})
 }
 
@@ -432,10 +434,18 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.render(w, "detail.html", record)
+	s.render(w, "detail.html", struct {
+		*model.AlertRecord
+		DisableApproval bool
+	}{record, s.cfg.DisableApproval})
 }
 
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.DisableApproval {
+		http.Error(w, "承認機能は無効化されています", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "不正なID", http.StatusBadRequest)
@@ -452,6 +462,11 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.DisableApproval {
+		http.Error(w, "却下機能は無効化されています", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "不正なID", http.StatusBadRequest)
@@ -567,6 +582,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("DISCORD_WEBHOOK_URL") == "" {
 		s.cfg.Discord.WebhookURL = r.FormValue("discord_webhook_url")
 	}
+
+	// 承認/却下機能の有効・無効
+	s.cfg.DisableApproval = r.FormValue("disable_approval") == "true"
 
 	// 取得最低重要度（空=全件取得）
 	if v := r.FormValue("fetch_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" || v == "" {

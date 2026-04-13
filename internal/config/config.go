@@ -87,6 +87,7 @@ type Config struct {
 	NotifyMinSeverity string          `yaml:"notify_min_severity"` // 通知する最低重要度 (low/medium/high/critical)
 	FetchMinSeverity  string          `yaml:"fetch_min_severity"`  // 取得・保存する最低重要度 (low/medium/high/critical)、デフォルト: 空=全件
 	ActiveMonths      int             `yaml:"active_months"`       // 直近Nか月以内に更新されたリポのみ対象 (0=無効)
+	DisableApproval   bool            `yaml:"disable_approval"`    // true=承認/却下ボタンを無効化（閲覧専用モード）
 }
 
 // severityRank は重要度の数値ランク（大きいほど深刻）

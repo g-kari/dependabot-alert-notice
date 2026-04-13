@@ -130,12 +130,16 @@
 
 {{if eq (printf "%s" .State) "pending"}}
 <div class="detail-actions">
+  {{if not .DisableApproval}}
   <form method="POST" action="/alerts/{{.Alert.ID}}/approve">
     <button type="submit" class="btn btn-approve">✅ マージ承認</button>
   </form>
   <form method="POST" action="/alerts/{{.Alert.ID}}/reject">
     <button type="submit" class="btn btn-reject">❌ 却下</button>
   </form>
+  {{else}}
+  <p class="text-muted">承認/却下機能は無効化されています</p>
+  {{end}}
 </div>
 {{end}}
 {{end}}

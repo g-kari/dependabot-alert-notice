@@ -258,6 +258,44 @@ func TestReject_InvalidID(t *testing.T) {
 	}
 }
 
+// TestApprove_DisabledReturns403 はDisableApproval=trueのとき承認が403を返すことを確認
+func TestApprove_DisabledReturns403(t *testing.T) {
+	srv, s, m := newTestServer(t)
+	srv.cfg.DisableApproval = true
+	saveAlert(s, 1, "lodash", model.SeverityHigh)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/1/approve", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	srv.handleApprove(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d (approval disabled)", w.Code, http.StatusForbidden)
+	}
+	if len(m.approved) != 0 {
+		t.Error("merger.Approve should not have been called")
+	}
+}
+
+// TestReject_DisabledReturns403 はDisableApproval=trueのとき却下が403を返すことを確認
+func TestReject_DisabledReturns403(t *testing.T) {
+	srv, s, m := newTestServer(t)
+	srv.cfg.DisableApproval = true
+	saveAlert(s, 2, "axios", model.SeverityCritical)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/2/reject", nil)
+	req.SetPathValue("id", "2")
+	w := httptest.NewRecorder()
+	srv.handleReject(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d (approval disabled)", w.Code, http.StatusForbidden)
+	}
+	if len(m.rejected) != 0 {
+		t.Error("merger.Reject should not have been called")
+	}
+}
+
 // TestLogs_Empty は空のstoreでログページが200を返すことを確認
 func TestLogs_Empty(t *testing.T) {
 	srv, _, _ := newTestServer(t)

@@ -158,7 +158,7 @@ window.__copyGroupCSV = function(btn) {
             </td>
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
             <td class="action-cell">
-              {{if eq (printf "%s" .State) "pending"}}
+              {{if and (eq (printf "%s" .State) "pending") (not $.DisableApproval)}}
               <form method="POST" action="/alerts/{{.Alert.ID}}/approve" class="inline-form">
                 <button type="submit" class="btn btn-approve btn-sm">承認</button>
               </form>
@@ -255,7 +255,7 @@ window.__copyGroupCSV = function(btn) {
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
             <td>{{if .Alert.DefaultBranch}}<code>{{.Alert.DefaultBranch}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
             <td class="action-cell">
-              {{if eq (printf "%s" .State) "pending"}}
+              {{if and (eq (printf "%s" .State) "pending") (not $.DisableApproval)}}
               <form method="POST" action="/alerts/{{.Alert.ID}}/approve" class="inline-form">
                 <button type="submit" class="btn btn-approve btn-sm">承認</button>
               </form>

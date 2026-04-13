@@ -95,6 +95,18 @@
           </td>
         </tr>
         <tr>
+          <th>承認/却下機能</th>
+          <td>
+            <div class="input-row">
+              <select name="disable_approval" style="width:160px">
+                <option value="false" {{if not .Config.DisableApproval}}selected{{end}}>有効（デフォルト）</option>
+                <option value="true"  {{if .Config.DisableApproval}}selected{{end}}>無効（閲覧専用）</option>
+              </select>
+              <span class="field-hint">無効にするとボタンが非表示になり、エンドポイントも 403 を返します</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
           <th>取得最低重要度</th>
           <td>
             <div class="input-row">

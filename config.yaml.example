@@ -1,6 +1,7 @@
 poll_interval: 30m
 active_months: 0          # 直近Nか月以内にpushがあったリポのみ対象 (0=無効、例: 6=半年以内)
 fetch_min_severity: ""    # 取得する最低重要度 (critical/high/medium、空=全件取得)
+disable_approval: false   # true=承認/却下ボタンを無効化して閲覧専用モードにする
 
 targets:
   - owner: your-org
