@@ -740,3 +740,38 @@ func TestSave_PRNumberZeroDefault(t *testing.T) {
 		t.Errorf("PRNumber = %d, want 0 (zero value)", got.Alert.PRNumber)
 	}
 }
+
+// TestUpdateAlertJSON は既存レコードのalert_jsonだけが更新されることを確認
+func TestUpdateAlertJSON(t *testing.T) {
+	s := New()
+	r := &model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo", Number: 1, DefaultBranch: "", Contributors: nil},
+		State:      model.AlertStatePending,
+		EvalStatus: model.EvalStatusPending,
+		NotifiedAt: time.Now(),
+	}
+	s.Save(r)
+
+	// DefaultBranch と Contributors を更新
+	updated := r.Alert
+	updated.DefaultBranch = "main"
+	updated.Contributors = []string{"alice", "bob"}
+	if err := s.UpdateAlertJSON(r.Alert.Owner, r.Alert.Repo, r.Alert.Number, updated); err != nil {
+		t.Fatalf("UpdateAlertJSON() error = %v", err)
+	}
+
+	got, err := s.Get(r.Alert.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Alert.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %q, want main", got.Alert.DefaultBranch)
+	}
+	if len(got.Alert.Contributors) != 2 || got.Alert.Contributors[0] != "alice" {
+		t.Errorf("Contributors = %v, want [alice bob]", got.Alert.Contributors)
+	}
+	// state は変わっていないことを確認
+	if got.State != model.AlertStatePending {
+		t.Errorf("State = %q, want pending (should not be changed)", got.State)
+	}
+}

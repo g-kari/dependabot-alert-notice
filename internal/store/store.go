@@ -311,6 +311,24 @@ func (s *Store) HasByKey(owner, repo string, number int) bool {
 	return count > 0
 }
 
+// UpdateAlertJSON は既存レコードの alert_json（GitHubから取得するアラートデータ）のみを更新する。
+// state・eval_json・eval_status・notified_at 等の管理フィールドは変更しない。
+func (s *Store) UpdateAlertJSON(owner, repo string, number int, alert model.Alert) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	alertJSON, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("alert_json マーシャル失敗: %w", err)
+	}
+	_, err = s.db.Exec(`UPDATE alert_records SET alert_json = ? WHERE owner = ? AND repo = ? AND number = ?`,
+		string(alertJSON), owner, repo, number)
+	if err != nil {
+		return fmt.Errorf("alert_json 更新失敗: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) UpdateState(alertID int, state model.AlertState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
