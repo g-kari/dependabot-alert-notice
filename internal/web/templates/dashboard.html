@@ -26,6 +26,44 @@
 
   window.__reloadWithState = function() { location.reload(); };
 })();
+
+// CSVコピー共通処理
+window.__copyGroupCSV = function(btn) {
+  event.stopPropagation();
+  var details = btn.closest('details');
+  var table = details && details.querySelector('table');
+  if (!table) return;
+
+  // 操作列（data-csv-skip属性付き）のインデックスを収集
+  var ths = Array.from(table.querySelectorAll('thead th'));
+  var skip = {};
+  ths.forEach(function(th, i) { if (th.dataset.csvSkip !== undefined) skip[i] = true; });
+
+  function cellText(td) {
+    var clone = td.cloneNode(true);
+    clone.querySelectorAll('.gh-link').forEach(function(el) { el.remove(); });
+    return clone.textContent.trim().replace(/\s+/g, ' ');
+  }
+  function csvCell(s) {
+    return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0)
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  var header = ths.filter(function(_, i) { return !skip[i]; })
+                  .map(function(th) { return csvCell(th.textContent.trim()); }).join(',');
+  var rows = Array.from(table.querySelectorAll('tbody tr')).map(function(tr) {
+    return Array.from(tr.querySelectorAll('td'))
+      .filter(function(_, i) { return !skip[i]; })
+      .map(function(td) { return csvCell(cellText(td)); }).join(',');
+  });
+
+  var csv = [header].concat(rows).join('\n');
+  navigator.clipboard.writeText(csv).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = '✅';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  });
+};
 </script>
 <div class="dashboard-header">
   <h1>Dependabot アラート一覧</h1>
@@ -66,6 +104,7 @@
       </div>
       <div class="cve-summary-meta">
         <span class="badge badge-info">{{len .Records}} リポジトリ</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="__copyGroupCSV(this)" title="CSVコピー">📋</button>
       </div>
     </summary>
     <div class="cve-repos-wrap">
@@ -75,7 +114,7 @@
             <th>リポジトリ</th>
             <th>AI評価</th>
             <th>ステータス</th>
-            <th>操作</th>
+            <th data-csv-skip>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -149,6 +188,7 @@
       </div>
       <div class="cve-summary-meta">
         <span class="badge badge-info">{{len .Records}} アラート</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="__copyGroupCSV(this)" title="CSVコピー">📋</button>
         <form method="POST" action="/api/poll/repo" class="inline-form" onclick="event.stopPropagation()">
           <input type="hidden" name="owner" value="{{.Owner}}">
           <input type="hidden" name="repo" value="{{.Repo}}">
@@ -164,7 +204,7 @@
             <th>CVE</th>
             <th>AI評価</th>
             <th>ステータス</th>
-            <th>操作</th>
+            <th data-csv-skip>操作</th>
           </tr>
         </thead>
         <tbody>
