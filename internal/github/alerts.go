@@ -62,6 +62,60 @@ func isRateLimitMessage(msg string) bool {
 	return strings.Contains(msg, "rate limit") || strings.Contains(msg, "secondary rate")
 }
 
+// parseContributorLogins はGitHub contributors APIレスポンスからloginリストを抽出する。
+// exec.Command から分離することでユニットテストを可能にしている。
+func parseContributorLogins(data []byte) []string {
+	var items []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil
+	}
+	logins := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Login != "" {
+			logins = append(logins, item.Login)
+		}
+	}
+	return logins
+}
+
+// fetchContributors はリポジトリのコントリビューターlogin一覧を最大100件返す（貢献数降順）。
+// 取得失敗時は nil を返す（致命的エラーとして扱わない）。
+func (c *ghClient) fetchContributors(ctx context.Context, owner, repo string) []string {
+	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "api",
+		fmt.Sprintf("repos/%s/%s/contributors?per_page=100", owner, repo),
+	).Output()
+	if err != nil {
+		return nil
+	}
+	return parseContributorLogins(out)
+}
+
+// fetchContributorsMap はリポジトリセットに対してコントリビューター一覧を並列取得し、
+// repo名→loginスライスのマップを返す。
+func (c *ghClient) fetchContributorsMap(ctx context.Context, owner string, repoSet map[string]struct{}) map[string][]string {
+	const concurrency = 5
+	sem := make(chan struct{}, concurrency)
+	var mu sync.Mutex
+	result := make(map[string][]string, len(repoSet))
+	var wg sync.WaitGroup
+	for repo := range repoSet {
+		wg.Add(1)
+		go func(r string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			cs := c.fetchContributors(ctx, owner, r)
+			mu.Lock()
+			result[r] = cs
+			mu.Unlock()
+		}(repo)
+	}
+	wg.Wait()
+	return result
+}
+
 // isRepoActive はリポジトリが指定された月数以内にpushがあったかを返す
 func isRepoActive(pushedAt time.Time, activeMonths int) bool {
 	if activeMonths <= 0 {
@@ -241,8 +295,10 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 		}
 		if len(alerts) > 0 {
 			branch := c.fetchDefaultBranch(ctx, target.Owner, target.Repo)
+			contributors := c.fetchContributors(ctx, target.Owner, target.Repo)
 			for i := range alerts {
 				alerts[i].DefaultBranch = branch
+				alerts[i].Contributors = contributors
 			}
 		}
 		return alerts, nil
@@ -324,13 +380,20 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	// リポジトリ別にGraphQL APIでdependabotUpdateエラー情報を補完
 	c.enrichUpdateErrors(ctx, owner, alerts)
 
-	repoCount := 0
 	repoSet := make(map[string]struct{})
 	for _, a := range alerts {
 		repoSet[a.Repo] = struct{}{}
 	}
-	repoCount = len(repoSet)
-	slog.Info("org APIアラート取得完了", "owner", owner, "count", len(alerts), "repos", repoCount)
+
+	// コントリビューター一覧をリポジトリ別に並列取得
+	contribMap := c.fetchContributorsMap(ctx, owner, repoSet)
+	for i := range alerts {
+		if cs, ok := contribMap[alerts[i].Repo]; ok {
+			alerts[i].Contributors = cs
+		}
+	}
+
+	slog.Info("org APIアラート取得完了", "owner", owner, "count", len(alerts), "repos", len(repoSet))
 
 	return alerts, nil
 }
@@ -481,6 +544,12 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			defer func() { <-sem }()
 			alerts, err := c.fetchRepoAlerts(ctx, owner, repo)
 
+			// コントリビューター取得（Mutex外で実行してロック競合を最小化）
+			var contributors []string
+			if err == nil && len(alerts) > 0 {
+				contributors = c.fetchContributors(ctx, owner, repo)
+			}
+
 			mu.Lock()
 			completed++
 			done := completed
@@ -491,6 +560,7 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 					if alerts[i].DefaultBranch == "" {
 						alerts[i].DefaultBranch = branch
 					}
+					alerts[i].Contributors = contributors
 				}
 				all = append(all, alerts...)
 			} else {

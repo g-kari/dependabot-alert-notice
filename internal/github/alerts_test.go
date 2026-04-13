@@ -619,6 +619,56 @@ func TestIsRateLimitMessage(t *testing.T) {
 	}
 }
 
+// TestParseContributorLogins はGitHub contributors APIレスポンスのJSONパースを確認
+func TestParseContributorLogins(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want []string
+	}{
+		{
+			name: "通常のコントリビューター一覧",
+			data: `[{"login":"alice","contributions":100},{"login":"bob","contributions":50},{"login":"charlie","contributions":10}]`,
+			want: []string{"alice", "bob", "charlie"},
+		},
+		{
+			name: "空の配列は空スライス",
+			data: `[]`,
+			want: []string{},
+		},
+		{
+			name: "loginが空のエントリはスキップ",
+			data: `[{"login":"alice","contributions":100},{"login":"","contributions":5}]`,
+			want: []string{"alice"},
+		},
+		{
+			name: "不正なJSONはnil",
+			data: `not json`,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseContributorLogins([]byte(tt.data))
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("got %v, want nil", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d; got=%v", len(got), len(tt.want), got)
+			}
+			for i, v := range tt.want {
+				if got[i] != v {
+					t.Errorf("[%d] = %q, want %q", i, got[i], v)
+				}
+			}
+		})
+	}
+}
+
 func TestEqualFold(t *testing.T) {
 	tests := []struct {
 		a, b string

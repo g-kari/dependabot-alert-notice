@@ -36,7 +36,8 @@ type Alert struct {
 	State            string
 	Owner            string
 	Repo             string
-	DefaultBranch    string // Dependabotアラートの対象ブランチ（通常デフォルトブランチ）
+	DefaultBranch    string   // Dependabotアラートの対象ブランチ（通常デフォルトブランチ）
+	Contributors     []string // コントリビューター login 一覧（貢献数降順）
 	PackageName      string
 	PackageEcosystem string
 	Severity         Severity

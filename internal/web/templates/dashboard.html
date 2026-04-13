@@ -27,56 +27,33 @@
   window.__reloadWithState = function() { location.reload(); };
 })();
 
-// CSVコピー共通処理
+// CSVコピー共通処理（data-* 属性から固定列を生成）
 window.__copyGroupCSV = function(btn) {
   event.stopPropagation();
   var details = btn.closest('details');
-  var table = details && details.querySelector('table');
-  if (!table) return;
+  var rows = details && details.querySelectorAll('tbody tr[data-repo]');
+  if (!rows || rows.length === 0) return;
 
-  var ths = Array.from(table.querySelectorAll('thead th'));
-  var skip = {};
-  ths.forEach(function(th, i) { if (th.dataset.csvSkip !== undefined) skip[i] = true; });
-
-  // data-gh-url 付きのセルがある列インデックスを最初の行で検出
-  var ghUrlAfter = {};
-  var firstRow = table.querySelector('tbody tr');
-  if (firstRow) {
-    Array.from(firstRow.querySelectorAll('td')).forEach(function(td, i) {
-      if (!skip[i] && td.dataset.ghUrl !== undefined) ghUrlAfter[i] = true;
-    });
-  }
-
-  function cellText(td) {
-    var clone = td.cloneNode(true);
-    clone.querySelectorAll('.gh-link').forEach(function(el) { el.remove(); });
-    return clone.textContent.trim().replace(/\s+/g, ' ');
-  }
   function csvCell(s) {
+    s = (s || '').replace(/\s+/g, ' ').trim();
     return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0)
       ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
-  // ヘッダー（gh-url列の直後に "GitHub URL" を挿入）
-  var headers = [];
-  ths.forEach(function(th, i) {
-    if (skip[i]) return;
-    headers.push(csvCell(th.textContent.trim()));
-    if (ghUrlAfter[i]) headers.push('GitHub URL');
+  var headers = ['リポジトリ', '公開URL', 'リポジトリURL', 'ブランチ', 'トップコントリビューター', 'DependabotURL', 'コントリビューター一覧'];
+  var csvRows = Array.from(rows).map(function(row) {
+    return [
+      csvCell(row.dataset.repo),
+      csvCell(row.dataset.advisoryUrl),
+      csvCell(row.dataset.repoUrl),
+      csvCell(row.dataset.branch),
+      csvCell(row.dataset.topContributor),
+      csvCell(row.dataset.dependabotUrl),
+      csvCell(row.dataset.contributors),
+    ].join(',');
   });
 
-  // 行（gh-url列の直後にURL値を挿入）
-  var rows = Array.from(table.querySelectorAll('tbody tr')).map(function(tr) {
-    var cols = [];
-    Array.from(tr.querySelectorAll('td')).forEach(function(td, i) {
-      if (skip[i]) return;
-      cols.push(csvCell(cellText(td)));
-      if (ghUrlAfter[i]) cols.push(csvCell(td.dataset.ghUrl || ''));
-    });
-    return cols.join(',');
-  });
-
-  var csv = [headers.join(',')].concat(rows).join('\n');
+  var csv = [headers.join(',')].concat(csvRows).join('\n');
   navigator.clipboard.writeText(csv).then(function() {
     var orig = btn.textContent;
     btn.textContent = '✅';
@@ -132,6 +109,7 @@ window.__copyGroupCSV = function(btn) {
           <tr>
             <th>リポジトリ</th>
             <th>デフォルトブランチ</th>
+            <th>コントリビューター</th>
             <th>AI評価</th>
             <th>ステータス</th>
             <th data-csv-skip>操作</th>
@@ -139,12 +117,19 @@ window.__copyGroupCSV = function(btn) {
         </thead>
         <tbody>
           {{range .Records}}
-          <tr>
-            <td data-gh-url="{{.Alert.HTMLURL}}">
+          <tr data-repo="{{.Alert.Repo}}"
+              data-advisory-url="{{if .Alert.GHSAID}}https://github.com/advisories/{{.Alert.GHSAID}}{{else if .Alert.CVEID}}https://nvd.nist.gov/vuln/detail/{{.Alert.CVEID}}{{end}}"
+              data-repo-url="https://github.com/{{.Alert.Owner}}/{{.Alert.Repo}}"
+              data-branch="{{.Alert.DefaultBranch}}"
+              data-top-contributor="{{topContributor .Alert.Contributors}}"
+              data-dependabot-url="{{.Alert.HTMLURL}}"
+              data-contributors="{{joinStrings .Alert.Contributors ", "}}">
+            <td>
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.Owner}}/{{.Alert.Repo}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>
             <td>{{if .Alert.DefaultBranch}}<code>{{.Alert.DefaultBranch}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
+            <td class="contributors-cell">{{if .Alert.Contributors}}<span class="text-muted-small">{{contributorsSummary .Alert.Contributors}}</span>{{else}}<span class="text-muted">—</span>{{end}}</td>
             <td>
               {{if .Evaluation}}
               <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
@@ -220,6 +205,13 @@ window.__copyGroupCSV = function(btn) {
       </div>
     </summary>
     <div class="cve-repos-wrap">
+      {{if .Records}}
+      {{with index .Records 0}}
+      {{if .Alert.Contributors}}
+      <div class="contributors-row-repo">👥 {{contributorsSummary .Alert.Contributors}}</div>
+      {{end}}
+      {{end}}
+      {{end}}
       <table class="cve-repos cve-repos-repo">
         <thead>
           <tr>
@@ -233,8 +225,14 @@ window.__copyGroupCSV = function(btn) {
         </thead>
         <tbody>
           {{range .Records}}
-          <tr>
-            <td data-gh-url="{{.Alert.HTMLURL}}">
+          <tr data-repo="{{.Alert.Repo}}"
+              data-advisory-url="{{if .Alert.GHSAID}}https://github.com/advisories/{{.Alert.GHSAID}}{{else if .Alert.CVEID}}https://nvd.nist.gov/vuln/detail/{{.Alert.CVEID}}{{end}}"
+              data-repo-url="https://github.com/{{.Alert.Owner}}/{{.Alert.Repo}}"
+              data-branch="{{.Alert.DefaultBranch}}"
+              data-top-contributor="{{topContributor .Alert.Contributors}}"
+              data-dependabot-url="{{.Alert.HTMLURL}}"
+              data-contributors="{{joinStrings .Alert.Contributors ", "}}">
+            <td>
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.PackageName}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>

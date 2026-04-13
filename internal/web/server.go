@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
@@ -57,6 +58,25 @@ func (s *Server) SetQueue(q *queue.Queue) {
 // templateFuncs はテンプレートで使用するカスタム関数
 var templateFuncs = template.FuncMap{
 	"mul100": func(v float64) float64 { return v * 100 },
+	// joinStrings はスライスをセパレータで結合する
+	"joinStrings": strings.Join,
+	// topContributor はコントリビューター一覧の先頭を返す（空なら空文字列）
+	"topContributor": func(cs []string) string {
+		if len(cs) == 0 {
+			return ""
+		}
+		return cs[0]
+	},
+	// contributorsSummary は最大5件を表示し、超えた場合は「他N名」を付ける
+	"contributorsSummary": func(cs []string) string {
+		if len(cs) == 0 {
+			return ""
+		}
+		if len(cs) <= 5 {
+			return strings.Join(cs, ", ")
+		}
+		return strings.Join(cs[:5], ", ") + fmt.Sprintf(" (他%d名)", len(cs)-5)
+	},
 	"markdown": func(s string) template.HTML {
 		if s == "" {
 			return ""

@@ -51,6 +51,16 @@
   </div>
 </div>
 
+{{if .Alert.Contributors}}
+<div class="card">
+  <h2>👥 コントリビューター</h2>
+  <div class="contributors-list">
+    {{range .Alert.Contributors}}<span class="badge badge-info contributor-badge">{{.}}</span>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{if .Alert.Description}}
 <div class="card">
   <h2>詳細説明</h2>
