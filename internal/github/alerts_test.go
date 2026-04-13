@@ -540,6 +540,40 @@ func TestFilterAlertsByActiveRepos_DisabledFilter(t *testing.T) {
 	}
 }
 
+// TestParseAlerts_DefaultBranch はorgAPIレスポンスのrepository.default_branchが正しく取得されることを確認
+func TestParseAlerts_DefaultBranch(t *testing.T) {
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
+	jsonData := `[{
+		"number": 1,
+		"state": "open",
+		"html_url": "https://github.com/owner/my-repo/security/dependabot/1",
+		"created_at": "2024-01-01T00:00:00Z",
+		"repository": {"name": "my-repo", "archived": false, "default_branch": "main"},
+		"security_advisory": {
+			"cve_id": "CVE-2024-1234",
+			"summary": "Test",
+			"identifiers": [],
+			"cvss": {"score": 7.0},
+			"cvss_severities": {}
+		},
+		"security_vulnerability": {
+			"package": {"name": "lodash", "ecosystem": "npm"},
+			"severity": "high",
+			"first_patched_version": {"identifier": "1.0.1"}
+		}
+	}]`
+	alerts, err := c.parseAlerts([]byte(jsonData), "owner", "", nil)
+	if err != nil {
+		t.Fatalf("parseAlerts() error = %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want 1", len(alerts))
+	}
+	if alerts[0].DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %q, want %q", alerts[0].DefaultBranch, "main")
+	}
+}
+
 // TestBuildSeverityParam は最低重要度から GitHub API severity パラメータ文字列が正しく生成されることを確認
 func TestBuildSeverityParam(t *testing.T) {
 	tests := []struct {

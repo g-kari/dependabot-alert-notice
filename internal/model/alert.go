@@ -36,6 +36,7 @@ type Alert struct {
 	State            string
 	Owner            string
 	Repo             string
+	DefaultBranch    string // Dependabotアラートの対象ブランチ（通常デフォルトブランチ）
 	PackageName      string
 	PackageEcosystem string
 	Severity         Severity

@@ -82,8 +82,9 @@ type ghAlert struct {
 	UpdatedAt string `json:"updated_at"`
 
 	Repository struct {
-		Name     string `json:"name"`
-		Archived bool   `json:"archived"`
+		Name          string `json:"name"`
+		Archived      bool   `json:"archived"`
+		DefaultBranch string `json:"default_branch"`
 	} `json:"repository"`
 
 	Dependency struct {
@@ -189,6 +190,19 @@ func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
 	}, nil
 }
 
+// fetchDefaultBranch はリポジトリのデフォルトブランチ名を返す。取得失敗時は空文字列。
+func (c *ghClient) fetchDefaultBranch(ctx context.Context, owner, repo string) string {
+	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
+		fmt.Sprintf("%s/%s", owner, repo),
+		"--json", "defaultBranchRef",
+		"--jq", ".defaultBranchRef.name",
+	).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // isRepoArchived はリポジトリがアーカイブ済みかを返す。取得失敗時は false（続行）。
 func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool {
 	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
@@ -221,7 +235,17 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 			slog.Debug("アーカイブリポジトリをスキップ", "owner", target.Owner, "repo", target.Repo)
 			return nil, nil
 		}
-		return c.fetchRepoAlerts(ctx, target.Owner, target.Repo)
+		alerts, err := c.fetchRepoAlerts(ctx, target.Owner, target.Repo)
+		if err != nil {
+			return nil, err
+		}
+		if len(alerts) > 0 {
+			branch := c.fetchDefaultBranch(ctx, target.Owner, target.Repo)
+			for i := range alerts {
+				alerts[i].DefaultBranch = branch
+			}
+		}
+		return alerts, nil
 	}
 
 	// リポジトリ指定なし → org API を試してダメなら全repoにフォールバック
@@ -314,7 +338,7 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 // fetchRepoList は gh repo list でリポジトリ一覧（名前・アーカイブ状態・pushedAt）を取得する
 func (c *ghClient) fetchRepoList(ctx context.Context, owner string) ([]repoListItem, error) {
 	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "list", owner,
-		"--json", "name,isArchived,pushedAt",
+		"--json", "name,isArchived,pushedAt,defaultBranchRef",
 		"--limit", "1000",
 	)
 	out, err := cmd.Output()
@@ -382,11 +406,14 @@ func (c *ghClient) enrichUpdateErrors(ctx context.Context, owner string, alerts 
 	slog.Info("GraphQL補完完了", "owner", owner, "repos", len(repoSet))
 }
 
-// repoListItem は `gh repo list --json name,isArchived,pushedAt` の各要素
+// repoListItem は `gh repo list --json name,isArchived,pushedAt,defaultBranchRef` の各要素
 type repoListItem struct {
-	Name       string    `json:"name"`
-	IsArchived bool      `json:"isArchived"`
-	PushedAt   time.Time `json:"pushedAt"`
+	Name             string    `json:"name"`
+	IsArchived       bool      `json:"isArchived"`
+	PushedAt         time.Time `json:"pushedAt"`
+	DefaultBranchRef struct {
+		Name string `json:"name"`
+	} `json:"defaultBranchRef"`
 }
 
 // fetchUserRepoAlerts はユーザーの全リポジトリを列挙して各リポジトリのアラートを取得する
@@ -399,6 +426,12 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	excludeSet := make(map[string]struct{}, len(excludes))
 	for _, ex := range excludes {
 		excludeSet[ex] = struct{}{}
+	}
+
+	// リポジトリ名 → デフォルトブランチ名のマップを作成
+	branchMap := make(map[string]string, len(repoItems))
+	for _, item := range repoItems {
+		branchMap[item.Name] = item.DefaultBranchRef.Name
 	}
 
 	var repos []string
@@ -452,6 +485,13 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 			completed++
 			done := completed
 			if err == nil {
+				// per-repo APIはdefault_branchを返さないのでrepoListItemから補完
+				branch := branchMap[repo]
+				for i := range alerts {
+					if alerts[i].DefaultBranch == "" {
+						alerts[i].DefaultBranch = branch
+					}
+				}
 				all = append(all, alerts...)
 			} else {
 				var skipErr *SkipError
@@ -614,6 +654,7 @@ func (c *ghClient) parseAlerts(out []byte, owner, repo string, excludes []string
 			State:            r.State,
 			Owner:            owner,
 			Repo:             repoName,
+			DefaultBranch:    r.Repository.DefaultBranch,
 			PackageName:      r.SecurityVulnerability.Package.Name,
 			PackageEcosystem: r.SecurityVulnerability.Package.Ecosystem,
 			Severity:         model.Severity(r.SecurityVulnerability.Severity),

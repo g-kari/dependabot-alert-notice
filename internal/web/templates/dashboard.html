@@ -112,6 +112,7 @@ window.__copyGroupCSV = function(btn) {
         <thead>
           <tr>
             <th>リポジトリ</th>
+            <th>デフォルトブランチ</th>
             <th>AI評価</th>
             <th>ステータス</th>
             <th data-csv-skip>操作</th>
@@ -124,6 +125,7 @@ window.__copyGroupCSV = function(btn) {
               <a href="/alerts/{{.Alert.ID}}" class="repo-link">{{.Alert.Owner}}/{{.Alert.Repo}}</a>
               {{if .Alert.HTMLURL}}<a href="{{.Alert.HTMLURL}}" target="_blank" rel="noopener" class="gh-link" title="GitHubで開く">↗</a>{{end}}
             </td>
+            <td>{{if .Alert.DefaultBranch}}<code>{{.Alert.DefaultBranch}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
             <td>
               {{if .Evaluation}}
               <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
@@ -158,6 +160,7 @@ window.__copyGroupCSV = function(btn) {
 <div class="pagination">
   {{if .Pagination.HasPrev}}
   <a href="/?view=cve&page={{.Pagination.Prev}}" class="btn btn-ghost btn-sm">← 前へ</a>
+
   {{else}}
   <span class="btn btn-ghost btn-sm btn-disabled">← 前へ</span>
   {{end}}
@@ -185,6 +188,7 @@ window.__copyGroupCSV = function(btn) {
       <div class="cve-summary-main">
         <span class="badge badge-{{.MaxSeverity}}">{{.MaxSeverity}}</span>
         <span class="cve-pkg">{{.Owner}}/{{.Repo}}</span>
+        {{if .DefaultBranch}}<code class="branch-badge">{{.DefaultBranch}}</code>{{end}}
       </div>
       <div class="cve-summary-meta">
         <span class="badge badge-info">{{len .Records}} アラート</span>
@@ -204,6 +208,7 @@ window.__copyGroupCSV = function(btn) {
             <th>CVE</th>
             <th>AI評価</th>
             <th>ステータス</th>
+            <th>デフォルトブランチ</th>
             <th data-csv-skip>操作</th>
           </tr>
         </thead>
@@ -229,6 +234,7 @@ window.__copyGroupCSV = function(btn) {
               {{end}}
             </td>
             <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+            <td>{{if .Alert.DefaultBranch}}<code>{{.Alert.DefaultBranch}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
             <td class="action-cell">
               {{if eq (printf "%s" .State) "pending"}}
               <form method="POST" action="/alerts/{{.Alert.ID}}/approve" class="inline-form">

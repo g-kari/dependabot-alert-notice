@@ -26,6 +26,7 @@
       <tbody>
         <tr><th class="detail-th">パッケージ</th><td>{{.Alert.PackageName}} <span class="text-muted">({{.Alert.PackageEcosystem}})</span></td></tr>
         <tr><th class="detail-th">リポジトリ</th><td>{{.Alert.Owner}}/{{.Alert.Repo}}</td></tr>
+        {{if .Alert.DefaultBranch}}<tr><th class="detail-th">デフォルトブランチ</th><td><code>{{.Alert.DefaultBranch}}</code></td></tr>{{end}}
         <tr><th class="detail-th">重要度</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Alert.Severity}}</span></td></tr>
         <tr><th class="detail-th">ステータス</th><td><span class="badge badge-{{.State}}">{{.State}}</span></td></tr>
         {{if .Alert.CVEID}}<tr><th class="detail-th">CVE</th><td><code>{{.Alert.CVEID}}</code></td></tr>{{end}}

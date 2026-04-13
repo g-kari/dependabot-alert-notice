@@ -93,11 +93,12 @@ type CVEGroup struct {
 
 // RepoGroup はリポジトリ単位でアラートをまとめたグループ
 type RepoGroup struct {
-	Owner       string
-	Repo        string
-	MaxSeverity model.Severity
-	MaxCVSS     float64
-	Records     []*model.AlertRecord
+	Owner         string
+	Repo          string
+	DefaultBranch string
+	MaxSeverity   model.Severity
+	MaxCVSS       float64
+	Records       []*model.AlertRecord
 }
 
 // groupByRepo はAlertRecordのリストをリポジトリ単位でグルーピングする。
@@ -124,11 +125,12 @@ func groupByRepo(records []*model.AlertRecord) []RepoGroup {
 			}
 		} else {
 			groupMap[key] = &RepoGroup{
-				Owner:       r.Alert.Owner,
-				Repo:        r.Alert.Repo,
-				MaxSeverity: r.Alert.Severity,
-				MaxCVSS:     r.Alert.CVSSScore,
-				Records:     []*model.AlertRecord{r},
+				Owner:         r.Alert.Owner,
+				Repo:          r.Alert.Repo,
+				DefaultBranch: r.Alert.DefaultBranch,
+				MaxSeverity:   r.Alert.Severity,
+				MaxCVSS:       r.Alert.CVSSScore,
+				Records:       []*model.AlertRecord{r},
 			}
 			keys = append(keys, key)
 		}
