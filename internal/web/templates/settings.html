@@ -95,6 +95,20 @@
           </td>
         </tr>
         <tr>
+          <th>取得最低重要度</th>
+          <td>
+            <div class="input-row">
+              <select name="fetch_min_severity" style="width:160px">
+                <option value=""       {{if eq .Config.FetchMinSeverity ""       }}selected{{end}}>すべて（デフォルト）</option>
+                <option value="medium" {{if eq .Config.FetchMinSeverity "medium" }}selected{{end}}>medium 以上</option>
+                <option value="high"   {{if eq .Config.FetchMinSeverity "high"   }}selected{{end}}>high 以上</option>
+                <option value="critical" {{if eq .Config.FetchMinSeverity "critical"}}selected{{end}}>critical のみ</option>
+              </select>
+              <span class="field-hint">この重要度未満のアラートはGitHub APIから取得しません（件数削減に効果的）</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
           <th>直近活動フィルタ</th>
           <td>
             <div class="input-row">

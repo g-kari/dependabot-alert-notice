@@ -566,6 +566,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Discord.WebhookURL = r.FormValue("discord_webhook_url")
 	}
 
+	// 取得最低重要度（空=全件取得）
+	if v := r.FormValue("fetch_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" || v == "" {
+		s.cfg.FetchMinSeverity = v
+	}
+
 	// 通知最低重要度
 	if v := r.FormValue("notify_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
 		s.cfg.NotifyMinSeverity = v

@@ -539,6 +539,51 @@ func TestFilterAlertsByActiveRepos_DisabledFilter(t *testing.T) {
 	}
 }
 
+// TestBuildSeverityParam は最低重要度から GitHub API severity パラメータ文字列が正しく生成されることを確認
+func TestBuildSeverityParam(t *testing.T) {
+	tests := []struct {
+		min  string
+		want string
+	}{
+		{"critical", "critical"},
+		{"high", "critical,high"},
+		{"medium", "critical,high,medium"},
+		{"low", ""},
+		{"", ""},
+		{"unknown", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.min, func(t *testing.T) {
+			got := buildSeverityParam(tt.min)
+			if got != tt.want {
+				t.Errorf("buildSeverityParam(%q) = %q, want %q", tt.min, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsRateLimitMessage はレート制限メッセージの検出が正しく動作することを確認
+func TestIsRateLimitMessage(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"you have exceeded a secondary rate limit", true},
+		{"api rate limit exceeded for user", true},
+		{"rate limit exceeded", true},
+		{"resource not accessible by integration", false},
+		{"403 forbidden", false},
+		{"not found - 404", false},
+		{"dependabot alerts are disabled for this repository", false},
+	}
+	for _, tc := range cases {
+		got := isRateLimitMessage(tc.msg)
+		if got != tc.want {
+			t.Errorf("isRateLimitMessage(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
+	}
+}
+
 func TestEqualFold(t *testing.T) {
 	tests := []struct {
 		a, b string

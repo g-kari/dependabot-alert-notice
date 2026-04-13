@@ -35,15 +35,37 @@ type Client interface {
 }
 
 type ghClient struct {
-	ghPath       string
-	activeMonths int // 0=無効、N=直近Nか月以内にpushがあったリポのみ対象
+	ghPath           string
+	activeMonths     int    // 0=無効、N=直近Nか月以内にpushがあったリポのみ対象
+	fetchMinSeverity string // 取得する最低重要度 (low/medium/high/critical)、空=無制限
 }
 
 func New(cfg *config.Config) Client {
 	return &ghClient{
-		ghPath:       cfg.GhPath,
-		activeMonths: cfg.ActiveMonths,
+		ghPath:           cfg.GhPath,
+		activeMonths:     cfg.ActiveMonths,
+		fetchMinSeverity: cfg.FetchMinSeverity,
 	}
+}
+
+// buildSeverityParam は最低重要度から GitHub API の severity クエリパラメータ文字列を生成する。
+// 空文字列を返した場合はパラメータなし（全件取得）を意味する。
+func buildSeverityParam(minSeverity string) string {
+	switch strings.ToLower(minSeverity) {
+	case "critical":
+		return "critical"
+	case "high":
+		return "critical,high"
+	case "medium":
+		return "critical,high,medium"
+	default: // low・空・不明 → フィルタなし
+		return ""
+	}
+}
+
+// isRateLimitMessage は gh コマンドのエラー出力（小文字化済み）がレート制限かを判定する
+func isRateLimitMessage(msg string) bool {
+	return strings.Contains(msg, "rate limit") || strings.Contains(msg, "secondary rate")
 }
 
 // isRepoActive はリポジトリが指定された月数以内にpushがあったかを返す
@@ -223,7 +245,10 @@ var alertNumberMarker = []byte(`"number":`)
 
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
-	slog.Info("org APIアラート取得開始", "owner", owner)
+	if sev := buildSeverityParam(c.fetchMinSeverity); sev != "" {
+		endpoint += "&severity=" + sev
+	}
+	slog.Info("org APIアラート取得開始", "owner", owner, "fetchMinSeverity", c.fetchMinSeverity)
 
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	stdout, err := cmd.StdoutPipe()
@@ -410,11 +435,15 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	const concurrency = 10
 	sem := make(chan struct{}, concurrency)
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var (
-		mu        sync.Mutex
-		all       []model.Alert
-		wg        sync.WaitGroup
-		completed int
+		mu           sync.Mutex
+		all          []model.Alert
+		wg           sync.WaitGroup
+		completed    int
+		rateLimitErr *RateLimitError
 	)
 	total := len(repos)
 	for _, repo := range repos {
@@ -432,7 +461,13 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 				all = append(all, alerts...)
 			} else {
 				var skipErr *SkipError
-				if !errors.As(err, &skipErr) {
+				var rlErr *RateLimitError
+				if errors.As(err, &rlErr) {
+					if rateLimitErr == nil {
+						rateLimitErr = rlErr
+					}
+					cancel() // 残りのgoroutineをキャンセル
+				} else if !errors.As(err, &skipErr) {
 					slog.Debug("リポジトリのアラート取得スキップ", "repo", repo, "error", err)
 				}
 			}
@@ -446,18 +481,32 @@ func (c *ghClient) fetchUserRepoAlerts(ctx context.Context, owner string, exclud
 	}
 	wg.Wait()
 
+	if rateLimitErr != nil {
+		slog.Warn("レート制限によりリポジトリ別取得を中断", "owner", owner, "completed", rateLimitErr.Remaining)
+		return nil, rateLimitErr
+	}
+
 	slog.Info("アラート取得完了（全リポジトリ）", "owner", owner, "repos", total, "alerts", len(all))
 	return all, nil
 }
 
 func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open&per_page=100", owner, repo)
+	if sev := buildSeverityParam(c.fetchMinSeverity); sev != "" {
+		endpoint += "&severity=" + sev
+	}
 	slog.Debug("gh api実行（リポジトリ）", "endpoint", endpoint)
 	cmd := exec.CommandContext(ctx, c.ghPath, "api", endpoint, "--paginate")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.ToLower(strings.TrimSpace(string(out)))
-		// Dependabot未有効・権限なし・リポジトリ不存在は警告スキップ
+		// レート制限は403で返るが権限エラーと区別する（先にチェック）
+		if isRateLimitMessage(msg) {
+			info, _ := c.checkRateLimit(ctx)
+			slog.Warn("レート制限検出（リポジトリ取得中）", "owner", owner, "repo", repo, "remaining", info.Remaining)
+			return nil, &RateLimitError{Remaining: info.Remaining, ResetAt: info.ResetAt}
+		}
+		// Dependabot未有効・権限なし・リポジトリ不存在はスキップ
 		if strings.Contains(msg, "not found") ||
 			strings.Contains(msg, "not enabled") ||
 			strings.Contains(msg, "403") ||
