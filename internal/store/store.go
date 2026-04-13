@@ -455,6 +455,37 @@ func (s *Store) FindEvalByCVE(cveID string) *model.Evaluation {
 	return &eval
 }
 
+// FindEvalByAdvisory は CVE ID または GHSA ID で既存のAI評価を検索する。
+// cveID が非空のときは CVE ID で検索する。cveID が空で ghsaID が非空のときは GHSA ID で検索する。
+// 両方空の場合は nil を返す（空アドバイザリ同士のマッチを防ぐ）。
+func (s *Store) FindEvalByAdvisory(cveID, ghsaID string) *model.Evaluation {
+	if cveID != "" {
+		return s.FindEvalByCVE(cveID)
+	}
+	if ghsaID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var evalJSON sql.NullString
+	err := s.db.QueryRow(`
+		SELECT eval_json FROM alert_records
+		WHERE json_extract(alert_json, '$.GHSAID') = ?
+		  AND eval_json IS NOT NULL
+		  AND eval_status = 'done'
+		ORDER BY id DESC
+		LIMIT 1`, ghsaID).Scan(&evalJSON)
+	if err != nil || !evalJSON.Valid {
+		return nil
+	}
+	var eval model.Evaluation
+	if err := json.Unmarshal([]byte(evalJSON.String), &eval); err != nil {
+		return nil
+	}
+	return &eval
+}
+
 // RemoveResolvedAlerts は (owner, repo) のうち openNumbers に含まれないレコードを削除し、
 // 削除されたレコードを返す（Slack/Discord通知の更新に使うため）。
 func (s *Store) RemoveResolvedAlerts(owner, repo string, openNumbers []int) []*model.AlertRecord {

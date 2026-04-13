@@ -51,12 +51,12 @@
 {{if .CVEGroups}}
 <div class="cve-list">
   {{range .CVEGroups}}
-  <details class="cve-group" data-key="cve:{{.CVEID}}:{{.PackageName}}">
+  <details class="cve-group" data-key="cve:{{if .CVEID}}{{.CVEID}}{{else}}{{.GHSAID}}{{end}}:{{.PackageName}}">
     <summary class="cve-summary">
       <div class="cve-summary-main">
         <span class="badge badge-{{.Severity}}">{{.Severity}}</span>
         <span class="cve-pkg">{{.PackageName}}</span>
-        {{if .CVEID}}<span class="cve-id">{{.CVEID}}</span>{{end}}
+        {{if .CVEID}}<span class="cve-id">{{.CVEID}}</span>{{else if .GHSAID}}<span class="cve-id">{{.GHSAID}}</span>{{end}}
         {{if .Summary}}<span class="cve-desc">{{.Summary}}</span>{{end}}
       </div>
       <div class="cve-summary-meta">

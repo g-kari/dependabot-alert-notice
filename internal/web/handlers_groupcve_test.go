@@ -99,6 +99,7 @@ func TestGroupByCVE_EmptyCVEID(t *testing.T) {
 				Repo:        "repo1",
 				Severity:    model.SeverityLow,
 				CVEID:       "",
+				GHSAID:      "",
 				CreatedAt:   time.Now(),
 			},
 			State: model.AlertStatePending,
@@ -111,15 +112,88 @@ func TestGroupByCVE_EmptyCVEID(t *testing.T) {
 				Repo:        "repo2",
 				Severity:    model.SeverityLow,
 				CVEID:       "",
+				GHSAID:      "",
 				CreatedAt:   time.Now(),
 			},
 			State: model.AlertStatePending,
 		},
 	}
 	groups := groupByCVE(records)
-	// CVE IDが空のアラートは個別グループになる
+	// CVE ID・GHSA IDが両方空のアラートは個別グループになる
 	if len(groups) != 2 {
-		t.Fatalf("groups = %d, want 2 (empty CVE IDs should not be merged)", len(groups))
+		t.Fatalf("groups = %d, want 2 (empty CVE/GHSA IDs should not be merged)", len(groups))
+	}
+}
+
+// TestGroupByCVE_SameGHSANoCV はCVEなし・同一GHSAのアラートが1グループにまとまることを確認
+func TestGroupByCVE_SameGHSANoCV(t *testing.T) {
+	now := time.Now()
+	records := []*model.AlertRecord{
+		{
+			Alert: model.Alert{
+				ID:          1,
+				PackageName: "pkg-a",
+				Owner:       "testorg",
+				Repo:        "repo1",
+				Severity:    model.SeverityHigh,
+				CVEID:       "",
+				GHSAID:      "GHSA-xxxx-yyyy-zzzz",
+				CVSSScore:   7.5,
+				CreatedAt:   now.Add(-time.Hour),
+			},
+			State: model.AlertStatePending,
+		},
+		{
+			Alert: model.Alert{
+				ID:          2,
+				PackageName: "pkg-a",
+				Owner:       "testorg",
+				Repo:        "repo2",
+				Severity:    model.SeverityHigh,
+				CVEID:       "",
+				GHSAID:      "GHSA-xxxx-yyyy-zzzz",
+				CVSSScore:   7.5,
+				CreatedAt:   now,
+			},
+			State: model.AlertStatePending,
+		},
+	}
+	groups := groupByCVE(records)
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want 1 (same GHSA should be grouped)", len(groups))
+	}
+	if len(groups[0].Records) != 2 {
+		t.Errorf("Records len = %d, want 2", len(groups[0].Records))
+	}
+	if groups[0].GHSAID != "GHSA-xxxx-yyyy-zzzz" {
+		t.Errorf("GHSAID = %q, want GHSA-xxxx-yyyy-zzzz", groups[0].GHSAID)
+	}
+	if groups[0].CVEID != "" {
+		t.Errorf("CVEID = %q, want empty", groups[0].CVEID)
+	}
+}
+
+// TestGroupByCVE_DifferentGHSANoCV は異なるGHSAが別グループになることを確認
+func TestGroupByCVE_DifferentGHSANoCV(t *testing.T) {
+	records := []*model.AlertRecord{
+		{
+			Alert: model.Alert{
+				ID: 1, PackageName: "pkg-a", Repo: "repo1",
+				Severity: model.SeverityHigh, CVEID: "", GHSAID: "GHSA-aaaa-bbbb-cccc",
+				CreatedAt: time.Now(),
+			},
+		},
+		{
+			Alert: model.Alert{
+				ID: 2, PackageName: "pkg-b", Repo: "repo2",
+				Severity: model.SeverityMedium, CVEID: "", GHSAID: "GHSA-dddd-eeee-ffff",
+				CreatedAt: time.Now(),
+			},
+		},
+	}
+	groups := groupByCVE(records)
+	if len(groups) != 2 {
+		t.Fatalf("groups = %d, want 2 (different GHSAs are separate groups)", len(groups))
 	}
 }
 

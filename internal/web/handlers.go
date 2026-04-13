@@ -15,9 +15,10 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 )
 
-// CVEGroup はCVE ID単位でアラートをまとめたグループ
+// CVEGroup はCVE ID（またはGHSA ID）単位でアラートをまとめたグループ
 type CVEGroup struct {
 	CVEID       string
+	GHSAID      string
 	Summary     string
 	Severity    model.Severity
 	PackageName string
@@ -112,7 +113,11 @@ func groupByCVE(records []*model.AlertRecord) []CVEGroup {
 	for _, r := range records {
 		key := r.Alert.CVEID
 		if key == "" {
-			key = fmt.Sprintf("__noCVE_%d", r.Alert.ID)
+			if r.Alert.GHSAID != "" {
+				key = "ghsa:" + r.Alert.GHSAID
+			} else {
+				key = fmt.Sprintf("__noAdvisory_%d", r.Alert.ID)
+			}
 		}
 
 		if g, ok := groupMap[key]; ok {
@@ -129,6 +134,7 @@ func groupByCVE(records []*model.AlertRecord) []CVEGroup {
 		} else {
 			groupMap[key] = &CVEGroup{
 				CVEID:       r.Alert.CVEID,
+				GHSAID:      r.Alert.GHSAID,
 				Summary:     r.Alert.Summary,
 				Severity:    r.Alert.Severity,
 				PackageName: r.Alert.PackageName,

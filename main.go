@@ -333,14 +333,18 @@ func makeEvaluateHandler(cfg *config.Config, eval evaluator.Evaluator, s *store.
 		alert := record.Alert
 		slog.Info("AI評価中", "id", alert.ID, "package", alert.PackageName, "severity", alert.Severity)
 
-		// 同一CVEの評価済み結果を再利用
+		// 同一CVE/GHSAの評価済み結果を再利用
 		var evaluation *model.Evaluation
-		if existing := s.FindEvalByCVE(alert.CVEID); existing != nil {
-			slog.Info("CVE重複評価スキップ（既存結果を再利用）", "alertID", alert.ID, "cveID", alert.CVEID)
+		if existing := s.FindEvalByAdvisory(alert.CVEID, alert.GHSAID); existing != nil {
+			advisoryID := alert.CVEID
+			if advisoryID == "" {
+				advisoryID = alert.GHSAID
+			}
+			slog.Info("アドバイザリ重複評価スキップ（既存結果を再利用）", "alertID", alert.ID, "advisoryID", advisoryID)
 			s.AddLog(model.LogEntry{
 				Timestamp: time.Now(),
 				Level:     "info",
-				Message:   fmt.Sprintf("AI評価スキップ (#%d %s): CVE %s の評価を再利用", alert.ID, alert.PackageName, alert.CVEID),
+				Message:   fmt.Sprintf("AI評価スキップ (#%d %s): %s の評価を再利用", alert.ID, alert.PackageName, advisoryID),
 				AlertID:   alert.ID,
 			})
 			evaluation = existing

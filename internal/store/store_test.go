@@ -402,6 +402,71 @@ func TestFindEvalByCVE_ReturnsNewestWhenMultiple(t *testing.T) {
 	}
 }
 
+// TestFindEvalByAdvisory_CVEIDTakesPriority はCVE IDが非空のとき CVE で検索されることを確認
+func TestFindEvalByAdvisory_CVEIDTakesPriority(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "CVE-2024-AAAA", GHSAID: "GHSA-xxxx"},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	// CVE IDで引っかかる
+	eval := s.FindEvalByAdvisory("CVE-2024-AAAA", "GHSA-xxxx")
+	if eval == nil {
+		t.Fatal("FindEvalByAdvisory() should return eval when CVEID matches")
+	}
+	if eval.Recommendation != "approve" {
+		t.Errorf("Recommendation = %q, want approve", eval.Recommendation)
+	}
+}
+
+// TestFindEvalByAdvisory_FallsBackToGHSA はCVEが空のときGHSA IDで検索されることを確認
+func TestFindEvalByAdvisory_FallsBackToGHSA(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "", GHSAID: "GHSA-yyyy-zzzz"},
+		Evaluation: &model.Evaluation{Recommendation: "reject"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	eval := s.FindEvalByAdvisory("", "GHSA-yyyy-zzzz")
+	if eval == nil {
+		t.Fatal("FindEvalByAdvisory() should return eval when GHSAID matches")
+	}
+	if eval.Recommendation != "reject" {
+		t.Errorf("Recommendation = %q, want reject", eval.Recommendation)
+	}
+}
+
+// TestFindEvalByAdvisory_BothEmpty は両方空のとき nil を返すことを確認
+func TestFindEvalByAdvisory_BothEmpty(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "", GHSAID: ""},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	if s.FindEvalByAdvisory("", "") != nil {
+		t.Error("FindEvalByAdvisory(\"\",\"\") should return nil to prevent empty-advisory matching")
+	}
+}
+
+// TestFindEvalByAdvisory_GHSANoMatch はGHSAが一致しないとき nil を返すことを確認
+func TestFindEvalByAdvisory_GHSANoMatch(t *testing.T) {
+	s := New()
+	s.Save(&model.AlertRecord{
+		Alert:      model.Alert{Owner: "org", Repo: "repo1", Number: 1, CVEID: "", GHSAID: "GHSA-aaaa"},
+		Evaluation: &model.Evaluation{Recommendation: "approve"},
+		EvalStatus: model.EvalStatusDone,
+	})
+
+	if s.FindEvalByAdvisory("", "GHSA-bbbb") != nil {
+		t.Error("FindEvalByAdvisory() should return nil for different GHSA ID")
+	}
+}
+
 func saveTestAlert(s *Store, owner, repo string, number int) *model.AlertRecord {
 	rec := &model.AlertRecord{
 		Alert: model.Alert{
