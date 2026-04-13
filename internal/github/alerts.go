@@ -284,6 +284,26 @@ func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool 
 	return strings.TrimSpace(string(out)) == "true"
 }
 
+// repoMetadata はシングルリポジトリ取得パスで並列取得するメタデータをまとめる構造体
+type repoMetadata struct {
+	branch       string
+	homepage     string
+	contributors []string
+}
+
+// fetchRepoMetadata はデフォルトブランチ・公開URL・コントリビューターを並列取得して返す。
+// 各フィールドの取得失敗時はゼロ値を返す（フィールドごとに独立したgoroutineで実行）。
+func (c *ghClient) fetchRepoMetadata(ctx context.Context, owner, repo string) repoMetadata {
+	var wg sync.WaitGroup
+	var meta repoMetadata
+	wg.Add(3)
+	go func() { defer wg.Done(); meta.branch = c.fetchDefaultBranch(ctx, owner, repo) }()
+	go func() { defer wg.Done(); meta.homepage = c.fetchHomepage(ctx, owner, repo) }()
+	go func() { defer wg.Done(); meta.contributors = c.fetchContributors(ctx, owner, repo) }()
+	wg.Wait()
+	return meta
+}
+
 func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]model.Alert, error) {
 	// レート制限チェック（残り200未満はスキップ）
 	info, _ := c.checkRateLimit(ctx)
@@ -308,13 +328,11 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 			return nil, err
 		}
 		if len(alerts) > 0 {
-			branch := c.fetchDefaultBranch(ctx, target.Owner, target.Repo)
-			homepage := c.fetchHomepage(ctx, target.Owner, target.Repo)
-			contributors := c.fetchContributors(ctx, target.Owner, target.Repo)
+			meta := c.fetchRepoMetadata(ctx, target.Owner, target.Repo)
 			for i := range alerts {
-				alerts[i].DefaultBranch = branch
-				alerts[i].Homepage = homepage
-				alerts[i].Contributors = contributors
+				alerts[i].DefaultBranch = meta.branch
+				alerts[i].Homepage = meta.homepage
+				alerts[i].Contributors = meta.contributors
 			}
 		}
 		return alerts, nil
@@ -393,16 +411,24 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 		}
 	}
 
-	// リポジトリ別にGraphQL APIでdependabotUpdateエラー情報を補完
-	c.enrichUpdateErrors(ctx, owner, alerts)
-
+	// repoSet を先に構築（enrichUpdateErrors と fetchContributorsMap の両方で使用）
 	repoSet := make(map[string]struct{})
 	for _, a := range alerts {
 		repoSet[a.Repo] = struct{}{}
 	}
 
-	// コントリビューター一覧をリポジトリ別に並列取得
-	contribMap := c.fetchContributorsMap(ctx, owner, repoSet)
+	// GraphQL補完（UpdateError/PRNumber）とコントリビューター取得を並列実行
+	// enrichUpdateErrors は UpdateError/PRNumber フィールドのみ書き込み、
+	// fetchContributorsMap は独立した map を返すため data race なし
+	var (
+		wg         sync.WaitGroup
+		contribMap map[string][]string
+	)
+	wg.Add(2)
+	go func() { defer wg.Done(); c.enrichUpdateErrors(ctx, owner, alerts) }()
+	go func() { defer wg.Done(); contribMap = c.fetchContributorsMap(ctx, owner, repoSet) }()
+	wg.Wait()
+
 	for i := range alerts {
 		if cs, ok := contribMap[alerts[i].Repo]; ok {
 			alerts[i].Contributors = cs

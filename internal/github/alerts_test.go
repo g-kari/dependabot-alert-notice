@@ -1,6 +1,8 @@
 package github
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -616,6 +618,65 @@ func TestIsRateLimitMessage(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("isRateLimitMessage(%q) = %v, want %v", tc.msg, got, tc.want)
 		}
+	}
+}
+
+// TestFetchRepoMetadata_Parallel は存在しないghパスでも panic せずゼロ値を返すことを確認
+func TestFetchRepoMetadata_Parallel(t *testing.T) {
+	c := &ghClient{cfg: &config.Config{GhPath: "/nonexistent/gh"}}
+	ctx := context.Background()
+	meta := c.fetchRepoMetadata(ctx, "owner", "repo")
+	if meta.branch != "" {
+		t.Errorf("branch = %q, want empty", meta.branch)
+	}
+	if meta.homepage != "" {
+		t.Errorf("homepage = %q, want empty", meta.homepage)
+	}
+	if meta.contributors != nil {
+		t.Errorf("contributors = %v, want nil", meta.contributors)
+	}
+}
+
+// TestFetchRepoMetadata_ContextCancel はキャンセル済みコンテキストで速やかに完了しゼロ値を返すことを確認
+func TestFetchRepoMetadata_ContextCancel(t *testing.T) {
+	c := &ghClient{cfg: &config.Config{GhPath: "gh"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	meta := c.fetchRepoMetadata(ctx, "owner", "repo")
+	if meta.branch != "" || meta.homepage != "" || meta.contributors != nil {
+		t.Errorf("cancelled context should yield zero values, got branch=%q homepage=%q contributors=%v",
+			meta.branch, meta.homepage, meta.contributors)
+	}
+}
+
+// TestEnrichAndContributors_FieldIsolation は enrichUpdateErrors と fetchContributorsMap の並列実行で
+// data race が起きないことを -race フラグ下で確認する
+func TestEnrichAndContributors_FieldIsolation(t *testing.T) {
+	c := &ghClient{cfg: &config.Config{GhPath: "/nonexistent/gh"}}
+	ctx := context.Background()
+	alerts := []model.Alert{
+		{Repo: "repo-a", Number: 1},
+		{Repo: "repo-b", Number: 2},
+	}
+	repoSet := map[string]struct{}{"repo-a": {}, "repo-b": {}}
+
+	var (
+		wg         sync.WaitGroup
+		contribMap map[string][]string
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		c.enrichUpdateErrors(ctx, "owner", alerts)
+	}()
+	go func() {
+		defer wg.Done()
+		contribMap = c.fetchContributorsMap(ctx, "owner", repoSet)
+	}()
+	wg.Wait()
+
+	if contribMap == nil {
+		t.Error("contribMap should not be nil after fetchContributorsMap")
 	}
 }
 
