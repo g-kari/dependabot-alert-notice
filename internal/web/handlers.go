@@ -234,6 +234,29 @@ func groupByCVE(records []*model.AlertRecord) []CVEGroup {
 	return groups
 }
 
+// filterBySearch はクエリ文字列でAlertRecordを絞り込む。
+// Repo・Owner・PackageName・CVEID・GHSAID・Summary に case-insensitive 部分一致。
+// query が空の場合は全件返却する。
+func filterBySearch(records []*model.AlertRecord, query string) []*model.AlertRecord {
+	if query == "" {
+		return records
+	}
+	q := strings.ToLower(query)
+	var result []*model.AlertRecord
+	for _, r := range records {
+		a := r.Alert
+		if strings.Contains(strings.ToLower(a.Repo), q) ||
+			strings.Contains(strings.ToLower(a.Owner), q) ||
+			strings.Contains(strings.ToLower(a.PackageName), q) ||
+			strings.Contains(strings.ToLower(a.CVEID), q) ||
+			strings.Contains(strings.ToLower(a.GHSAID), q) ||
+			strings.Contains(strings.ToLower(a.Summary), q) {
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
 // filterByConfig はconfigの除外リストに基づいてAlertRecordをフィルタリングする。
 // excludeに設定されたリポジトリのアラートのみ除外し、それ以外は全て表示する。
 func filterByConfig(records []*model.AlertRecord, cfg *config.Config) []*model.AlertRecord {
@@ -276,6 +299,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	records := filterByConfig(s.store.List(), cfg)
 
+	searchQuery := r.URL.Query().Get("q")
+	if searchQuery != "" {
+		records = filterBySearch(records, searchQuery)
+	}
+
 	hasEvaluating := false
 	for _, rec := range records {
 		if rec.EvalStatus == model.EvalStatusEvaluating {
@@ -308,6 +336,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		CVEGroups       []CVEGroup
 		RepoGroups      []RepoGroup
 		ViewMode        string
+		SearchQuery     string
 		IsPolling       bool
 		HasEvaluating   bool
 		Pagination      PaginationInfo
@@ -316,6 +345,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		CVEGroups:       pagedCVE,
 		RepoGroups:      pagedRepo,
 		ViewMode:        viewMode,
+		SearchQuery:     searchQuery,
 		IsPolling:       polling,
 		HasEvaluating:   hasEvaluating,
 		DisableApproval: s.cfg.DisableApproval,

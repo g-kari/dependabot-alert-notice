@@ -87,6 +87,7 @@ func (c *ghClient) fetchContributors(ctx context.Context, owner, repo string) []
 		fmt.Sprintf("repos/%s/%s/contributors?per_page=100", owner, repo),
 	).Output()
 	if err != nil {
+		slog.Warn("コントリビューター取得失敗", "owner", owner, "repo", repo, "error", err)
 		return nil
 	}
 	return parseContributorLogins(out)
@@ -253,6 +254,7 @@ func (c *ghClient) fetchHomepage(ctx context.Context, owner, repo string) string
 		"--jq", ".homepageUrl",
 	).Output()
 	if err != nil {
+		slog.Debug("公開URL取得失敗", "owner", owner, "repo", repo, "error", err)
 		return ""
 	}
 	return strings.TrimSpace(string(out))
@@ -266,9 +268,29 @@ func (c *ghClient) fetchDefaultBranch(ctx context.Context, owner, repo string) s
 		"--jq", ".defaultBranchRef.name",
 	).Output()
 	if err != nil {
+		slog.Debug("デフォルトブランチ取得失敗", "owner", owner, "repo", repo, "error", err)
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// supplementMetadata は org API で空になった DefaultBranch/Homepage を repoList から補完する。
+// 既に値がある場合は上書きしない。
+func supplementMetadata(alerts []model.Alert, repoList []repoListItem) {
+	branchMap := make(map[string]string, len(repoList))
+	homepageMap := make(map[string]string, len(repoList))
+	for _, item := range repoList {
+		branchMap[item.Name] = item.DefaultBranchRef.Name
+		homepageMap[item.Name] = item.HomepageUrl
+	}
+	for i := range alerts {
+		if alerts[i].DefaultBranch == "" {
+			alerts[i].DefaultBranch = branchMap[alerts[i].Repo]
+		}
+		if alerts[i].Homepage == "" {
+			alerts[i].Homepage = homepageMap[alerts[i].Repo]
+		}
+	}
 }
 
 // isRepoArchived はリポジトリがアーカイブ済みかを返す。取得失敗時は false（続行）。
@@ -399,15 +421,19 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	}
 	slog.Info("org APIアラートパース完了", "owner", owner, "count", len(alerts))
 
-	// activeMonths > 0 のとき: リポ一覧を取得して非活動リポのアラートをフィルタ
-	if c.cfg.ActiveMonths > 0 && len(alerts) > 0 {
-		repoList, err := c.fetchRepoList(ctx, owner)
-		if err != nil {
-			slog.Warn("リポ一覧取得失敗（activeMonthsフィルタをスキップ）", "owner", owner, "error", err)
+	// リポ一覧を取得してフィルタとメタデータ補完に使用
+	// org APIは repository.default_branch / homepage を返すが、空になるケースがあるため repoList でフォールバック補完する
+	if len(alerts) > 0 {
+		repoList, repoListErr := c.fetchRepoList(ctx, owner)
+		if repoListErr != nil {
+			slog.Warn("リポ一覧取得失敗（フィルタ・メタデータ補完スキップ）", "owner", owner, "error", repoListErr)
 		} else {
-			before := len(alerts)
-			alerts = filterAlertsByActiveRepos(alerts, repoList, c.cfg.ActiveMonths)
-			slog.Info("直近活動フィルタ適用（org）", "owner", owner, "before", before, "after", len(alerts), "activeMonths", c.cfg.ActiveMonths)
+			if c.cfg.ActiveMonths > 0 {
+				before := len(alerts)
+				alerts = filterAlertsByActiveRepos(alerts, repoList, c.cfg.ActiveMonths)
+				slog.Info("直近活動フィルタ適用（org）", "owner", owner, "before", before, "after", len(alerts), "activeMonths", c.cfg.ActiveMonths)
+			}
+			supplementMetadata(alerts, repoList)
 		}
 	}
 

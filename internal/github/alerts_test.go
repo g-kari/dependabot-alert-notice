@@ -764,6 +764,54 @@ func TestParseContributorLogins(t *testing.T) {
 	}
 }
 
+// TestSupplementMetadata は repoList から DefaultBranch/Homepage が補完されることを確認
+func TestSupplementMetadata(t *testing.T) {
+	alerts := []model.Alert{
+		{Repo: "repo-a", DefaultBranch: "", Homepage: ""},
+		{Repo: "repo-b", DefaultBranch: "", Homepage: ""},
+	}
+	repoList := []repoListItem{
+		{Name: "repo-a", DefaultBranchRef: struct {
+			Name string `json:"name"`
+		}{Name: "main"}, HomepageUrl: "https://example.com/a"},
+		{Name: "repo-b", DefaultBranchRef: struct {
+			Name string `json:"name"`
+		}{Name: "develop"}, HomepageUrl: ""},
+	}
+	supplementMetadata(alerts, repoList)
+	if alerts[0].DefaultBranch != "main" {
+		t.Errorf("repo-a DefaultBranch = %q, want %q", alerts[0].DefaultBranch, "main")
+	}
+	if alerts[0].Homepage != "https://example.com/a" {
+		t.Errorf("repo-a Homepage = %q, want %q", alerts[0].Homepage, "https://example.com/a")
+	}
+	if alerts[1].DefaultBranch != "develop" {
+		t.Errorf("repo-b DefaultBranch = %q, want %q", alerts[1].DefaultBranch, "develop")
+	}
+	if alerts[1].Homepage != "" {
+		t.Errorf("repo-b Homepage = %q, want empty", alerts[1].Homepage)
+	}
+}
+
+// TestSupplementMetadata_NoOverwrite は既に値がある場合は上書きしないことを確認
+func TestSupplementMetadata_NoOverwrite(t *testing.T) {
+	alerts := []model.Alert{
+		{Repo: "repo-a", DefaultBranch: "already-set", Homepage: "https://existing.com"},
+	}
+	repoList := []repoListItem{
+		{Name: "repo-a", DefaultBranchRef: struct {
+			Name string `json:"name"`
+		}{Name: "main"}, HomepageUrl: "https://new.com"},
+	}
+	supplementMetadata(alerts, repoList)
+	if alerts[0].DefaultBranch != "already-set" {
+		t.Errorf("DefaultBranch should not be overwritten, got %q", alerts[0].DefaultBranch)
+	}
+	if alerts[0].Homepage != "https://existing.com" {
+		t.Errorf("Homepage should not be overwritten, got %q", alerts[0].Homepage)
+	}
+}
+
 func TestEqualFold(t *testing.T) {
 	tests := []struct {
 		a, b string
