@@ -694,3 +694,34 @@ func TestTargetDelete_InvalidIndex(t *testing.T) {
 		t.Error("Targets should not be changed for out-of-range index")
 	}
 }
+
+func TestDetail_ApproveButtonOnlyWithPR(t *testing.T) {
+	srv, s, _ := newTestServer(t)
+	saveAlert(s, 1, "nopr", model.SeverityHigh)
+	saveAlert(s, 2, "haspr", model.SeverityHigh)
+	for _, r := range s.List() {
+		if r.Alert.PackageName == "haspr" {
+			r.Alert.PRNumber = 5
+			s.Save(r)
+		}
+	}
+
+	render := func(id string) string {
+		req := httptest.NewRequest(http.MethodGet, "/alerts/"+id, nil)
+		req.SetPathValue("id", id)
+		w := httptest.NewRecorder()
+		srv.handleDetail(w, req)
+		return w.Body.String()
+	}
+	for _, r := range s.List() {
+		body := render(fmt.Sprintf("%d", r.Alert.ID))
+		has := strings.Contains(body, "/approve")
+		want := r.Alert.PRNumber > 0
+		if has != want {
+			t.Errorf("%s: approve button present=%v, want %v", r.Alert.PackageName, has, want)
+		}
+		if !strings.Contains(body, "/reject") {
+			t.Errorf("%s: reject button should remain", r.Alert.PackageName)
+		}
+	}
+}

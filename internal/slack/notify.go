@@ -69,25 +69,31 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 		)
 	}
 
-	blocks = append(blocks,
-		slackgo.NewActionBlock(
-			fmt.Sprintf("alert_actions_%d", alert.ID),
+	var buttons []slackgo.BlockElement
+	// 修正用PRが存在する（PRNumber > 0）場合のみマージ承認ボタンを表示する
+	if alert.PRNumber > 0 {
+		buttons = append(buttons,
 			slackgo.NewButtonBlockElement(
 				"approve",
 				fmt.Sprintf("%d", alert.ID),
 				slackgo.NewTextBlockObject(slackgo.PlainTextType, "✅ マージ承認", true, false),
 			).WithStyle(slackgo.StylePrimary),
-			slackgo.NewButtonBlockElement(
-				"reject",
-				fmt.Sprintf("%d", alert.ID),
-				slackgo.NewTextBlockObject(slackgo.PlainTextType, "❌ 却下", true, false),
-			).WithStyle(slackgo.StyleDanger),
-			slackgo.NewButtonBlockElement(
-				"open_github",
-				alert.HTMLURL,
-				slackgo.NewTextBlockObject(slackgo.PlainTextType, "🔗 GitHubで開く", true, false),
-			),
+		)
+	}
+	buttons = append(buttons,
+		slackgo.NewButtonBlockElement(
+			"reject",
+			fmt.Sprintf("%d", alert.ID),
+			slackgo.NewTextBlockObject(slackgo.PlainTextType, "❌ 却下", true, false),
+		).WithStyle(slackgo.StyleDanger),
+		slackgo.NewButtonBlockElement(
+			"open_github",
+			alert.HTMLURL,
+			slackgo.NewTextBlockObject(slackgo.PlainTextType, "🔗 GitHubで開く", true, false),
 		),
+	)
+	blocks = append(blocks,
+		slackgo.NewActionBlock(fmt.Sprintf("alert_actions_%d", alert.ID), buttons...),
 	)
 
 	return blocks
