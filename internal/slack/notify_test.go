@@ -149,3 +149,22 @@ func TestBuildBlocks_WithoutEval(t *testing.T) {
 		t.Error("blocks should not be empty even without eval")
 	}
 }
+
+func TestBuildBlocks_ApproveButtonOnlyWithPR(t *testing.T) {
+	base := model.Alert{ID: 1, PackageName: "lodash", Owner: "o", Repo: "r", HTMLURL: "https://example.com"}
+
+	withPR := base
+	withPR.PRNumber = 12
+	text := blocksToText(buildBlocks(&model.AlertRecord{Alert: withPR}))
+	if !strings.Contains(text, `"action_id":"approve"`) {
+		t.Error("PRありの場合はマージ承認ボタンが表示されるべき")
+	}
+
+	text = blocksToText(buildBlocks(&model.AlertRecord{Alert: base}))
+	if strings.Contains(text, `"action_id":"approve"`) {
+		t.Error("PRなしの場合はマージ承認ボタンを表示しないべき")
+	}
+	if !strings.Contains(text, `"action_id":"reject"`) || !strings.Contains(text, `"action_id":"open_github"`) {
+		t.Error("他のボタンは維持されるべき")
+	}
+}
