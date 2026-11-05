@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -208,40 +209,68 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS notification_batches (group_key TEXT PRIMARY KEY, scope TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, fingerprint TEXT NOT NULL, sent_fingerprint TEXT NOT NULL DEFAULT '', due_at INTEGER)`); err != nil {
 		return fmt.Errorf("通知待機テーブル作成失敗: %w", err)
 	}
-	return nil
+	return s.migrateSecurity()
 }
 
 // Save preserves resolved records against delayed evaluation writes.
 func (s *Store) Save(record *model.AlertRecord) bool {
-	return s.save(record, false)
+	saved, err := s.save(context.Background(), record, false)
+	if err != nil {
+		slog.Error("アラート保存失敗", "error", err)
+	}
+	return saved
 }
 
 // SaveObserved stores an alert confirmed open by a fresh GitHub fetch. A new
 // or explicitly reopened record returns true and retains its stable database ID.
+// Legacy callers receive false for both an existing record and a failed write.
 func (s *Store) SaveObserved(record *model.AlertRecord) bool {
-	return s.save(record, true)
+	saved, err := s.SaveObservedWithError(context.Background(), record)
+	if err != nil {
+		slog.Error("取得済みアラート保存失敗", "error", err)
+	}
+	return saved
 }
 
-func (s *Store) save(record *model.AlertRecord, observed bool) bool {
+// SaveObservedWithError preserves the legacy new/reopened result while exposing
+// storage failures so fetch jobs cannot report a failed write as successful.
+func (s *Store) SaveObservedWithError(ctx context.Context, record *model.AlertRecord) (bool, error) {
+	return s.save(ctx, record, true)
+}
+
+func (s *Store) save(ctx context.Context, record *model.AlertRecord, observed bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if record == nil {
+		return false, fmt.Errorf("保存対象アラートが未設定です")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("アラート保存開始失敗: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	var existingID int
 	var resolved sql.NullString
 	var existingBody string
-	existingErr := s.db.QueryRow(`SELECT id,resolved_at,alert_json FROM alert_records WHERE owner=? AND repo=? AND number=?`, record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&existingID, &resolved, &existingBody)
+	existingErr := tx.QueryRowContext(ctx, `SELECT id,resolved_at,alert_json FROM alert_records WHERE owner=? AND repo=? AND number=?`, record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&existingID, &resolved, &existingBody)
 	if existingErr != nil && existingErr != sql.ErrNoRows {
-		slog.Error("既存レコード確認失敗", "error", existingErr)
-		return false
+		return false, fmt.Errorf("既存レコード確認失敗: %w", existingErr)
 	}
 	if resolved.Valid && !observed {
-		return false
+		return false, nil
 	}
 
-	alertJSON, _ := json.Marshal(record.Alert)
+	alertJSON, err := json.Marshal(record.Alert)
+	if err != nil {
+		return false, fmt.Errorf("アラート変換失敗: %w", err)
+	}
 
 	var evalJSON sql.NullString
 	if record.Evaluation != nil {
-		b, _ := json.Marshal(record.Evaluation)
+		b, err := json.Marshal(record.Evaluation)
+		if err != nil {
+			return false, fmt.Errorf("評価変換失敗: %w", err)
+		}
 		evalJSON = sql.NullString{String: string(b), Valid: true}
 	}
 
@@ -255,7 +284,7 @@ func (s *Store) save(record *model.AlertRecord, observed bool) bool {
 		evalStatus = string(model.EvalStatusDone)
 	}
 
-	_, err := s.db.Exec(`INSERT INTO alert_records
+	_, err = tx.ExecContext(ctx, `INSERT INTO alert_records
 		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(owner, repo, number) DO UPDATE SET
@@ -281,21 +310,27 @@ func (s *Store) save(record *model.AlertRecord, observed bool) bool {
 		record.DiscordMessageID,
 	)
 	if err != nil {
-		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
-		return false
+		return false, fmt.Errorf("レコード保存失敗: %w", err)
 	}
 	var dbID int
-	if err2 := s.db.QueryRow(`SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
+	if err2 := tx.QueryRowContext(ctx, `SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
 		record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 != nil {
-		slog.Error("保存済みID取得失敗", "error", err2)
-		return false
+		return false, fmt.Errorf("保存済みID取得失敗: %w", err2)
+	}
+	projection := *record
+	projection.ResolvedAt = nil
+	if err := projectDependabot(ctx, tx, projection, "", time.Now().UTC(), false); err != nil {
+		return false, fmt.Errorf("アラート正規化保存失敗: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("アラート保存確定失敗: %w", err)
 	}
 	record.Alert.ID = dbID
 	record.ResolvedAt = nil
 	if existingErr == sql.ErrNoRows || resolved.Valid || existingBody != string(alertJSON) {
 		s.riskChangedLocked(RiskScope{Repos: []string{record.Alert.Owner + "/" + record.Alert.Repo}})
 	}
-	return existingErr == sql.ErrNoRows || resolved.Valid
+	return existingErr == sql.ErrNoRows || resolved.Valid, nil
 }
 
 func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
@@ -435,7 +470,12 @@ func (s *Store) UpdateAlertJSON(owner, repo string, number int, alert model.Aler
 	if err != nil {
 		return fmt.Errorf("alert_json マーシャル失敗: %w", err)
 	}
-	result, err := s.db.Exec(`UPDATE alert_records SET alert_json = ? WHERE owner = ? AND repo = ? AND number = ? AND alert_json != ?`,
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("alert_json 更新開始失敗: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.Exec(`UPDATE alert_records SET alert_json = ? WHERE owner = ? AND repo = ? AND number = ? AND alert_json != ?`,
 		string(alertJSON), owner, repo, number, string(alertJSON))
 	if err != nil {
 		return fmt.Errorf("alert_json 更新失敗: %w", err)
@@ -443,6 +483,27 @@ func (s *Store) UpdateAlertJSON(owner, repo string, number int, alert model.Aler
 	count, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("alert_json 更新件数確認失敗: %w", err)
+	}
+	if count > 0 {
+		projection := model.AlertRecord{Alert: alert}
+		projection.Alert.Owner, projection.Alert.Repo, projection.Alert.Number = owner, repo, number
+		var resolved sql.NullString
+		if err := tx.QueryRow(`SELECT resolved_at FROM alert_records WHERE owner=? AND repo=? AND number=?`, owner, repo, number).Scan(&resolved); err != nil {
+			return fmt.Errorf("alert_json 解決状態確認失敗: %w", err)
+		}
+		if resolved.Valid {
+			at, err := time.Parse(time.RFC3339Nano, resolved.String)
+			if err != nil {
+				return fmt.Errorf("alert_json 解決日時解析失敗: %w", err)
+			}
+			projection.ResolvedAt = &at
+		}
+		if err := projectDependabot(context.Background(), tx, projection, "", time.Now().UTC(), false); err != nil {
+			return fmt.Errorf("alert_json 正規化保存失敗: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("alert_json 更新確定失敗: %w", err)
 	}
 	if count > 0 {
 		s.riskChangedLocked(RiskScope{Repos: []string{owner + "/" + repo}})

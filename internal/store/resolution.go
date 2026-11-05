@@ -98,6 +98,9 @@ func (s *Store) ResolveMissingAlerts(ctx context.Context, owner, repo string, op
 		return nil, fmt.Errorf("解決日時保存失敗: %w", err)
 	}
 	for _, rec := range records {
+		if err := projectDependabot(ctx, tx, *rec, "", at, false); err != nil {
+			return nil, fmt.Errorf("解決済みFinding保存失敗: %w", err)
+		}
 		key := model.AdvisoryKey(rec.Alert)
 		if cve := strings.ToUpper(strings.TrimSpace(rec.Alert.CVEID)); cve != "" {
 			key = "cve:" + cve

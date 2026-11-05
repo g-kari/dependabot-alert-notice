@@ -363,7 +363,7 @@ func enqueueFetchAll(cfg *config.Config, q *queue.Queue, guards ...*policy.Guard
 // makeFetchHandler はFetchAlertsジョブのハンドラを返す
 func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store, q *queue.Queue, slackClient *slack.SlackClient, discordClient *discord.Client, guards ...*policy.Guard) queue.Handler {
 	guard := jobPolicy(cfg, guards)
-	return func(ctx context.Context, job queue.Job) error {
+	return func(ctx context.Context, job queue.Job) (handlerErr error) {
 		snapshot, err := guard.Snapshot()
 		if err != nil {
 			return fmt.Errorf("取得ジョブ設定取得失敗: %w", err)
@@ -396,6 +396,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 		slog.Info("FetchAlerts開始", "owner", target.Owner, "repo", target.Repo)
 		var alerts []model.Alert
 		var completeRepos []string
+		var skippedRepos []string
 		resultAware := false
 		client := ghClient
 		if configurable, ok := client.(github.ConfigClient); ok {
@@ -404,16 +405,38 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				return err
 			}
 		}
+		scope := target.Owner
+		if target.Repo != "" {
+			scope += "/" + target.Repo
+		}
+		run, err := s.StartIngestRun(ctx, "dependabot", scope, time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("ingest run開始失敗: %w", err)
+		}
+		ingestResult, ingestCoverage, ingestCode := model.IngestResultFailed, model.IngestCoverageUnknown, "fetch_failed"
+		defer func() {
+			if handlerErr != nil && ingestResult != model.IngestResultFailed {
+				ingestResult, ingestCoverage, ingestCode = model.IngestResultFailed, model.IngestCoveragePartial, "processing_failed"
+			}
+			// Cancellation of collection must not leave its ledger running. Bound
+			// this independent write so shutdown cannot wait indefinitely either.
+			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.FinishIngestRun(finishCtx, run.ID, ingestResult, ingestCoverage, ingestCode, time.Now().UTC()); err != nil {
+				handlerErr = errors.Join(handlerErr, fmt.Errorf("ingest run終了失敗: %w", err))
+			}
+		}()
 		if rich, ok := client.(github.ResultClient); ok {
 			resultAware = true
 			result, fetchErr := rich.FetchAlertsResult(ctx, target)
-			alerts, completeRepos, err = result.Alerts, result.CompleteRepos, fetchErr
+			alerts, completeRepos, skippedRepos, err = result.Alerts, result.CompleteRepos, result.SkippedRepos, fetchErr
 		} else {
 			alerts, err = client.FetchAlerts(ctx, target)
 		}
 		if err != nil {
 			var rateLimitErr *github.RateLimitError
 			if errors.As(err, &rateLimitErr) {
+				ingestCode = "rate_limited"
 				slog.Warn("GitHub APIレート制限スキップ",
 					"remaining", rateLimitErr.Remaining,
 					"resetAt", rateLimitErr.ResetAt.Format("15:04:05"))
@@ -427,6 +450,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			}
 			var skipErr *github.SkipError
 			if errors.As(err, &skipErr) {
+				ingestCode = "source_skipped"
 				slog.Warn("Dependabotアラートスキップ", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo))
 				s.AddLog(model.LogEntry{
 					Timestamp: time.Now(),
@@ -434,6 +458,11 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 					Message:   fmt.Sprintf("Dependabotアラートスキップ (%s/%s): 未有効または権限なし", target.Owner, target.Repo),
 				})
 				return nil
+			}
+			if errors.Is(err, context.Canceled) {
+				ingestCode = "canceled"
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				ingestCode = "deadline_exceeded"
 			}
 			slog.Error("アラート取得失敗", "target", fmt.Sprintf("%s/%s", target.Owner, target.Repo), "error", err)
 			s.AddLog(model.LogEntry{
@@ -444,19 +473,44 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 			return fmt.Errorf("FetchAlerts: %w", err)
 		}
 
+		ingestResult, ingestCoverage, ingestCode = model.IngestResultPartial, model.IngestCoveragePartial, "incomplete_coverage"
+		switch {
+		case !resultAware:
+			ingestCoverage, ingestCode = model.IngestCoverageUnknown, "coverage_unknown"
+		case cfg.FetchMinSeverity != "" && !strings.EqualFold(cfg.FetchMinSeverity, "low"):
+			ingestCode = "filtered_scope"
+		case len(skippedRepos) > 0:
+			ingestCode = "scope_skipped"
+		case target.Repo != "":
+			for _, repo := range completeRepos {
+				if strings.EqualFold(repo, scope) {
+					ingestResult, ingestCoverage, ingestCode = model.IngestResultSuccess, model.IngestCoverageFull, ""
+					break
+				}
+			}
+		}
+		// CompleteRepos proves only individual repositories, not an exhaustive
+		// owner-wide inventory. Owner-scoped collection remains partial.
+		markPolicyChanged := func() {
+			ingestResult, ingestCoverage, ingestCode = model.IngestResultPartial, model.IngestCoveragePartial, "policy_changed"
+		}
+
 		newCount := 0
 		for _, alert := range alerts {
 			if !strings.EqualFold(alert.Owner, target.Owner) || (target.Repo != "" && !strings.EqualFold(alert.Repo, target.Repo)) {
 				continue
 			}
 			err := guard.WithAllowed(ctx, alert.Owner, alert.Repo, func(current config.Snapshot) error {
+				if err := s.ObserveDependabot(ctx, alert, run.ID, time.Now().UTC()); err != nil {
+					return fmt.Errorf("Dependabot観測保存失敗: %w", err)
+				}
 				cfg := &current.Config
 				if s.HasByKey(alert.Owner, alert.Repo, alert.Number) {
 					// 既存レコードでも、今回のポーリングでメタデータが取得できた場合のみ更新する。
 					// 取得失敗（空/nil）の場合はスキップし、以前の良いデータを上書きしない。
 					if alert.DefaultBranch != "" || len(alert.Contributors) > 0 || alert.Homepage != "" {
 						if err := s.UpdateAlertJSON(alert.Owner, alert.Repo, alert.Number, alert); err != nil {
-							slog.Warn("alert_json 更新失敗", "owner", alert.Owner, "repo", alert.Repo, "number", alert.Number, "error", err)
+							return fmt.Errorf("取得済みアラートmetadata更新失敗: %w", err)
 						}
 					}
 					existing, err := s.GetByKey(alert.Owner, alert.Repo, alert.Number)
@@ -472,7 +526,10 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 					EvalStatus: model.EvalStatusPending,
 					NotifiedAt: time.Now(),
 				}
-				isNew := s.SaveObserved(record)
+				isNew, err := s.SaveObservedWithError(ctx, record)
+				if err != nil {
+					return fmt.Errorf("取得済みアラート保存失敗: %w", err)
+				}
 				if !isNew {
 					// 既存レコードの更新（別ターゲットから重複取得など）はスキップ
 					return nil
@@ -511,6 +568,9 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				newCount++
 				return nil
 			})
+			if errors.Is(err, policy.ErrNotMonitored) {
+				markPolicyChanged()
+			}
 			if err != nil && !errors.Is(err, policy.ErrNotMonitored) {
 				return fmt.Errorf("アラート保存/通知失敗: %w", err)
 			}
@@ -563,6 +623,9 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 					}
 					return nil
 				})
+				if errors.Is(err, policy.ErrNotMonitored) {
+					markPolicyChanged()
+				}
 				if err != nil && !errors.Is(err, policy.ErrNotMonitored) {
 					return err
 				}
@@ -570,7 +633,7 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 		}
 
 		// 重要度フィルタを使った取得は全件取得ではないため、欠落を解決済みと推定しない。
-		if !resultAware || len(completeRepos) == 0 || (cfg.FetchMinSeverity != "" && !strings.EqualFold(cfg.FetchMinSeverity, "low")) {
+		if !resultAware || len(completeRepos) == 0 || len(skippedRepos) > 0 || (cfg.FetchMinSeverity != "" && !strings.EqualFold(cfg.FetchMinSeverity, "low")) {
 			return nil
 		}
 		// 対応済みアラートのクリーンアップ: fetch 結果に含まれないものは GitHub 側で close 済み
@@ -644,6 +707,9 @@ func makeFetchHandler(cfg *config.Config, ghClient github.Client, s *store.Store
 				refreshRepositoryNotifications(slackClient, discordClient, parts[0], parts[1])
 				return nil
 			})
+			if errors.Is(err, policy.ErrNotMonitored) {
+				markPolicyChanged()
+			}
 			if err != nil && !errors.Is(err, policy.ErrNotMonitored) {
 				return err
 			}
