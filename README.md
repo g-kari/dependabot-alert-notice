@@ -4,6 +4,8 @@ GitHub Dependabotアラートと脆弱性RSSを収集し、対応緊急度評価
 
 普段の確認にはWeb UI/TUIを使います。Slack/Discordは既定で1時間ごとのリポジトリ別サマリーとし、件数とAI評価状況だけを知らせます。アラートの詳細やAI評価の全文は画面で確認してください。
 
+共通セキュリティ基盤は [Phase 0](docs/security-phase0.md)、Trivy JSONのoffline取込と読み取り専用Findings APIは [Phase 1の最初の実装](docs/security-phase1.md) を参照してください。既存Dependabotの承認・評価・通知フローは維持します。
+
 ## Macでセットアップ・常駐運用（ビルド済み配布）
 
  `notification_interval: 1h` を既定とし、Slack/Discordを1時間単位でまとめます。既存設定に項目がなくてもこの既定値を使います。更新して本体を再起動すると有効になります。

@@ -145,6 +145,7 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerTUI(mux)
+	s.registerFindingsAPI(mux)
 	mux.HandleFunc("GET /", s.handleDashboard)
 	mux.HandleFunc("GET /alerts/{id}", s.handleDetail)
 	mux.HandleFunc("POST /alerts/{id}/approve", s.handleApprove)

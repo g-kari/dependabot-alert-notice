@@ -215,7 +215,6 @@ func (s *Store) ObserveDependabot(ctx context.Context, alert model.Alert, runID 
 }
 
 func projectDependabot(ctx context.Context, tx *sql.Tx, rec model.AlertRecord, runID string, at time.Time, alwaysObserve bool) error {
-	// Generate an internal run only for a changed legacy projection.
 	normalizedRun := runID
 	if normalizedRun == "" {
 		normalizedRun = "legacy-projection"
@@ -224,6 +223,33 @@ func projectDependabot(ctx context.Context, tx *sql.Tx, rec model.AlertRecord, r
 	if err != nil {
 		return fmt.Errorf("Dependabot正規化失敗: %w", err)
 	}
+	if runID == "" {
+		var fingerprint, status string
+		err := tx.QueryRowContext(ctx, `SELECT fingerprint,source_status FROM findings WHERE id=?`, value.Finding.ID).Scan(&fingerprint, &status)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("既存Finding確認失敗: %w", err)
+		}
+		if err == nil && fingerprint == value.Observation.Fingerprint && status == string(value.Finding.SourceStatus) && !alwaysObserve {
+			return nil
+		}
+		id, err := securityID()
+		if err != nil {
+			return err
+		}
+		finished := at.UTC()
+		run := model.IngestRun{ID: id, Connector: "dependabot", Scope: rec.Alert.Owner + "/" + rec.Alert.Repo, StartedAt: at.UTC(), FinishedAt: &finished, Result: "success", Coverage: "partial"}
+		if err := insertIngestRun(ctx, tx, run); err != nil {
+			return err
+		}
+		value, err = adapter.NormalizeDependabot(rec, id, at.UTC())
+		if err != nil {
+			return fmt.Errorf("Dependabot正規化失敗: %w", err)
+		}
+	}
+	return projectSecurityFinding(ctx, tx, model.SecurityFinding{Asset: value.Asset, Finding: value.Finding, Observation: value.Observation})
+}
+
+func projectSecurityFinding(ctx context.Context, tx *sql.Tx, value model.SecurityFinding) error {
 	var previous model.Finding
 	var previousBody, previousFingerprint string
 	existingErr := tx.QueryRowContext(ctx, `SELECT body_json,fingerprint FROM findings WHERE id=?`, value.Finding.ID).Scan(&previousBody, &previousFingerprint)
@@ -234,34 +260,29 @@ func projectDependabot(ctx context.Context, tx *sql.Tx, rec model.AlertRecord, r
 		if err := json.Unmarshal([]byte(previousBody), &previous); err != nil {
 			return fmt.Errorf("既存Finding解析失敗: %w", err)
 		}
+		if previous.AssetID != value.Finding.AssetID || previous.Category != value.Finding.Category {
+			return fmt.Errorf("Finding identity conflict")
+		}
 		value.Finding.FirstSeen = previous.FirstSeen
 		value.Finding.TriageStatus = previous.TriageStatus
 	}
 	changed := existingErr == sql.ErrNoRows || previousFingerprint != value.Observation.Fingerprint || previous.SourceStatus != value.Finding.SourceStatus
-	if !changed && !alwaysObserve {
-		return nil
+	var priorAssetBody string
+	assetErr := tx.QueryRowContext(ctx, `SELECT body_json FROM assets WHERE id=?`, value.Asset.ID).Scan(&priorAssetBody)
+	if assetErr != nil && assetErr != sql.ErrNoRows {
+		return fmt.Errorf("既存Asset確認失敗: %w", assetErr)
 	}
-	if runID == "" {
-		id, err := securityID()
-		if err != nil {
-			return err
+	if assetErr == nil {
+		var prior model.Asset
+		if err := json.Unmarshal([]byte(priorAssetBody), &prior); err != nil {
+			return fmt.Errorf("既存Asset解析失敗: %w", err)
 		}
-		runID = id
-		finished := at.UTC()
-		run := model.IngestRun{ID: id, Connector: "dependabot", Scope: rec.Alert.Owner + "/" + rec.Alert.Repo, StartedAt: at.UTC(), FinishedAt: &finished, Result: "success", Coverage: "partial"}
-		if err := insertIngestRun(ctx, tx, run); err != nil {
-			return err
-		}
-		value, err = adapter.NormalizeDependabot(rec, runID, at.UTC())
-		if err != nil {
-			return fmt.Errorf("Dependabot正規化失敗: %w", err)
-		}
-		if existingErr == nil {
-			value.Finding.FirstSeen = previous.FirstSeen
-			value.Finding.TriageStatus = previous.TriageStatus
+		if prior.Type != value.Asset.Type || prior.Provider != value.Asset.Provider || prior.Account != value.Asset.Account || prior.Region != value.Asset.Region || prior.NativeID != value.Asset.NativeID {
+			return fmt.Errorf("Asset identity conflict")
 		}
 	}
-	stale := existingErr == nil && at.Before(previous.LastSeen)
+
+	stale := existingErr == nil && value.Observation.ObservedAt.Before(previous.LastSeen)
 	assetJSON, err := json.Marshal(value.Asset)
 	if err != nil {
 		return fmt.Errorf("Asset変換失敗: %w", err)
@@ -304,7 +325,7 @@ func projectDependabot(ctx context.Context, tx *sql.Tx, rec model.AlertRecord, r
 		} else if previous.SourceStatus != value.Finding.SourceStatus {
 			kind = "finding.source_status_changed"
 		}
-		event := model.Event{ID: id, EntityID: value.Finding.ID, EventType: kind, Actor: "dependabot", Timestamp: at.UTC(), BeforeRef: previousFingerprint, AfterRef: value.Observation.Fingerprint}
+		event := model.Event{ID: id, EntityID: value.Finding.ID, EventType: kind, Actor: value.Observation.Source, Timestamp: value.Observation.ObservedAt.UTC(), BeforeRef: previousFingerprint, AfterRef: value.Observation.Fingerprint}
 		body, err := json.Marshal(event)
 		if err != nil {
 			return fmt.Errorf("Event変換失敗: %w", err)

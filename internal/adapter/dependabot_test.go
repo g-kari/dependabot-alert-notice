@@ -259,3 +259,18 @@ func TestCanonicalKeyIsValidJSONForControlCharacters(t *testing.T) {
 		t.Fatal("canonical key lost source values")
 	}
 }
+
+func TestNormalizeDependabotExposesSafeFindingMetadata(t *testing.T) {
+	rec := dependabotRecord()
+	rec.Alert.Summary = "example title"
+	rec.Alert.FixedIn = "2.0.0"
+	got := normalizeForTest(t, rec, "run", rec.Alert.CreatedAt).Finding
+	if got.Title != rec.Alert.Summary || got.VulnerabilityID != rec.Alert.CVEID || got.PackageName != rec.Alert.PackageName || got.PackageEcosystem != rec.Alert.PackageEcosystem || got.FixedVersion != rec.Alert.FixedIn {
+		t.Fatalf("metadata=%+v", got)
+	}
+	rec.Alert.CVEID = ""
+	got = normalizeForTest(t, rec, "run", rec.Alert.CreatedAt).Finding
+	if got.VulnerabilityID != strings.ToUpper(rec.Alert.GHSAID) {
+		t.Fatal("missing GHSA metadata fallback")
+	}
+}
