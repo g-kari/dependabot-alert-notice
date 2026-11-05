@@ -2,8 +2,11 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
 func writeTemp(t *testing.T, content string) string {
@@ -49,6 +52,50 @@ targets:
 	}
 	if !cfg.Evaluator.Sandbox.Enabled {
 		t.Error("Evaluator.Sandbox.Enabled should be true by default")
+	}
+	if !cfg.RSS.Enabled || len(cfg.RSS.Feeds) != 6 {
+		t.Fatalf("RSS defaults = %+v, want 6 enabled feeds", cfg.RSS)
+	}
+	for _, feed := range cfg.RSS.Feeds {
+		if !feed.Enabled || !strings.HasPrefix(feed.URL, "https://") {
+			t.Errorf("default feed = %+v, want enabled HTTPS feed", feed)
+		}
+	}
+	for _, url := range []string{
+		"https://share.0g0.xyz/security-incidents-feed.xml",
+		"https://share.0g0.xyz/vulnerabilities-feed.xml",
+	} {
+		count := 0
+		for _, feed := range cfg.RSS.Feeds {
+			if feed.URL == url {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("default feed %q count = %d, want 1", url, count)
+		}
+	}
+}
+
+func TestLoad_ExplicitEmptyRSSFeedsRemainEmpty(t *testing.T) {
+	path := writeTemp(t, "rss:\n  enabled: false\n  feeds: []\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RSS.Enabled || len(cfg.RSS.Feeds) != 0 {
+		t.Fatalf("explicit RSS opt-out overwritten: %+v", cfg.RSS)
+	}
+}
+
+func TestLoad_EvaluatorModels(t *testing.T) {
+	path := writeTemp(t, "evaluator:\n  codex_model: gpt-6-sol\n  claude_model: claude-sonnet-test\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Evaluator.CodexModel != "gpt-6-sol" || cfg.Evaluator.ClaudeModel != "claude-sonnet-test" {
+		t.Fatalf("evaluator models = %+v", cfg.Evaluator)
 	}
 }
 
@@ -296,5 +343,60 @@ evaluator:
 	}
 	if cfg.Evaluator.Sandbox.Timeout != 30*time.Second {
 		t.Errorf("Sandbox.Timeout = %v, want 30s", cfg.Evaluator.Sandbox.Timeout)
+	}
+}
+
+func TestLoad_RiskProfileAndRSSConfig(t *testing.T) {
+	path := writeTemp(t, `
+rss:
+  enabled: true
+  refresh_interval: 30m
+  request_timeout: 5s
+  max_items_per_feed: 20
+  retention_days: 30
+  feeds:
+    - name: JPCERT
+      url: https://example.com/feed.xml
+      enabled: true
+service_profiles:
+  - id: api-prod
+    owner: org
+    repo: api
+    environment: production
+    exposure: internet
+    authentication: customer
+    business_criticality: critical
+    max_outage_minutes: 60
+    data_classification: restricted
+    integrity_impact: high
+    privilege_scope: production_write
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.RSS.Enabled || cfg.RSS.RefreshInterval != 30*time.Minute || cfg.RSS.MaxItemsPerFeed != 20 {
+		t.Fatalf("RSS = %+v", cfg.RSS)
+	}
+	if len(cfg.ServiceProfiles) != 1 || cfg.ServiceProfiles[0].BusinessCriticality != model.RiskCritical {
+		t.Fatalf("ServiceProfiles = %+v", cfg.ServiceProfiles)
+	}
+}
+
+func TestLoad_CodexProvider(t *testing.T) {
+	path := writeTemp(t, "codex_path: custom-codex\nevaluator:\n  provider: codex\n  sandbox:\n    codex_image: codex-image:v1\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CodexPath != "custom-codex" || cfg.Evaluator.Provider != "codex" || cfg.Evaluator.Sandbox.CodexImage != "codex-image:v1" {
+		t.Fatalf("Codex settings = %+v / %+v", cfg.CodexPath, cfg.Evaluator)
+	}
+}
+
+func TestLoad_RejectsUnknownEvaluatorProvider(t *testing.T) {
+	path := writeTemp(t, "evaluator:\n  provider: unknown-provider\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("unknown evaluator provider should be rejected")
 	}
 }

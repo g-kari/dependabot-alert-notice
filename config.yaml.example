@@ -1,33 +1,93 @@
-poll_interval: 30m
-active_months: 0          # 直近Nか月以内にpushがあったリポのみ対象 (0=無効、例: 6=半年以内)
-fetch_min_severity: ""    # 取得する最低重要度 (critical/high/medium、空=全件取得)
-disable_approval: false   # true=承認/却下ボタンを無効化して閲覧専用モードにする
-
+config_revision: 4
+poll_interval: 30m0s
 targets:
-  - owner: your-org
-    repo: your-repo
-  - owner: your-org
-    # repo省略でorg全体
-
+    - owner: example-org
+      repo: ""
 slack:
-  channel_id: C0123456789
-  # SLACK_BOT_TOKEN, SLACK_APP_TOKEN は環境変数で設定
-  allowed_user_ids: []  # 空=全員許可。承認・却下を許可するSlack User ID (U...) のリスト
-
+    channel_id: C0123456789
+    bot_token: ""
+    app_token: ""
 discord:
-  webhook_url: ""  # Discord Webhook URL (環境変数 DISCORD_WEBHOOK_URL でも設定可)
-
-claude_path: claude    # claude CLIのパス
-gh_path: gh            # gh CLIのパス
-log_level: info        # debug, info, warn, error
-
+    webhook_url: ""
+claude_path: claude
+codex_path: codex
+gh_path: gh
+log_level: info
+data_path: store.db
 web:
-  port: 8999
-
+    port: 8999
 evaluator:
-  sandbox:
+    provider: claude
+    claude_model: claude-sonnet-5-5
+    codex_model: ""
+    auto_eval: true
+    min_severity: high
+    sandbox:
+        runtime: auto # auto / apple / docker / podman
+        container_path: container
+        container_cpus: 1 # Apple VMのvCPU数（Dockerのcpu_limitとは別）
+        apple_claude_image: security-notice-apple-claude:latest
+        apple_codex_image: security-notice-apple-codex:latest
+        enabled: true
+        image: dependabot-evaluator:latest
+        codex_image: dependabot-codex-evaluator:latest
+        claude_home: ""
+        memory_limit: 512m
+        cpu_limit: "0.5"
+        timeout: 1m0s
+    max_eval_per_poll: 10
+notify_min_severity: low
+notification_interval: 1h # リポジトリ単位でまとめる間隔。0sで都度通知
+fetch_min_severity: ""
+active_months: 12
+disable_approval: true
+rss:
     enabled: true
-    image: dependabot-evaluator:latest
-    memory_limit: 512m
-    cpu_limit: "0.5"
-    timeout: 60s
+    refresh_interval: 1h0m0s
+    request_timeout: 10s
+    max_items_per_feed: 100
+    retention_days: 90
+    feeds:
+        - name: JPCERT/CC 脆弱性情報
+          url: https://www.jpcert.or.jp/rss/jpcert-all.rdf
+          enabled: true
+        - name: CIS Advisories
+          url: https://www.cisecurity.org/feed/advisories
+          enabled: true
+        - name: BleepingComputer
+          url: https://www.bleepingcomputer.com/feed/
+          enabled: true
+        - name: The Hacker News
+          url: https://feeds.feedburner.com/TheHackersNews
+          enabled: true
+        - name: セキュリティインシデント (share.0g0.xyz)
+          url: https://share.0g0.xyz/security-incidents-feed.xml
+          enabled: true
+        - name: 脆弱性情報 (share.0g0.xyz)
+          url: https://share.0g0.xyz/vulnerabilities-feed.xml
+          enabled: true
+service_profiles:
+    - id: customer-api-prod
+      owner: your-org
+      repo: your-repo
+      environment: production
+      exposure: internet
+      authentication: customer
+      business_criticality: critical
+      max_outage_minutes: 60
+      data_classification: restricted
+      integrity_impact: high
+      privilege_scope: production_write
+      owner_team: platform
+      reviewed_by: security-owner
+      reviewed_at: 2026-01-01T00:00:00Z
+      review_due_at: 2026-04-01T00:00:00Z
+assessments: []
+threat:
+    enabled: false
+    kev_url: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+    epss_url: https://epss.cyentia.com/epss_scores-current.csv.gz
+    interval: 24h0m0s
+    timeout: 10s
+business_calendar:
+    timezone: ""

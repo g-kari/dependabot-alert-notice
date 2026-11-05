@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,11 +14,23 @@ import (
 )
 
 type Store struct {
-	mu        sync.RWMutex
-	db        *sql.DB
-	logs      []model.LogEntry // ログはセッション限定のin-memory
-	logSubs   []chan model.LogEntry
-	logSubsMu sync.Mutex
+	notificationMu sync.Mutex
+	mu             sync.RWMutex
+	db             *sql.DB
+	logs           []model.LogEntry // ログはセッション限定のin-memory
+	logSubs        []chan model.LogEntry
+	logSubsMu      sync.Mutex
+	riskRevision   uint64
+	riskSubs       map[chan RiskScope]struct{}
+}
+
+// Close releases the SQLite connection and is safe to call once during
+// shutdown or test cleanup.
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
 }
 
 // SubscribeLogs は新着ログを受け取るチャネルを登録する。呼び出し元はctx終了時に UnsubscribeLogs を呼ぶこと。
@@ -75,16 +86,18 @@ func NewWithPath(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	// 旧スキーマ検出: numberカラムが存在しない場合は再作成
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("foreign key有効化失敗: %w", err)
+	}
+	// 旧スキーマ検出: 既存データを暗黙に削除せず、未知の形状は明示的に停止する。
+	var tableCount int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_records'`).Scan(&tableCount)
 	var numberColCount int
 	_ = s.db.QueryRow(
 		`SELECT COUNT(*) FROM pragma_table_info('alert_records') WHERE name = 'number'`,
 	).Scan(&numberColCount)
-	if numberColCount == 0 {
-		// 旧テーブルを削除して再作成（個人ツールなのでデータは再fetchで復元）
-		if _, err := s.db.Exec(`DROP TABLE IF EXISTS alert_records`); err != nil {
-			return fmt.Errorf("旧テーブル削除失敗: %w", err)
-		}
+	if tableCount > 0 && numberColCount == 0 {
+		return fmt.Errorf("alert_recordsの未知スキーマです: number列がありません（既存データを保護するため変換しません）")
 	}
 
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS alert_records (
@@ -114,6 +127,70 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("slack_message_tsカラム追加失敗: %w", err)
 		}
 	}
+	var resolvedColCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('alert_records') WHERE name='resolved_at'`).Scan(&resolvedColCount); err != nil {
+		return fmt.Errorf("解決日時カラム確認失敗: %w", err)
+	}
+	if resolvedColCount == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE alert_records ADD COLUMN resolved_at TEXT`); err != nil {
+			return fmt.Errorf("解決日時カラム追加失敗: %w", err)
+		}
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rss_items (id INTEGER PRIMARY KEY AUTOINCREMENT, feed_url TEXT NOT NULL, external_id TEXT NOT NULL, title TEXT NOT NULL, link TEXT NOT NULL, summary TEXT NOT NULL, published_at TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, UNIQUE(feed_url, external_id))`); err != nil {
+		return fmt.Errorf("RSS記事テーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rss_item_cves (item_id INTEGER NOT NULL REFERENCES rss_items(id) ON DELETE CASCADE, cve_id TEXT NOT NULL, PRIMARY KEY(item_id,cve_id))`); err != nil {
+		return fmt.Errorf("RSS CVE索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS rss_cve_lookup ON rss_item_cves(cve_id,item_id)`); err != nil {
+		return fmt.Errorf("RSS CVE索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rss_feed_status (feed_url TEXT PRIMARY KEY, last_attempt_at TEXT, last_success_at TEXT, last_error TEXT NOT NULL DEFAULT '', item_count INTEGER NOT NULL DEFAULT 0, etag TEXT NOT NULL DEFAULT '', last_modified TEXT NOT NULL DEFAULT '', next_attempt_at TEXT)`); err != nil {
+		return fmt.Errorf("RSS状態テーブル作成失敗: %w", err)
+	}
+	var nextAttemptColCount int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('rss_feed_status') WHERE name = 'next_attempt_at'`).Scan(&nextAttemptColCount)
+	if nextAttemptColCount == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE rss_feed_status ADD COLUMN next_attempt_at TEXT`); err != nil {
+			return fmt.Errorf("next_attempt_atカラム追加失敗: %w", err)
+		}
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS score_history (id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id TEXT NOT NULL, repo TEXT NOT NULL, advisory_key TEXT NOT NULL, model_version TEXT NOT NULL, input_hash TEXT NOT NULL, computed_at TEXT NOT NULL, input_json TEXT NOT NULL, result_json TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("スコア履歴テーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS score_history_lookup ON score_history(profile_id, advisory_key, id DESC)`); err != nil {
+		return fmt.Errorf("スコア履歴索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS score_history_repo_lookup ON score_history(repo COLLATE NOCASE,advisory_key,id DESC)`); err != nil {
+		return fmt.Errorf("リポジトリ評価履歴索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS app_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("migration管理テーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS service_assessments (profile_id TEXT NOT NULL, advisory_key TEXT NOT NULL, config_revision INTEGER NOT NULL, body_json TEXT NOT NULL, PRIMARY KEY(profile_id, advisory_key))`); err != nil {
+		return fmt.Errorf("assessmentテーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS threat_snapshots (source TEXT NOT NULL, advisory_key TEXT NOT NULL, fetched_at TEXT NOT NULL, source_date TEXT, body_json TEXT NOT NULL, PRIMARY KEY(source, advisory_key))`); err != nil {
+		return fmt.Errorf("脅威スナップショットテーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS threat_advisory_lookup ON threat_snapshots(advisory_key)`); err != nil {
+		return fmt.Errorf("脅威アドバイザリ索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS risk_deadlines (profile_id TEXT NOT NULL, advisory_key TEXT NOT NULL, episode INTEGER NOT NULL, opened_at TEXT NOT NULL, due_at TEXT NOT NULL, priority TEXT NOT NULL, closed_at TEXT, PRIMARY KEY(profile_id, advisory_key, episode))`); err != nil {
+		return fmt.Errorf("期限テーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO app_migrations(version, applied_at) VALUES(1, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("migration記録失敗: %w", err)
+	}
+
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS alert_cve_lookup ON alert_records(UPPER(json_extract(alert_json,'$.CVEID')))`); err != nil {
+		return fmt.Errorf("アラートCVE索引作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS alert_evaluation_cache_lookup
+		ON alert_records(json_extract(eval_json,'$.provenance.cache_key'),id DESC)
+		WHERE resolved_at IS NULL AND eval_status='done' AND eval_json IS NOT NULL`); err != nil {
+		return fmt.Errorf("AI評価キャッシュ索引作成失敗: %w", err)
+	}
 
 	// discord_message_id カラム追加
 	var discordIDColCount int
@@ -125,13 +202,40 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("discord_message_idカラム追加失敗: %w", err)
 		}
 	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS notification_groups (group_key TEXT PRIMARY KEY, message_id TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("通知グループテーブル作成失敗: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS notification_batches (group_key TEXT PRIMARY KEY, scope TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, fingerprint TEXT NOT NULL, sent_fingerprint TEXT NOT NULL DEFAULT '', due_at INTEGER)`); err != nil {
+		return fmt.Errorf("通知待機テーブル作成失敗: %w", err)
+	}
 	return nil
 }
 
-// Save はレコードを保存し、新規挿入の場合 true を返す（更新の場合 false）
+// Save preserves resolved records against delayed evaluation writes.
 func (s *Store) Save(record *model.AlertRecord) bool {
+	return s.save(record, false)
+}
+
+// SaveObserved stores an alert confirmed open by a fresh GitHub fetch. A new
+// or explicitly reopened record returns true and retains its stable database ID.
+func (s *Store) SaveObserved(record *model.AlertRecord) bool {
+	return s.save(record, true)
+}
+
+func (s *Store) save(record *model.AlertRecord, observed bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var existingID int
+	var resolved sql.NullString
+	var existingBody string
+	existingErr := s.db.QueryRow(`SELECT id,resolved_at,alert_json FROM alert_records WHERE owner=? AND repo=? AND number=?`, record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&existingID, &resolved, &existingBody)
+	if existingErr != nil && existingErr != sql.ErrNoRows {
+		slog.Error("既存レコード確認失敗", "error", existingErr)
+		return false
+	}
+	if resolved.Valid && !observed {
+		return false
+	}
 
 	alertJSON, _ := json.Marshal(record.Alert)
 
@@ -151,7 +255,7 @@ func (s *Store) Save(record *model.AlertRecord) bool {
 		evalStatus = string(model.EvalStatusDone)
 	}
 
-	res, err := s.db.Exec(`INSERT INTO alert_records
+	_, err := s.db.Exec(`INSERT INTO alert_records
 		(owner, repo, number, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(owner, repo, number) DO UPDATE SET
@@ -162,7 +266,8 @@ func (s *Store) Save(record *model.AlertRecord) bool {
 			notified_at        = excluded.notified_at,
 			merged_at          = excluded.merged_at,
 			slack_message_ts   = excluded.slack_message_ts,
-			discord_message_id = excluded.discord_message_id`,
+			discord_message_id = excluded.discord_message_id,
+			resolved_at        = NULL`,
 		record.Alert.Owner,
 		record.Alert.Repo,
 		record.Alert.Number,
@@ -179,17 +284,18 @@ func (s *Store) Save(record *model.AlertRecord) bool {
 		slog.Error("レコード保存失敗", "owner", record.Alert.Owner, "repo", record.Alert.Repo, "number", record.Alert.Number, "error", err)
 		return false
 	}
-	if id, err := res.LastInsertId(); err == nil && id > 0 {
-		record.Alert.ID = int(id)
-		return true // 新規挿入
-	}
-	// ON CONFLICT UPDATE の場合、LastInsertId が 0 になる → 既存IDを取得
 	var dbID int
 	if err2 := s.db.QueryRow(`SELECT id FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
-		record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 == nil {
-		record.Alert.ID = dbID
+		record.Alert.Owner, record.Alert.Repo, record.Alert.Number).Scan(&dbID); err2 != nil {
+		slog.Error("保存済みID取得失敗", "error", err2)
+		return false
 	}
-	return false // 既存レコードの更新
+	record.Alert.ID = dbID
+	record.ResolvedAt = nil
+	if existingErr == sql.ErrNoRows || resolved.Valid || existingBody != string(alertJSON) {
+		s.riskChangedLocked(RiskScope{Repos: []string{record.Alert.Owner + "/" + record.Alert.Repo}})
+	}
+	return existingErr == sql.ErrNoRows || resolved.Valid
 }
 
 func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
@@ -199,7 +305,7 @@ func (s *Store) Get(alertID int) (*model.AlertRecord, error) {
 }
 
 func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
-	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
+	row := s.db.QueryRow(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id, resolved_at
 		FROM alert_records WHERE id = ?`, alertID)
 
 	var dbID int
@@ -211,8 +317,9 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 	var mergedAt sql.NullTime
 	var slackTS string
 	var discordMsgID string
+	var resolved sql.NullString
 
-	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
+	if err := row.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID, &resolved); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("アラートID %d が見つかりません", alertID)
 		}
@@ -242,6 +349,13 @@ func (s *Store) getUnlocked(alertID int) (*model.AlertRecord, error) {
 		t := mergedAt.Time
 		record.MergedAt = &t
 	}
+	if resolved.Valid {
+		at, err := time.Parse(time.RFC3339Nano, resolved.String)
+		if err != nil {
+			return nil, fmt.Errorf("解決日時解析失敗: %w", err)
+		}
+		record.ResolvedAt = &at
+	}
 	return record, nil
 }
 
@@ -249,7 +363,7 @@ func (s *Store) List() []*model.AlertRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id FROM alert_records`)
+	rows, err := s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id FROM alert_records WHERE resolved_at IS NULL`)
 	if err != nil {
 		slog.Error("レコード一覧取得失敗", "error", err)
 		return nil
@@ -300,13 +414,13 @@ func (s *Store) List() []*model.AlertRecord {
 	return records
 }
 
-// HasByKey は (owner, repo, number) の組み合わせでレコードが存在するか確認する
+// HasByKey は (owner, repo, number) の未解決レコードが存在するか確認する。
 func (s *Store) HasByKey(owner, repo string, number int) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var count int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alert_records WHERE owner = ? AND repo = ? AND number = ?`,
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alert_records WHERE owner = ? AND repo = ? AND number = ? AND resolved_at IS NULL`,
 		owner, repo, number).Scan(&count)
 	return count > 0
 }
@@ -321,10 +435,17 @@ func (s *Store) UpdateAlertJSON(owner, repo string, number int, alert model.Aler
 	if err != nil {
 		return fmt.Errorf("alert_json マーシャル失敗: %w", err)
 	}
-	_, err = s.db.Exec(`UPDATE alert_records SET alert_json = ? WHERE owner = ? AND repo = ? AND number = ?`,
-		string(alertJSON), owner, repo, number)
+	result, err := s.db.Exec(`UPDATE alert_records SET alert_json = ? WHERE owner = ? AND repo = ? AND number = ? AND alert_json != ?`,
+		string(alertJSON), owner, repo, number, string(alertJSON))
 	if err != nil {
 		return fmt.Errorf("alert_json 更新失敗: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("alert_json 更新件数確認失敗: %w", err)
+	}
+	if count > 0 {
+		s.riskChangedLocked(RiskScope{Repos: []string{owner + "/" + repo}})
 	}
 	return nil
 }
@@ -338,7 +459,7 @@ func (s *Store) UpdateState(alertID int, state model.AlertState) error {
 		mergedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	}
 
-	res, err := s.db.Exec(`UPDATE alert_records SET state = ?, merged_at = ? WHERE id = ?`,
+	res, err := s.db.Exec(`UPDATE alert_records SET state = ?, merged_at = ? WHERE id = ? AND resolved_at IS NULL`,
 		string(state), mergedAt, alertID)
 	if err != nil {
 		return fmt.Errorf("状態更新失敗: %w", err)
@@ -358,7 +479,7 @@ func (s *Store) ListPendingEvaluation(limit int) []*model.AlertRecord {
 	rows, err := s.db.Query(`
 		SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at
 		FROM alert_records
-		WHERE eval_status IN ('pending', 'failed')
+		WHERE eval_status IN ('pending', 'failed') AND resolved_at IS NULL
 		LIMIT ?`, limit)
 	if err != nil {
 		slog.Error("評価待ちレコード取得失敗", "error", err)
@@ -401,7 +522,7 @@ func (s *Store) UpdateEvalStatus(alertID int, status model.EvalStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(`UPDATE alert_records SET eval_status = ? WHERE id = ?`,
+	res, err := s.db.Exec(`UPDATE alert_records SET eval_status = ? WHERE id = ? AND resolved_at IS NULL`,
 		string(status), alertID)
 	if err != nil {
 		return fmt.Errorf("eval_status更新失敗: %w", err)
@@ -448,6 +569,7 @@ func (s *Store) NeedsEvaluation(alertID int) bool {
 
 // FindEvalByCVE は同じCVE IDを持つ既存レコードのAI評価を返す。
 // cveIDが空の場合はnilを返す（空CVE同士のマッチを防ぐ）。
+// Deprecated: 履歴検索専用。AI評価の再利用にはFindEvaluationByKeyを使用する。
 func (s *Store) FindEvalByCVE(cveID string) *model.Evaluation {
 	if cveID == "" {
 		return nil
@@ -476,6 +598,7 @@ func (s *Store) FindEvalByCVE(cveID string) *model.Evaluation {
 // FindEvalByAdvisory は CVE ID または GHSA ID で既存のAI評価を検索する。
 // cveID が非空のときは CVE ID で検索する。cveID が空で ghsaID が非空のときは GHSA ID で検索する。
 // 両方空の場合は nil を返す（空アドバイザリ同士のマッチを防ぐ）。
+// Deprecated: 履歴検索専用。AI評価の再利用にはFindEvaluationByKeyを使用する。
 func (s *Store) FindEvalByAdvisory(cveID, ghsaID string) *model.Evaluation {
 	if cveID != "" {
 		return s.FindEvalByCVE(cveID)
@@ -502,96 +625,6 @@ func (s *Store) FindEvalByAdvisory(cveID, ghsaID string) *model.Evaluation {
 		return nil
 	}
 	return &eval
-}
-
-// RemoveResolvedAlerts は (owner, repo) のうち openNumbers に含まれないレコードを削除し、
-// 削除されたレコードを返す（Slack/Discord通知の更新に使うため）。
-func (s *Store) RemoveResolvedAlerts(owner, repo string, openNumbers []int) []*model.AlertRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 削除対象を先に取得
-	var rows *sql.Rows
-	var err error
-	if len(openNumbers) == 0 {
-		rows, err = s.db.Query(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
-			FROM alert_records WHERE owner = ? AND repo = ?`, owner, repo)
-	} else {
-		placeholders := make([]string, len(openNumbers))
-		args := []interface{}{owner, repo}
-		for i, n := range openNumbers {
-			placeholders[i] = "?"
-			args = append(args, n)
-		}
-		query := fmt.Sprintf(`SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
-			FROM alert_records WHERE owner = ? AND repo = ? AND number NOT IN (%s)`,
-			strings.Join(placeholders, ","))
-		rows, err = s.db.Query(query, args...)
-	}
-	if err != nil {
-		slog.Error("resolved対象レコード取得失敗", "error", err)
-		return nil
-	}
-
-	var removed []*model.AlertRecord
-	for rows.Next() {
-		var dbID int
-		var alertJSON string
-		var evalJSON sql.NullString
-		var state, evalStatus string
-		var notifiedAt time.Time
-		var mergedAt sql.NullTime
-		var slackTS, discordMsgID string
-
-		if err := rows.Scan(&dbID, &alertJSON, &evalJSON, &state, &evalStatus, &notifiedAt, &mergedAt, &slackTS, &discordMsgID); err != nil {
-			slog.Error("resolvedレコードスキャン失敗", "error", err)
-			continue
-		}
-		var alert model.Alert
-		_ = json.Unmarshal([]byte(alertJSON), &alert)
-		alert.ID = dbID
-
-		var eval *model.Evaluation
-		if evalJSON.Valid {
-			eval = &model.Evaluation{}
-			_ = json.Unmarshal([]byte(evalJSON.String), eval)
-		}
-
-		rec := &model.AlertRecord{
-			Alert:            alert,
-			Evaluation:       eval,
-			State:            model.AlertState(state),
-			EvalStatus:       model.EvalStatus(evalStatus),
-			NotifiedAt:       notifiedAt,
-			SlackMessageTS:   slackTS,
-			DiscordMessageID: discordMsgID,
-		}
-		if mergedAt.Valid {
-			t := mergedAt.Time
-			rec.MergedAt = &t
-		}
-		removed = append(removed, rec)
-	}
-	_ = rows.Close()
-
-	if len(removed) == 0 {
-		return nil
-	}
-
-	// 削除実行
-	ids := make([]interface{}, len(removed))
-	placeholders := make([]string, len(removed))
-	for i, r := range removed {
-		ids[i] = r.Alert.ID
-		placeholders[i] = "?"
-	}
-	query := fmt.Sprintf(`DELETE FROM alert_records WHERE id IN (%s)`, strings.Join(placeholders, ","))
-	if _, err := s.db.Exec(query, ids...); err != nil {
-		slog.Error("resolvedアラート削除失敗", "error", err)
-		return nil
-	}
-
-	return removed
 }
 
 // ListReposByOwner はオーナー配下のリポジトリ名一覧をDBから取得する
@@ -639,7 +672,7 @@ func (s *Store) ListByPRNumber(owner, repo string, prNumber int) []*model.AlertR
 	rows, err := s.db.Query(`
 		SELECT id, alert_json, eval_json, state, eval_status, notified_at, merged_at, slack_message_ts, discord_message_id
 		FROM alert_records
-		WHERE owner = ? AND repo = ? AND json_extract(alert_json, '$.PRNumber') = ?`,
+		WHERE owner = ? AND repo = ? AND resolved_at IS NULL AND json_extract(alert_json, '$.PRNumber') = ?`,
 		owner, repo, prNumber)
 	if err != nil {
 		slog.Error("ListByPRNumber クエリ失敗", "owner", owner, "repo", repo, "prNumber", prNumber, "error", err)

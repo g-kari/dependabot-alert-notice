@@ -5,6 +5,8 @@ paths:
 
 # HTML テンプレート コーディング規約
 
+> 互換メモ: Codex を含む共通ルールの正本は `internal/web/AGENTS.md`。このファイルは Claude Code の既存設定との互換用。
+
 ## デザインシステム
 
 - **カラーパレット**: CSS 変数（`--color-bg`, `--color-text`, `--color-muted`, `--color-border`, `--color-surface`, `--color-accent`, `--color-danger`）を使用する

@@ -36,6 +36,21 @@ func TestQueue_EnqueueAndProcess(t *testing.T) {
 	}
 }
 
+func TestQueue_WaitCompletesAllJobs(t *testing.T) {
+	q := New(4, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	q.Register("wait", func(context.Context, Job) error { time.Sleep(10 * time.Millisecond); return nil })
+	q.Start(ctx)
+	q.Enqueue(Job{Type: "wait"})
+	q.Enqueue(Job{Type: "wait"})
+	q.Wait()
+	if q.Len() != 0 {
+		t.Fatalf("queue length = %d", q.Len())
+	}
+	q.Stop()
+}
+
 func TestQueue_ConcurrentWorkers(t *testing.T) {
 	const numJobs = 10
 	const numWorkers = 3

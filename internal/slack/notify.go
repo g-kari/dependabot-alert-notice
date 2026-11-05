@@ -2,20 +2,22 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/notification"
 	slackgo "github.com/slack-go/slack"
 )
 
 // buildBlocks はアラートレコードからSlackブロックを生成する（eval nilセーフ）
-func buildBlocks(record *model.AlertRecord) []slackgo.Block {
+func buildBlocks(record *model.AlertRecord, disabled ...bool) []slackgo.Block {
 	alert := record.Alert
 	eval := record.Evaluation
 
 	severityEmoji := severityToEmoji(alert.Severity)
-	headerText := fmt.Sprintf("%s %s in %s/%s", severityEmoji, alert.PackageName, alert.Owner, alert.Repo)
+	headerText := notification.Limit(notification.SingleLine(fmt.Sprintf("%s %s in %s/%s", severityEmoji, alert.PackageName, alert.Owner, alert.Repo)), 150)
 
 	blocks := []slackgo.Block{
 		slackgo.NewHeaderBlock(
@@ -27,7 +29,7 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 		blocks = append(blocks,
 			slackgo.NewSectionBlock(
 				slackgo.NewTextBlockObject(slackgo.MarkdownType,
-					fmt.Sprintf("_%s_", alert.Summary),
+					slackText(alert.Summary, 2800),
 					false, false,
 				), nil, nil,
 			),
@@ -38,7 +40,7 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 		slackgo.NewSectionBlock(
 			slackgo.NewTextBlockObject(slackgo.MarkdownType,
 				fmt.Sprintf("*Severity:* %s | *CVE:* %s | *CVSS:* %.1f\n*Fixed in:* %s",
-					alert.Severity, nonEmpty(alert.CVEID, "N/A"), alert.CVSSScore, nonEmpty(alert.FixedIn, "N/A")),
+					slackText(string(alert.Severity), 40), slackText(nonEmpty(alert.CVEID, "N/A"), 100), alert.CVSSScore, slackText(nonEmpty(alert.FixedIn, "N/A"), 200)),
 				false, false,
 			), nil, nil,
 		),
@@ -47,12 +49,15 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 
 	if eval != nil {
 		recEmoji := recommendationToEmoji(eval.Recommendation)
-		evalText := fmt.Sprintf("%s *AI評価:* %s", recEmoji, eval.Recommendation)
+		evalText := fmt.Sprintf("%s *AI評価:* %s", recEmoji, slackText(eval.Recommendation, 100))
 		if eval.Impact != "" {
-			evalText += fmt.Sprintf("\n\n*🔓 侵害される内容:*\n%s", eval.Impact)
+			evalText += fmt.Sprintf("\n\n*🔓 侵害される内容:*\n%s", slackText(eval.Impact, 750))
 		}
 		if eval.Reasoning != "" {
-			evalText += fmt.Sprintf("\n\n*⚠️ 侵害される使い方:*\n%s", eval.Reasoning)
+			evalText += fmt.Sprintf("\n\n*⚠️ 侵害される使い方:*\n%s", slackText(eval.Reasoning, 750))
+		}
+		if eval.AWSRisk != "" {
+			evalText += fmt.Sprintf("\n\n*☁️ AWSで危険になる利用条件（構成未確認）:*\n%s", slackText(eval.AWSRisk, 900))
 		}
 		blocks = append(blocks,
 			slackgo.NewSectionBlock(
@@ -96,25 +101,43 @@ func buildBlocks(record *model.AlertRecord) []slackgo.Block {
 		slackgo.NewActionBlock(fmt.Sprintf("alert_actions_%d", alert.ID), buttons...),
 	)
 
+	if len(disabled) > 0 && disabled[0] {
+		// 最後のactionsをGitHubリンクのみに置き換える。
+		blocks[len(blocks)-1] = slackgo.NewActionBlock("alert_links",
+			slackgo.NewButtonBlockElement("open_github", alert.HTMLURL,
+				slackgo.NewTextBlockObject(slackgo.PlainTextType, "🔗 GitHubで開く", true, false)))
+	}
 	return blocks
 }
 
 // Notify はアラートをSlackに通知し、メッセージのTimestampを返す（eval nil可）
 func (c *SlackClient) Notify(record *model.AlertRecord) (string, error) {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return "", err
+	}
+	c.notifyMu.Lock()
+	defer c.notifyMu.Unlock()
+	parent, err := c.refreshSummary(record.Alert.Owner, record.Alert.Repo, true)
+	if err != nil {
+		return "", err
+	}
+	if c.grouped() && parent == "" {
+		return "", nil
+	}
 	if err := c.limiter.Wait(context.Background()); err != nil {
 		return "", fmt.Errorf("slack通知レート制限待機失敗: %w", err)
 	}
 
 	alert := record.Alert
-	blocks := buildBlocks(record)
+	blocks := buildBlocks(record, c.approvalDisabled())
 	headerText := fmt.Sprintf("%s %s in %s/%s",
 		severityToEmoji(alert.Severity), alert.PackageName, alert.Owner, alert.Repo)
 
-	_, ts, err := c.api.PostMessage(
-		c.channelID,
-		slackgo.MsgOptionBlocks(blocks...),
-		slackgo.MsgOptionText(headerText, false),
-	)
+	options := []slackgo.MsgOption{slackgo.MsgOptionBlocks(blocks...), slackgo.MsgOptionText(headerText, false)}
+	if parent != "" {
+		options = append(options, slackgo.MsgOptionTS(parent))
+	}
+	_, ts, err := c.api.PostMessage(c.channelID, options...)
 	if err != nil {
 		// 429 Too Many Requests: Retry-After ヘッダを読んでリミッターに伝える
 		if rateLimitErr, ok := err.(*slackgo.RateLimitedError); ok {
@@ -133,7 +156,7 @@ func (c *SlackClient) Notify(record *model.AlertRecord) (string, error) {
 func buildResolvedBlocks(record *model.AlertRecord) []slackgo.Block {
 	alert := record.Alert
 	severityEmoji := severityToEmoji(alert.Severity)
-	headerText := fmt.Sprintf("✅ %s %s in %s/%s", severityEmoji, alert.PackageName, alert.Owner, alert.Repo)
+	headerText := notification.Limit(notification.SingleLine(fmt.Sprintf("✅ %s %s in %s/%s", severityEmoji, alert.PackageName, alert.Owner, alert.Repo)), 150)
 
 	blocks := []slackgo.Block{
 		slackgo.NewHeaderBlock(
@@ -165,6 +188,17 @@ func buildResolvedBlocks(record *model.AlertRecord) []slackgo.Block {
 // 1. 元メッセージを「✅ 対応済み」に編集（ボタン除去）
 // 2. スレッドに解決メッセージを投稿
 func (c *SlackClient) NotifyResolved(record *model.AlertRecord) error {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return err
+	}
+	c.notifyMu.Lock()
+	defer c.notifyMu.Unlock()
+	detailErr := c.notifyResolved(record)
+	_, summaryErr := c.refreshSummary(record.Alert.Owner, record.Alert.Repo, false)
+	return errors.Join(detailErr, summaryErr)
+}
+
+func (c *SlackClient) notifyResolved(record *model.AlertRecord) error {
 	if record.SlackMessageTS == "" {
 		return nil
 	}
@@ -199,10 +233,20 @@ func (c *SlackClient) NotifyResolved(record *model.AlertRecord) error {
 	}
 
 	threadText := fmt.Sprintf("✅ *対応済み*\nGitHub側で解決済みのため一覧から削除されました。\n<%s|GitHubで確認>", alert.HTMLURL)
+	threadTS := record.SlackMessageTS
+	if c.grouped() {
+		parent, err := c.store.NotificationGroup(c.groupKey(alert.Owner, alert.Repo))
+		if err != nil {
+			return err
+		}
+		if parent != "" {
+			threadTS = parent
+		}
+	}
 	_, _, err = c.api.PostMessage(
 		c.channelID,
 		slackgo.MsgOptionText(threadText, false),
-		slackgo.MsgOptionTS(record.SlackMessageTS),
+		slackgo.MsgOptionTS(threadTS),
 	)
 	if err != nil {
 		if rateLimitErr, ok := err.(*slackgo.RateLimitedError); ok {
@@ -218,6 +262,17 @@ func (c *SlackClient) NotifyResolved(record *model.AlertRecord) error {
 
 // UpdateEvalMessage はAI評価完了後にSlackのメッセージを編集してeval結果を追加する
 func (c *SlackClient) UpdateEvalMessage(record *model.AlertRecord) error {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return err
+	}
+	c.notifyMu.Lock()
+	defer c.notifyMu.Unlock()
+	detailErr := c.updateEvalMessage(record)
+	_, summaryErr := c.refreshSummary(record.Alert.Owner, record.Alert.Repo, true)
+	return errors.Join(detailErr, summaryErr)
+}
+
+func (c *SlackClient) updateEvalMessage(record *model.AlertRecord) error {
 	if record.SlackMessageTS == "" {
 		return nil
 	}
@@ -227,7 +282,7 @@ func (c *SlackClient) UpdateEvalMessage(record *model.AlertRecord) error {
 	}
 
 	alert := record.Alert
-	blocks := buildBlocks(record)
+	blocks := buildBlocks(record, c.approvalDisabled())
 	headerText := fmt.Sprintf("%s %s in %s/%s",
 		severityToEmoji(alert.Severity), alert.PackageName, alert.Owner, alert.Repo)
 

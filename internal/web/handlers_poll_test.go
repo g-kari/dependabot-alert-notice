@@ -160,6 +160,7 @@ func TestPollTarget_OutOfRange(t *testing.T) {
 // TestPollRepo_Success はowner/repoを指定してFetchJobがエンキューされることを確認
 func TestPollRepo_Success(t *testing.T) {
 	srv, _, _ := newTestServer(t)
+	srv.cfg.Targets = []config.Target{{Owner: "myorg"}}
 	srv.jobQueue = queue.New(10, 1)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/poll/repo", nil)

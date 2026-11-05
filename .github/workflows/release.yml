@@ -4,21 +4,121 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'ビルドする既存のv*タグ（新規タグの自動作成なし）'
+        required: true
+        type: string
+      publish:
+        description: '検証後に安定版Releaseを公開する（プレリリースタグはdraftのまま）'
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  mac-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
+
+      - name: Verify existing release tag
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]]
+          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
+
+      - name: Test and package standalone Macs
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./... -race -count=1
+          python3 scripts/test_macos_tools.py
+          go run ./cmd/package-macos -version "$RELEASE_TAG" -out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  mac-test:
+    needs: mac-build
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-distributions
+          path: mac-artifacts
+      - name: Verify native Mac binary and launcher
+        env:
+          ARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          go test ./... -race -count=1
+          python3 scripts/test_macos_tools.py
+          (cd mac-artifacts && shasum -a 256 -c macos-checksums.txt)
+          unzip "mac-artifacts/"*"_macos_${ARCH}.zip" -d mac-artifacts/extracted
+          folder=$(find mac-artifacts/extracted -mindepth 1 -maxdepth 1 -type d)
+          test -x "$folder/Start.command"
+          for script in "$folder/"*.command "$folder/service-macos.sh"; do
+            test -x "$script"
+            bash -n "$script"
+          done
+          test "$("$folder/dependabot-alert-notice" --version)" = "dependabot-alert-notice $RELEASE_TAG"
+          test "$("$folder/dependabot-alert-notice" --config "$folder/config.yaml.example" --web-url)" = "http://127.0.0.1:8999"
+
+  release:
+    needs: [mac-build, mac-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-distributions
+          path: mac-artifacts
 
       - uses: goreleaser/goreleaser-action@v6
         with:
@@ -27,3 +127,26 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add convenient Mac distributions to draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: gh release upload "$RELEASE_TAG" mac-artifacts/*.zip mac-artifacts/macos-checksums.txt --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish verified stable Release
+        if: ${{ github.event_name == 'push' || inputs.publish }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Stable SemVer tagではないためdraftを維持します。'
+            exit 0
+          fi
+          args=(--repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest --title "Security Notice ${RELEASE_TAG}")
+          notes_file="packaging/releases/${RELEASE_TAG}.md"
+          if [ -f "$notes_file" ]; then
+            args+=(--notes-file "$notes_file")
+          fi
+          gh release edit "$RELEASE_TAG" "${args[@]}"

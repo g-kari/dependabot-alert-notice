@@ -49,7 +49,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store, *mockMerger) {
 	t.Helper()
 	s := store.New()
 	m := &mockMerger{}
-	cfg := &config.Config{Web: config.WebConfig{Port: 0}}
+	cfg := &config.Config{Web: config.WebConfig{Port: 0}, Targets: []config.Target{{Owner: "testorg"}, {Owner: "org"}}}
 	srv := New(cfg, "", s, m)
 	return srv, s, m
 }
@@ -91,6 +91,26 @@ func TestDashboard_Empty(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Dependabot") {
 		t.Error("response should contain 'Dependabot'")
+	}
+}
+
+func TestRepositoryExcludeAndInclude(t *testing.T) {
+	srv, s, _ := newTestServer(t)
+	srv.cfg.Targets = []config.Target{{Owner: "testorg", Repo: ""}}
+	saveAlert(s, 100, "pkg", model.SeverityHigh)
+	req := httptest.NewRequest(http.MethodPost, "/settings/repositories/exclude", strings.NewReader("owner=testorg&repo=testrepo"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.handleRepositoryExclude(w, req)
+	if w.Code != http.StatusSeeOther || !srv.cfg.Targets[0].IsExcluded("testrepo") {
+		t.Fatalf("status=%d targets=%+v", w.Code, srv.cfg.Targets)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/settings/repositories/include", strings.NewReader("owner=testorg&repo=testrepo"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	srv.handleRepositoryInclude(w, req)
+	if w.Code != http.StatusSeeOther || srv.cfg.Targets[0].IsExcluded("testrepo") {
+		t.Fatalf("status=%d targets=%+v", w.Code, srv.cfg.Targets)
 	}
 }
 

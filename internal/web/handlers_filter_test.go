@@ -103,7 +103,7 @@ func TestFilterByConfig_DifferentOwner(t *testing.T) {
 	}
 }
 
-// TestFilterByConfig_OwnerNotInTargets はターゲットに含まれないownerのアラートはそのまま表示されることを確認
+// TestFilterByConfig_OwnerNotInTargets は設定なしのownerを通常集計から除くことを確認
 func TestFilterByConfig_OwnerNotInTargets(t *testing.T) {
 	records := []*model.AlertRecord{
 		makeRecord("myorg", "repo1"),
@@ -115,20 +115,19 @@ func TestFilterByConfig_OwnerNotInTargets(t *testing.T) {
 		},
 	}
 	got := filterByConfig(records, cfg)
-	// ターゲット設定外のownerもそのまま表示される
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
+	if len(got) != 1 || got[0].Alert.Owner != "myorg" {
+		t.Fatalf("configured owner only: %+v", got)
 	}
 }
 
-// TestFilterByConfig_EmptyTargets はターゲットが空のとき全レコードが表示されることを確認
+// TestFilterByConfig_EmptyTargets は設定なしを監視対象としないことを確認
 func TestFilterByConfig_EmptyTargets(t *testing.T) {
 	records := []*model.AlertRecord{
 		makeRecord("myorg", "repo1"),
 	}
 	cfg := &config.Config{}
 	got := filterByConfig(records, cfg)
-	if len(got) != 1 {
-		t.Errorf("len = %d, want 1 (no excludes configured)", len(got))
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0 (no monitoring configured)", len(got))
 	}
 }

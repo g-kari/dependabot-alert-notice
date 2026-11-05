@@ -45,6 +45,8 @@ type Alert struct {
 	CVEID            string `json:"CVEID"`
 	GHSAID           string
 	CVSSScore        float64
+	CVSSKnown        bool // CVSSScore is authoritative when true; false means unavailable.
+	CVSSVersion      string
 	CVSSVector       string
 	Summary          string
 	Description      string
@@ -80,10 +82,12 @@ type Alert struct {
 }
 
 type Evaluation struct {
-	Risk           string `json:"risk"`
-	Impact         string `json:"impact"`
-	Recommendation string `json:"recommendation"`
-	Reasoning      string `json:"reasoning"`
+	Risk           string                `json:"risk"`
+	Impact         string                `json:"impact"`
+	Recommendation string                `json:"recommendation"`
+	Reasoning      string                `json:"reasoning"`
+	AWSRisk        string                `json:"aws_risk,omitempty"`
+	Provenance     *EvaluationProvenance `json:"provenance,omitempty"`
 }
 
 type AlertState string
@@ -111,8 +115,9 @@ type AlertRecord struct {
 	EvalStatus       EvalStatus
 	NotifiedAt       time.Time
 	MergedAt         *time.Time
-	SlackMessageTS   string // Slack通知済みメッセージのTimestamp（編集に使用）
-	DiscordMessageID string // Discord Webhookメッセージ ID（編集に使用）
+	ResolvedAt       *time.Time // Confirmed absent from a complete GitHub snapshot; retained for history.
+	SlackMessageTS   string     // Slack通知済みメッセージのTimestamp（編集に使用）
+	DiscordMessageID string     // Discord Webhookメッセージ ID（編集に使用）
 }
 
 type LogEntry struct {

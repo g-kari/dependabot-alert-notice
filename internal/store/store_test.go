@@ -498,9 +498,9 @@ func TestRemoveResolvedAlerts_RemovesClosedAlerts(t *testing.T) {
 	if removed[0].Alert.Number != 3 {
 		t.Errorf("removed[0].Number = %d, want 3", removed[0].Alert.Number)
 	}
-	// DB に #3 が残っていないこと
+	// #3 は通常の監視対象から外れる（保存済み詳細は別途保持する）。
 	if s.HasByKey("org", "repo1", 3) {
-		t.Error("#3 はまだ DB に残っている")
+		t.Error("#3 はまだ通常の監視対象に残っている")
 	}
 	// #1, #2 は残っていること
 	if !s.HasByKey("org", "repo1", 1) || !s.HasByKey("org", "repo1", 2) {

@@ -1,10 +1,28 @@
 package evaluator
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 )
+
+func TestClaudeModelCommandArgs(t *testing.T) {
+	cfg := &config.Config{ClaudePath: "claude", Evaluator: config.EvaluatorConfig{ClaudeModel: "claude-sonnet-test"}}
+	e, ok := New(cfg).(*DirectEvaluator)
+	if !ok || e.model != "claude-sonnet-test" {
+		t.Fatalf("direct evaluator = %+v", e)
+	}
+	args := claudeArgs("prompt", cfg.Evaluator.ClaudeModel)
+	if got := strings.Join(args, " "); !strings.Contains(got, "--model claude-sonnet-test") {
+		t.Fatalf("direct args = %q", got)
+	}
+	docker := &DockerEvaluator{cfg: cfg.Evaluator}
+	if got := strings.Join(docker.buildDockerArgs("prompt", "C:/Users/test/.claude"), " "); !strings.Contains(got, "--model claude-sonnet-test") {
+		t.Fatalf("docker args = %q", got)
+	}
+}
 
 func TestExtractJSON(t *testing.T) {
 	tests := []struct {
@@ -114,7 +132,7 @@ func TestDockerEvaluator_SecurityOptFlag(t *testing.T) {
 		},
 	}
 	e := &DockerEvaluator{cfg: cfg}
-	args := e.buildDockerArgs("test prompt", "/home/test/.claude")
+	args := e.buildDockerArgs("test prompt", filepath.Join("home", "test", ".claude"))
 
 	hasSecurityOpt := false
 	for _, arg := range args {
@@ -140,17 +158,19 @@ func TestDockerEvaluator_MountsClaudeJSON(t *testing.T) {
 		},
 	}
 	e := &DockerEvaluator{cfg: cfg}
-	args := e.buildDockerArgs("test prompt", "/home/test/.claude")
+	claudeHome := filepath.Join("home", "test", ".claude")
+	args := e.buildDockerArgs("test prompt", claudeHome)
+	claudeJSON := filepath.Join(filepath.Dir(claudeHome), ".claude.json")
 
 	hasDirMount := false
 	hasJSONMount := false
 	for i, arg := range args {
 		if arg == "-v" && i+1 < len(args) {
 			v := args[i+1]
-			if v == "/home/test/.claude:/home/node/.claude:ro" {
+			if v == claudeHome+":/home/node/.claude:ro" {
 				hasDirMount = true
 			}
-			if v == "/home/test/.claude.json:/home/node/.claude.json:ro" {
+			if v == claudeJSON+":/home/node/.claude.json:ro" {
 				hasJSONMount = true
 			}
 		}

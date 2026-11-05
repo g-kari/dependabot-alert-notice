@@ -1,16 +1,68 @@
 {{define "content"}}
-<h1>⚙️ 設定</h1>
+{{if .Repositories}}
+<div class="card">
+  <h2>取得済みリポジトリ</h2>
+  <p class="text-muted">対象外にしても既存アラートと評価履歴は保持されます。</p>
+  <div class="table-wrap"><table><thead><tr><th>リポジトリ</th><th>保存アラート</th><th>状態</th><th>操作</th></tr></thead><tbody>
+  {{range .Repositories}}<tr>
+    <td><code>{{.Owner}}/{{.Repo}}</code></td><td>{{.AlertCount}}</td>
+    <td>{{if not .Configured}}監視設定なし{{else if .Excluded}}対象外{{else}}監視中{{end}}</td>
+    <td>{{if not .Configured}}<span class="text-muted">対象設定を追加してください</span>{{else if .Excluded}}
+      <form method="POST" action="/settings/repositories/include" class="inline-form"><input type="hidden" name="owner" value="{{.Owner}}"><input type="hidden" name="repo" value="{{.Repo}}"><input type="hidden" name="revision" value="{{$.Revision}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="btn btn-ghost btn-sm" type="submit">監視を再開</button></form>
+      {{else}}<form method="POST" action="/settings/repositories/exclude" class="inline-form"><input type="hidden" name="owner" value="{{.Owner}}"><input type="hidden" name="repo" value="{{.Repo}}"><input type="hidden" name="revision" value="{{$.Revision}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="btn btn-reject btn-sm" type="submit">対象外にする</button></form>{{end}}
+    </td>
+  </tr>{{end}}
+  </tbody></table></div>
+</div>
+{{end}}
+<h1>設定</h1>
 
 {{if .Error}}
-<div class="msg msg-error">❌ {{.Error}}</div>
+<div class="msg msg-error">{{.Error}}</div>
 {{end}}
 {{if .Flash}}
-<div class="msg msg-success">✅ {{.Flash}}</div>
+<div class="msg msg-success">{{.Flash}}</div>
 {{end}}
+
+<section class="card" id="rss-feeds">
+  <div class="section-heading">
+    <div><h2>脆弱性RSS / Atom</h2><p class="field-hint">登録すると定期取得と脆弱性レポートに反映されます。</p></div>
+    <a class="btn btn-ghost" href="/reports/vulnerabilities">レポートを見る</a>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>名前</th><th>URL</th><th>状態</th><th>操作</th></tr></thead>
+    <tbody>
+      {{range $i, $feed := .Config.RSS.Feeds}}
+      <tr>
+        <td>{{$feed.Name}}</td><td class="url-cell"><a href="{{$feed.URL}}" target="_blank" rel="noopener noreferrer">{{$feed.URL}}</a></td>
+        <td>{{if $feed.Enabled}}<span class="badge badge-approved">有効</span>{{else}}<span class="badge badge-pending">停止中</span>{{end}}</td>
+        <td class="feed-actions">
+          <form method="POST" action="/settings/rss/{{$i}}/toggle" class="inline-form"><input type="hidden" name="revision" value="{{$.Revision}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="btn btn-ghost btn-sm" type="submit">{{if $feed.Enabled}}停止{{else}}再開{{end}}</button></form>
+          <form method="POST" action="/settings/rss/{{$i}}/delete" class="inline-form"><input type="hidden" name="revision" value="{{$.Revision}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="btn btn-reject btn-sm" type="submit">登録解除</button></form>
+        </td>
+      </tr>
+      {{else}}<tr><td colspan="4" class="empty-table">フィードはまだ登録されていません。</td></tr>{{end}}
+    </tbody>
+  </table></div>
+  <form method="POST" action="/settings/rss/add" class="form-row">
+    <input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="field"><label for="rss-name">フィード名</label><input id="rss-name" type="text" name="name" placeholder="例: JPCERT/CC" required></div>
+    <div class="field field-grow"><label for="rss-url">RSS / Atom URL</label><input id="rss-url" type="url" name="url" placeholder="https://example.com/feed.xml" required></div>
+    <button class="btn btn-primary" type="submit">RSSフィードを追加</button>
+  </form>
+  <form method="POST" action="/settings/rss/config" class="form-row rss-options">
+    <input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="field"><label for="rss-enabled">定期取得</label><select id="rss-enabled" name="enabled"><option value="true" {{if .Config.RSS.Enabled}}selected{{end}}>有効</option><option value="false" {{if not .Config.RSS.Enabled}}selected{{end}}>停止</option></select></div>
+    <div class="field"><label for="rss-interval">更新間隔</label><input id="rss-interval" type="text" name="refresh_interval" value="{{.Config.RSS.RefreshInterval}}" required></div>
+    <div class="field"><label for="rss-max">最大件数 / フィード</label><input id="rss-max" type="number" name="max_items_per_feed" min="1" max="1000" value="{{.Config.RSS.MaxItemsPerFeed}}" required></div>
+    <div class="field"><label for="rss-retention">保存期間（日）</label><input id="rss-retention" type="number" name="retention_days" min="1" max="3650" value="{{.Config.RSS.RetentionDays}}" required></div>
+    <button class="btn btn-ghost" type="submit">取得設定を保存</button>
+  </form>
+</section>
 
 {{/* 監視ターゲット */}}
 <div class="card">
-  <h2 style="margin-bottom:16px">📌 監視ターゲット</h2>
+  <h2 style="margin-bottom:16px">監視ターゲット</h2>
   <div class="table-wrap">
     <table>
       <thead>
@@ -33,7 +85,7 @@
             {{if not $t.Repo}}
             <form method="POST" action="/settings/targets/{{$i}}/excludes/add" style="display:inline-flex;align-items:center;gap:4px;margin-top:4px">
               <input type="text" name="repo" placeholder="除外するrepo名" style="width:150px;padding:3px 8px;font-size:0.82rem">
-              <button type="submit" class="btn btn-ghost" style="padding:3px 10px;font-size:0.78rem">＋</button>
+              <button type="submit" class="btn btn-ghost btn-sm">除外を追加</button>
             </form>
             {{end}}
           </td>
@@ -62,15 +114,23 @@
       <label>Repo <span style="color:var(--color-muted);font-weight:400">（省略でorg全体）</span></label>
       <input type="text" name="repo" placeholder="your-repo" style="width:180px">
     </div>
-    <button type="submit" class="btn btn-approve">＋ 追加</button>
+    <button type="submit" class="btn btn-approve">追加</button>
   </form>
 </div>
 
 {{/* メイン設定フォーム */}}
+<section class="card" id="codex-auth">
+  <div class="section-heading"><div><h2>Codex 認証</h2><p class="field-hint">Codex CLIのログイン情報を使用します。認証情報はこのアプリに保存しません。</p></div><span id="codex-auth-status" class="badge badge-pending">確認中</span></div>
+  <div class="form-row">
+    <form method="POST" action="/settings/codex/login" class="inline-form"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="btn btn-primary" type="submit">ブラウザでCodexを認証</button></form>
+    <button id="codex-auth-refresh" class="btn btn-ghost" type="button">認証状態を再確認</button>
+    <span class="field-hint">このPCのブラウザでログイン画面が開きます。</span>
+  </div>
+</section>
 <form method="POST" action="/settings">
 
 <div class="card">
-  <h2 style="margin-bottom:16px">🔄 ポーリング</h2>
+  <h2 style="margin-bottom:16px">ポーリング</h2>
   <div class="table-wrap">
     <table>
       <tbody>
@@ -141,7 +201,7 @@
 </div>
 
 <div class="card">
-  <h2 style="margin-bottom:16px">💬 Slack</h2>
+  <h2 style="margin-bottom:16px">Slack</h2>
   <div class="table-wrap">
     <table>
       <tbody>
@@ -153,7 +213,7 @@
           <th>Bot Token</th>
           <td>
             {{if .EnvBotToken}}
-            <span class="badge badge-info">✅ 環境変数で設定済み</span>
+            <span class="badge badge-info">環境変数で設定済み</span>
             {{else}}
             <input type="password" name="slack_bot_token" placeholder="xoxb-…" style="width:320px">
             <div class="field-hint-block">{{if .Config.Slack.BotToken}}設定済み（空白のまま保存すると変更なし）{{else}}未設定{{end}}</div>
@@ -164,7 +224,7 @@
           <th>App Token</th>
           <td>
             {{if .EnvAppToken}}
-            <span class="badge badge-info">✅ 環境変数で設定済み</span>
+            <span class="badge badge-info">環境変数で設定済み</span>
             {{else}}
             <input type="password" name="slack_app_token" placeholder="xapp-…" style="width:320px">
             <div class="field-hint-block">{{if .Config.Slack.AppToken}}設定済み（空白のまま保存すると変更なし）{{else}}未設定{{end}}</div>
@@ -184,7 +244,7 @@
 </div>
 
 <div class="card">
-  <h2 style="margin-bottom:16px">🎮 Discord</h2>
+  <h2 style="margin-bottom:16px">Discord</h2>
   <div class="table-wrap">
     <table>
       <tbody>
@@ -192,7 +252,7 @@
           <th style="width:200px">Webhook URL</th>
           <td>
             {{if .EnvDiscordWebhook}}
-            <span class="badge badge-info">✅ 環境変数で設定済み</span>
+            <span class="badge badge-info">環境変数で設定済み</span>
             {{else}}
             <input type="text" name="discord_webhook_url" value="{{.Config.Discord.WebhookURL}}" placeholder="https://discord.com/api/webhooks/..." style="width:400px">
             {{end}}
@@ -204,13 +264,17 @@
 </div>
 
 <div class="card">
-  <h2 style="margin-bottom:16px">🤖 Claude / GitHub CLI</h2>
+  <h2 style="margin-bottom:16px">CLI のパス</h2>
   <div class="table-wrap">
     <table>
       <tbody>
         <tr>
           <th style="width:200px">claude パス</th>
           <td><input type="text" name="claude_path" value="{{.Config.ClaudePath}}" style="width:280px"></td>
+        </tr>
+        <tr>
+          <th>codex パス</th>
+          <td><input type="text" name="codex_path" value="{{.Config.CodexPath}}" style="width:280px"></td>
         </tr>
         <tr>
           <th>gh パス</th>
@@ -222,10 +286,14 @@
 </div>
 
 <div class="card">
-  <h2 style="margin-bottom:16px">🔔 通知設定</h2>
+  <h2 style="margin-bottom:16px">通知設定</h2>
   <div class="table-wrap">
     <table>
       <tbody>
+        <tr>
+          <th><label for="notification_interval">通知をまとめる間隔</label></th>
+          <td><div class="field"><input id="notification_interval" type="text" name="notification_interval" value="{{.Config.NotificationInterval}}"><p class="field-hint">1hで1時間ごとにリポジトリ別の一覧を更新します。変更がない場合は送りません。0sで都度通知に戻せます。</p></div></td>
+        </tr>
         <tr>
           <th style="width:200px">通知最低重要度</th>
           <td>
@@ -245,11 +313,14 @@
   </div>
 </div>
 
-<div class="card">
-  <h2 style="margin-bottom:16px">🤖 AI評価</h2>
+<div class="card" id="ai-evaluation">
+  <h2 style="margin-bottom:16px">AI評価</h2>
   <div class="table-wrap">
     <table>
       <tbody>
+        <tr><th style="width:200px">評価エンジン</th><td><select name="eval_provider"><option value="claude" {{if or (eq .Config.Evaluator.Provider "") (eq .Config.Evaluator.Provider "claude")}}selected{{end}}>Claude Code</option><option value="codex" {{if eq .Config.Evaluator.Provider "codex"}}selected{{end}}>Codex</option></select><span class="field-hint"> Codexを選ぶ場合は上の認証状態を確認してください。</span></td></tr>
+        <tr><th>Codex Model</th><td><div class="input-row"><input type="text" name="eval_codex_model" value="{{.Config.Evaluator.CodexModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Codex選択時に使用。空欄ならCodex CLIの既定値。</span></div></td></tr>
+        <tr><th>Claude Model</th><td><div class="input-row"><input type="text" name="eval_claude_model" value="{{.Config.Evaluator.ClaudeModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Claude Code選択時に使用。空欄ならClaude CLIの既定値。</span></div></td></tr>
         <tr>
           <th style="width:200px">AI自動評価</th>
           <td>
@@ -282,13 +353,20 @@
 </div>
 
 <div class="card">
-  <h2 style="margin-bottom:16px">🐳 Evaluator サンドボックス</h2>
+  <h2 style="margin-bottom:16px">Evaluator サンドボックス</h2>
   <div class="table-wrap">
     <table>
       <tbody>
         <tr>
-          <th style="width:200px">Docker隔離</th>
+          <th style="width:200px">AI隔離</th>
           <td>
+            <label for="sandbox_runtime">実行方式</label>
+            <select id="sandbox_runtime" name="sandbox_runtime">
+              <option value="auto" {{if or (eq .Config.Evaluator.Sandbox.Runtime "auto") (eq .Config.Evaluator.Sandbox.Runtime "")}}selected{{end}}>自動（Apple Silicon: Apple container / その他: Docker）</option>
+              <option value="apple" {{if eq .Config.Evaluator.Sandbox.Runtime "apple"}}selected{{end}}>Apple container</option>
+              <option value="docker" {{if eq .Config.Evaluator.Sandbox.Runtime "docker"}}selected{{end}}>Docker</option>
+              <option value="podman" {{if eq .Config.Evaluator.Sandbox.Runtime "podman"}}selected{{end}}>Podman（rootless）</option>
+            </select>
             <select name="sandbox_enabled" style="width:160px">
               <option value="true"  {{if .Config.Evaluator.Sandbox.Enabled}}selected{{end}}>有効（推奨）</option>
               <option value="false" {{if not .Config.Evaluator.Sandbox.Enabled}}selected{{end}}>無効</option>
@@ -297,7 +375,7 @@
         </tr>
         <tr>
           <th>イメージ</th>
-          <td><input type="text" name="sandbox_image" value="{{.Config.Evaluator.Sandbox.Image}}" style="width:280px"></td>
+          <td><div class="field"><label>Claude用</label><input type="text" name="sandbox_image" value="{{.Config.Evaluator.Sandbox.Image}}" style="width:280px"></div><div class="field"><label>Codex用</label><input type="text" name="sandbox_codex_image" value="{{.Config.Evaluator.Sandbox.CodexImage}}" style="width:280px"></div></td>
         </tr>
         <tr>
           <th>メモリ制限</th>
@@ -322,9 +400,29 @@
 </div>
 
 <div class="input-row" style="flex-wrap:wrap">
-  <button type="submit" class="btn btn-approve">💾 保存</button>
-  <a href="/settings/connectivity" class="btn btn-ghost">🔌 疎通テスト</a>
+  <button type="submit" class="btn btn-approve">保存</button>
+  <a href="/settings/connectivity" class="btn btn-ghost">疎通テスト</a>
   <span class="field-hint">※ 変更は次のポーリングから反映されます</span>
 </div>
 </form>
+<script>
+(function() {
+  const badge = document.getElementById('codex-auth-status');
+  async function refresh() {
+    badge.textContent = '確認中';
+    badge.className = 'badge badge-pending';
+    try {
+      const response = await fetch('/settings/codex/status', {cache: 'no-store'});
+      const result = await response.json();
+      badge.textContent = result.message;
+      badge.className = 'badge ' + (result.ok ? 'badge-approved' : 'badge-warn');
+    } catch (_) {
+      badge.textContent = '認証状態を確認できません';
+      badge.className = 'badge badge-warn';
+    }
+  }
+  document.getElementById('codex-auth-refresh').addEventListener('click', refresh);
+  refresh();
+})();
+</script>
 {{end}}

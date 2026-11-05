@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,15 +12,21 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/notification"
 	"github.com/g-kari/dependabot-alert-notice/internal/ratelimit"
+	"github.com/g-kari/dependabot-alert-notice/internal/store"
 )
 
 // Client はDiscord Webhook通知クライアント
 type Client struct {
-	webhookURL string
-	httpClient *http.Client
-	limiter    *ratelimit.Limiter
+	batch        *notification.Batcher
+	webhookURL   string
+	httpClient   *http.Client
+	limiter      *ratelimit.Limiter
+	store        *store.Store
+	configSource func() (config.Snapshot, error)
 }
 
 // New はDiscord Webhookクライアントを生成する
@@ -48,14 +55,18 @@ type embedField struct {
 }
 
 type embed struct {
-	Title  string       `json:"title"`
-	Color  int          `json:"color"`
-	URL    string       `json:"url,omitempty"`
-	Fields []embedField `json:"fields"`
+	Description string       `json:"description,omitempty"`
+	Title       string       `json:"title"`
+	Color       int          `json:"color"`
+	URL         string       `json:"url,omitempty"`
+	Fields      []embedField `json:"fields"`
 }
 
 type webhookPayload struct {
-	Embeds []embed `json:"embeds"`
+	Embeds          []embed `json:"embeds"`
+	AllowedMentions struct {
+		Parse []string `json:"parse"`
+	} `json:"allowed_mentions"`
 }
 
 // NotifyEval はAI評価完了をDiscord Webhookに追加通知する
@@ -68,6 +79,12 @@ func (c *Client) NotifyEval(record *model.AlertRecord) (string, error) {
 
 // Notify はDependabotアラートをDiscord Webhookに通知し、メッセージIDを返す
 func (c *Client) Notify(record *model.AlertRecord) (string, error) {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return "", err
+	}
+	if c.grouped() {
+		return c.refreshSummary(record.Alert.Owner, record.Alert.Repo, true)
+	}
 	if c.webhookURL == "" {
 		return "", fmt.Errorf("discord webhook URLが未設定です")
 	}
@@ -98,6 +115,7 @@ func (c *Client) Notify(record *model.AlertRecord) (string, error) {
 			embedField{Name: "Recommendation", Value: nonEmpty(eval.Recommendation, "N/A"), Inline: true},
 			embedField{Name: "侵害される内容", Value: nonEmpty(eval.Impact, "N/A"), Inline: false},
 			embedField{Name: "侵害される使い方", Value: nonEmpty(eval.Reasoning, "N/A"), Inline: false},
+			embedField{Name: "AWSで危険になる利用条件（構成未確認）", Value: nonEmpty(eval.AWSRisk, "未評価（再評価で確認）"), Inline: false},
 		)
 	}
 
@@ -112,7 +130,7 @@ func (c *Client) Notify(record *model.AlertRecord) (string, error) {
 		},
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := marshalPayload(payload)
 	if err != nil {
 		return "", fmt.Errorf("discord payload JSONシリアライズ失敗: %w", err)
 	}
@@ -148,6 +166,16 @@ func (c *Client) Notify(record *model.AlertRecord) (string, error) {
 
 // UpdateEvalMessage はAI評価完了後に既存Discord Webhookメッセージをeval結果でPATCH編集する
 func (c *Client) UpdateEvalMessage(record *model.AlertRecord) error {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return err
+	}
+	if c.grouped() {
+		return c.updateGrouped(record, false)
+	}
+	return c.updateEvalDetail(record)
+}
+
+func (c *Client) updateEvalDetail(record *model.AlertRecord) error {
 	if record.DiscordMessageID == "" {
 		return nil
 	}
@@ -178,6 +206,7 @@ func (c *Client) UpdateEvalMessage(record *model.AlertRecord) error {
 			embedField{Name: "Recommendation", Value: nonEmpty(eval.Recommendation, "N/A"), Inline: true},
 			embedField{Name: "侵害される内容", Value: nonEmpty(eval.Impact, "N/A"), Inline: false},
 			embedField{Name: "侵害される使い方", Value: nonEmpty(eval.Reasoning, "N/A"), Inline: false},
+			embedField{Name: "AWSで危険になる利用条件（構成未確認）", Value: nonEmpty(eval.AWSRisk, "未評価（再評価で確認）"), Inline: false},
 		)
 	}
 
@@ -192,7 +221,7 @@ func (c *Client) UpdateEvalMessage(record *model.AlertRecord) error {
 		},
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := marshalPayload(payload)
 	if err != nil {
 		return fmt.Errorf("discord eval更新 payload JSONシリアライズ失敗: %w", err)
 	}
@@ -222,6 +251,16 @@ func (c *Client) UpdateEvalMessage(record *model.AlertRecord) error {
 
 // NotifyResolved は対応済みアラートをDiscord Webhookメッセージに反映する（PATCHで編集）
 func (c *Client) NotifyResolved(record *model.AlertRecord) error {
+	if deferred, err := c.deferNotification(record.Alert.Owner, record.Alert.Repo); deferred || err != nil {
+		return err
+	}
+	if c.grouped() {
+		return c.updateGrouped(record, true)
+	}
+	return c.resolveDetail(record)
+}
+
+func (c *Client) resolveDetail(record *model.AlertRecord) error {
 	if record.DiscordMessageID == "" {
 		return nil
 	}
@@ -247,7 +286,7 @@ func (c *Client) NotifyResolved(record *model.AlertRecord) error {
 		},
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := marshalPayload(payload)
 	if err != nil {
 		return fmt.Errorf("discord resolved payload JSONシリアライズ失敗: %w", err)
 	}
@@ -344,4 +383,36 @@ func nonEmpty(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func marshalPayload(payload webhookPayload) ([]byte, error) {
+	payload.AllowedMentions.Parse = []string{}
+	for i := range payload.Embeds {
+		e := &payload.Embeds[i]
+		e.Title = notification.Limit(e.Title, 200)
+		e.Description = notification.Limit(e.Description, 2400)
+		for j := range e.Fields {
+			e.Fields[j].Name = notification.Limit(e.Fields[j].Name, 120)
+			e.Fields[j].Value = notification.Limit(e.Fields[j].Value, 650)
+		}
+	}
+	return json.Marshal(payload)
+}
+
+func (c *Client) updateGrouped(record *model.AlertRecord, resolved bool) error {
+	id, err := c.store.NotificationGroup(c.groupKey(record.Alert.Owner, record.Alert.Repo))
+	if err != nil {
+		return err
+	}
+	var detailErr error
+	// 旧個別通知は従来どおり編集し、新しい集約IDを個別詳細で上書きしない。
+	if record.DiscordMessageID != "" && record.DiscordMessageID != id {
+		if resolved {
+			detailErr = c.resolveDetail(record)
+		} else {
+			detailErr = c.updateEvalDetail(record)
+		}
+	}
+	_, summaryErr := c.refreshSummary(record.Alert.Owner, record.Alert.Repo, !resolved)
+	return errors.Join(detailErr, summaryErr)
 }

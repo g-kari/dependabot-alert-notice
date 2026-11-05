@@ -17,7 +17,7 @@ import (
 )
 
 type streamEvent struct {
-	Type    string `json:"type"` // "gh" | "claude" | "slack" | "sandbox" | "target" | "done"
+	Type    string `json:"type"` // "gh" | "claude" | "codex" | "slack" | "sandbox" | "target" | "done"
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 	Owner   string `json:"owner,omitempty"`
@@ -41,6 +41,7 @@ type targetResult struct {
 type connectivityResult struct {
 	GH      toolResult     `json:"gh"`
 	Claude  toolResult     `json:"claude"`
+	Codex   toolResult     `json:"codex"`
 	Slack   toolResult     `json:"slack"`
 	Sandbox toolResult     `json:"sandbox"`
 	Targets []targetResult `json:"targets"`
@@ -65,7 +66,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	s.cfgMu.RLock()
-	cfg := s.cfg
+	cfg, _ := config.Clone(*s.cfg)
 	s.cfgMu.RUnlock()
 
 	var sendMu sync.Mutex
@@ -96,6 +97,13 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		res := s.codexStatus(ctx, cfg)
+		send(streamEvent{Type: "codex", OK: res.OK, Message: res.Message})
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		res := testSlack(ctx, cfg.Slack)
 		send(streamEvent{Type: "slack", OK: res.OK, Message: res.Message})
 	}()
@@ -103,7 +111,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		res := testSandbox(ctx, cfg.Evaluator.Sandbox)
+		res := testSandbox(ctx, selectedSandbox(cfg))
 		send(streamEvent{Type: "sandbox", OK: res.OK, Message: res.Message})
 	}()
 
@@ -133,7 +141,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	s.cfgMu.RLock()
-	cfg := s.cfg
+	cfg, _ := config.Clone(*s.cfg)
 	s.cfgMu.RUnlock()
 
 	var (
@@ -142,7 +150,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 		wg  sync.WaitGroup
 	)
 
-	wg.Add(4)
+	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
@@ -162,6 +170,14 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
+		r := s.codexStatus(ctx, cfg)
+		mu.Lock()
+		res.Codex = r
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
 		r := testSlack(ctx, cfg.Slack)
 		mu.Lock()
 		res.Slack = r
@@ -170,7 +186,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
-		r := testSandbox(ctx, cfg.Evaluator.Sandbox)
+		r := testSandbox(ctx, selectedSandbox(cfg))
 		mu.Lock()
 		res.Sandbox = r
 		mu.Unlock()
@@ -205,6 +221,24 @@ func testClaude(ctx context.Context, claudePath string) toolResult {
 		return toolResult{OK: false, Message: msg}
 	}
 	return toolResult{OK: true, Message: strings.TrimSpace(string(out))}
+}
+
+func (s *Server) codexStatus(ctx context.Context, cfg config.Config) toolResult {
+	if cfg.Evaluator.Provider != "codex" {
+		return toolResult{OK: true, Message: "Claudeを選択中（Codexは未使用）"}
+	}
+	return s.codexAuth.Status(ctx, cfg.CodexPath)
+}
+
+func selectedSandbox(cfg config.Config) config.SandboxConfig {
+	sandbox := cfg.Evaluator.Sandbox
+	if cfg.Evaluator.Provider == "codex" {
+		sandbox.Image = sandbox.CodexImage
+		if sandbox.Image == "" {
+			sandbox.Image = "dependabot-codex-evaluator:latest"
+		}
+	}
+	return sandbox
 }
 
 func testSlack(ctx context.Context, slackCfg config.SlackConfig) toolResult {
