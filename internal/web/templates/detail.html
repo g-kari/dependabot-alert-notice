@@ -4,9 +4,11 @@
   <h1>アラート #{{.Alert.Number}}: {{.Alert.PackageName}}</h1>
 </div>
 
+{{if .ResolvedAt}}<div class="msg msg-success">解決済み（{{.ResolvedAt.Format "2006-01-02 15:04 UTC"}}）。保存済みの詳細・評価を表示しています。操作はできません。</div>{{end}}
+
 {{if .Alert.UpdateError}}
 <div class="card card-warning">
-  <h2>⚠️ Dependabot 更新エラー</h2>
+  <h2>Dependabot 更新エラー</h2>
   <div class="table-wrap">
     <table>
       <tbody>
@@ -51,9 +53,41 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>対応緊急度</h2>
+  <p class="text-muted">{{if .ResolvedAt}}{{if .Timeline.History}}最後に保存した解決前の評価を表示します。{{else}}保存履歴がないため、現在の入力による参考試算です。{{end}}{{else}}現在の入力による参考試算です。保存済みの評価・期限は下の履歴で確認できます。{{end}} {{if .Risk.ProfileID}}代表サービス: {{.Risk.ProfileID}}{{end}}</p>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th class="detail-th">評価</th><td><strong>{{.Risk.Lower}}〜{{.Risk.Upper}} / 100</strong> <span class="badge badge-{{.Risk.Priority}}">{{riskPriorityLabel .Risk.Priority}}</span></td></tr>
+        <tr><th class="detail-th">状態</th><td>{{riskStatusLabel .Risk.Status}}（信頼度: {{.Risk.Confidence}}）</td></tr>
+        {{if .Risk.MissingFacts}}<tr><th class="detail-th">要確認</th><td>{{joinStrings .Risk.MissingFacts "、"}}</td></tr>{{end}}
+        {{if .Risk.Reasons}}<tr><th class="detail-th">主な根拠</th><td>{{range .Risk.Reasons}}<div><code>{{.RuleID}}</code> {{.Text}}</div>{{end}}</td></tr>{{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<section class="card">
+  <h2>対応期限</h2>
+  <p class="text-muted">対応または不足情報の確認を開始するための期限です。日時はUTC。営業日計算で未登録の祝日は通常平日として扱います。</p>
+  <div class="table-wrap"><table><thead><tr><th>サービス</th><th>案件</th><th>開始</th><th>対応期限</th><th>状態</th></tr></thead><tbody>
+    {{range .Timeline.Deadlines}}<tr><td>{{.ProfileID}}</td><td>#{{.Episode}}</td><td>{{.OpenedAt.Format "2006-01-02 15:04"}}</td><td>{{.DueAt.Format "2006-01-02 15:04"}}<br>{{riskPriorityLabel .Priority}}</td><td>{{if .ClosedAt}}解決済み（{{.ClosedAt.Format "2006-01-02 15:04"}}）{{else if .DueAt.Before $.Now}}<span class="badge badge-error">期限超過</span>{{else}}対応中{{end}}</td></tr>{{else}}<tr><td colspan="5">保存済みの対応期限はありません。画面の参考試算だけでは期限を起算しません。</td></tr>{{end}}
+  </tbody></table></div>
+</section>
+
+<section class="card">
+  <h2>評価履歴（直近20件）</h2>
+  <p class="text-muted">保存時点の入力に基づく評価です。最新の状態とは区別してください。日時はUTC。</p>
+  <div class="table-wrap"><table><thead><tr><th>評価日時</th><th>サービス・環境</th><th>緊急度</th><th>根拠・不足情報</th><th>計算版</th></tr></thead><tbody>
+    {{range .Timeline.History}}<tr><td>{{.ComputedAt.Format "2006-01-02 15:04:05"}}</td><td>{{.ProfileID}}<br>{{.Input.Profile.Environment}}</td><td>{{.Result.Lower}}〜{{.Result.Upper}} / 100<br>{{riskPriorityLabel .Result.Priority}}・{{riskStatusLabel .Result.Status}}</td><td>{{if .Result.MissingFacts}}<p>要確認: {{joinStrings .Result.MissingFacts "、"}}</p>{{end}}{{range .Result.Reasons}}<p><code>{{.RuleID}}</code> {{.Text}}</p>{{end}}</td><td><code>{{.Result.ModelVersion}}</code></td></tr>{{else}}<tr><td colspan="5">保存済みの評価履歴はありません。</td></tr>{{end}}
+  </tbody></table></div>
+  {{if .Timeline.More}}<p class="text-muted">20件より前の履歴もDBに保持されています。この画面は直近20件のみ表示します。</p>{{end}}
+</section>
+
 {{if .Alert.Contributors}}
 <div class="card">
-  <h2>👥 コントリビューター</h2>
+  <h2>コントリビューター</h2>
   <div class="contributors-list">
     {{range .Alert.Contributors}}<span class="badge badge-info contributor-badge">{{.}}</span>
     {{end}}
@@ -97,20 +131,26 @@
 
 {{if .Evaluation}}
 <div class="card">
-  <h2>🤖 AI評価</h2>
+  <h2>AI評価</h2>
+  {{if eq (printf "%s" .EvalStatus) "evaluating"}}<p class="msg">再評価中です。以下は前回保存した評価です。</p>{{else if eq (printf "%s" .EvalStatus) "failed"}}<p class="msg msg-error">再評価に失敗しました。以下は前回保存した評価です。</p>{{else if eq (printf "%s" .EvalStatus) "pending"}}<p class="msg">再評価待ちです。以下は前回保存した評価です。</p>{{end}}
+  {{with .Evaluation.Provenance}}<p class="text-muted">評価先: {{.Provider}} / {{if .Model}}{{.Model}}{{else}}CLI既定モデル（再利用なし）{{end}} · {{.Mode}} · {{.PromptVersion}} · {{.EvaluatedAt.Format "2006-01-02 15:04:05 UTC"}}{{if .Reused}} · 同一入力の評価を再利用{{end}}</p>{{else}}<p class="text-muted">評価先・モデルの記録がない旧評価です。再評価時には再利用しません。</p>{{end}}
   <div class="table-wrap">
     <table>
       <tbody>
         <tr><th class="detail-th">推奨アクション</th><td><span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span></td></tr>
         <tr><th class="detail-th">侵害される内容</th><td class="pre-wrap">{{.Evaluation.Impact}}</td></tr>
         <tr><th class="detail-th">侵害される使い方</th><td class="pre-wrap">{{.Evaluation.Reasoning}}</td></tr>
+        <tr><th class="detail-th">AWSで危険になる利用条件<br>（実構成は未確認）</th><td class="pre-wrap">{{if .Evaluation.AWSRisk}}{{.Evaluation.AWSRisk}}{{else}}未評価（再評価すると確認できます）{{end}}</td></tr>
       </tbody>
     </table>
   </div>
+  {{if and .Monitored (ne (printf "%s" .EvalStatus) "evaluating")}}<form method="POST" action="/api/evaluate/{{.Alert.ID}}"><button type="submit" class="btn btn-primary">現在のモデルで再評価</button><p class="text-muted">保存済みの評価を再利用せず、新しく評価します。</p></form>{{end}}
 </div>
+{{else if .ResolvedAt}}
+<div class="card"><h2>AI評価</h2><p class="text-muted">保存済みの評価はありません。解決済みのため再評価は行いません。</p></div>
 {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
 <div class="card">
-  <h2>🤖 AI評価</h2>
+  <h2>AI評価</h2>
   <div class="msg">
     <span class="badge badge-pending eval-spinning">⏳ AI評価中...</span>
     <span class="text-muted eval-waiting-msg">完了するとトーストで通知されます</span>
@@ -118,36 +158,36 @@
 </div>
 {{else if eq (printf "%s" .EvalStatus) "failed"}}
 <div class="card">
-  <h2>🤖 AI評価</h2>
+  <h2>AI評価</h2>
   <div class="msg msg-error">
-    ❌ AI評価に失敗しました。
+    AI評価に失敗しました。
   </div>
-  <form method="POST" action="/api/evaluate/{{.Alert.ID}}">
-    <button type="submit" class="btn btn-primary">🔁 再評価</button>
-  </form>
+  {{if .Monitored}}<form method="POST" action="/api/evaluate/{{.Alert.ID}}">
+    <button type="submit" class="btn btn-primary">再評価</button>
+  </form>{{end}}
 </div>
 {{else}}
 <div class="card">
-  <h2>🤖 AI評価</h2>
+  <h2>AI評価</h2>
   <div class="msg">
     <span class="badge badge-pending">未評価</span>
   </div>
-  <form method="POST" action="/api/evaluate/{{.Alert.ID}}">
+  {{if .Monitored}}<form method="POST" action="/api/evaluate/{{.Alert.ID}}">
     <button type="submit" class="btn btn-primary">▶️ 評価開始</button>
-  </form>
+  </form>{{end}}
 </div>
 {{end}}
 
-{{if eq (printf "%s" .State) "pending"}}
+{{if and (not .ResolvedAt) (eq (printf "%s" .State) "pending")}}
 <div class="detail-actions">
   {{if not .DisableApproval}}
   {{if gt .Alert.PRNumber 0}}
   <form method="POST" action="/alerts/{{.Alert.ID}}/approve">
-    <button type="submit" class="btn btn-approve">✅ マージ承認</button>
+    <button type="submit" class="btn btn-approve">マージ承認</button>
   </form>
   {{end}}
   <form method="POST" action="/alerts/{{.Alert.ID}}/reject">
-    <button type="submit" class="btn btn-reject">❌ 却下</button>
+    <button type="submit" class="btn btn-reject">却下</button>
   </form>
   {{else}}
   <p class="text-muted">承認/却下機能は無効化されています</p>

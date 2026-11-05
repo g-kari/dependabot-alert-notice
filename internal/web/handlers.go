@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,12 +12,17 @@ import (
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/merger"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/policy"
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
+	"github.com/g-kari/dependabot-alert-notice/internal/store"
 )
 
 // dashboardPageSize はダッシュボード1ページあたりの表示グループ数
 const dashboardPageSize = 25
+
+var errEvaluationBusy = errors.New("このアラートは評価中です")
 
 // PaginationInfo はページネーション情報を保持する
 type PaginationInfo struct {
@@ -257,31 +263,14 @@ func filterBySearch(records []*model.AlertRecord, query string) []*model.AlertRe
 	return result
 }
 
-// filterByConfig はconfigの除外リストに基づいてAlertRecordをフィルタリングする。
-// excludeに設定されたリポジトリのアラートのみ除外し、それ以外は全て表示する。
+// filterByConfig は現在の監視設定に含まれる未解決レコードだけを返す。
 func filterByConfig(records []*model.AlertRecord, cfg *config.Config) []*model.AlertRecord {
-	// owner → targets のマップを構築
-	targetsByOwner := make(map[string][]config.Target)
-	for _, t := range cfg.Targets {
-		targetsByOwner[t.Owner] = append(targetsByOwner[t.Owner], t)
+	if cfg == nil {
+		return nil
 	}
-
 	var filtered []*model.AlertRecord
 	for _, r := range records {
-		targets, ok := targetsByOwner[r.Alert.Owner]
-		if !ok {
-			// ターゲット設定にないownerはそのまま表示
-			filtered = append(filtered, r)
-			continue
-		}
-		excluded := false
-		for _, t := range targets {
-			if t.IsExcluded(r.Alert.Repo) {
-				excluded = true
-				break
-			}
-		}
-		if !excluded {
+		if r != nil && r.ResolvedAt == nil && policy.IsMonitored(cfg.Targets, r.Alert.Owner, r.Alert.Repo) {
 			filtered = append(filtered, r)
 		}
 	}
@@ -289,9 +278,12 @@ func filterByConfig(records []*model.AlertRecord, cfg *config.Config) []*model.A
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	s.cfgMu.RLock()
-	cfg := s.cfg
-	s.cfgMu.RUnlock()
+	snapshot, err := s.ConfigurationSnapshot()
+	if err != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	cfg := &snapshot.Config
 
 	s.pollingMu.Lock()
 	polling := s.isPolling
@@ -348,7 +340,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		SearchQuery:     searchQuery,
 		IsPolling:       polling,
 		HasEvaluating:   hasEvaluating,
-		DisableApproval: s.cfg.DisableApproval,
+		DisableApproval: cfg.DisableApproval,
 		Pagination:      pagination,
 	})
 }
@@ -393,11 +385,24 @@ func (s *Server) handlePollRepo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "owner/repoが必要です", http.StatusBadRequest)
 		return
 	}
-	if s.jobQueue != nil {
-		s.jobQueue.Enqueue(queue.Job{
-			Type:    queue.JobFetchAlerts,
-			Payload: config.Target{Owner: owner, Repo: repo},
-		})
+	err := s.repositoryPolicy.WithAllowed(r.Context(), owner, repo, func(config.Snapshot) error {
+		if s.jobQueue != nil {
+			if !s.jobQueue.TryEnqueue(queue.Job{
+				Type:    queue.JobFetchAlerts,
+				Payload: config.Target{Owner: owner, Repo: repo},
+			}) {
+				return fmt.Errorf("取得キューが利用できません")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, policy.ErrNotMonitored) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
 	}
 	http.Redirect(w, r, "/?view=repo", http.StatusSeeOther)
 }
@@ -409,18 +414,24 @@ func (s *Server) handlePollTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "不正なインデックス", http.StatusBadRequest)
 		return
 	}
-	s.cfgMu.RLock()
-	targets := s.cfg.Targets
-	s.cfgMu.RUnlock()
+	snapshot, snapshotErr := s.ConfigurationSnapshot()
+	if snapshotErr != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	targets := snapshot.Config.Targets
 	if i < 0 || i >= len(targets) {
 		http.Error(w, "インデックスが範囲外です", http.StatusBadRequest)
 		return
 	}
 	if s.jobQueue != nil {
-		s.jobQueue.Enqueue(queue.Job{
+		if !s.jobQueue.TryEnqueue(queue.Job{
 			Type:    queue.JobFetchAlerts,
 			Payload: targets[i],
-		})
+		}) {
+			http.Error(w, "取得キューが利用できません", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
@@ -432,17 +443,45 @@ func (s *Server) handleEnqueueEvaluate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "不正なID", http.StatusBadRequest)
 		return
 	}
+	record, getErr := s.store.Get(id)
+	if getErr != nil {
+		http.Error(w, "アラートが見つかりません", http.StatusNotFound)
+		return
+	}
+	if !s.isMonitoredRecord(record) {
+		http.Error(w, "監視対象外リポジトリです", http.StatusConflict)
+		return
+	}
 
 	if s.jobQueue == nil {
 		http.Error(w, "JobQueueが設定されていません", http.StatusServiceUnavailable)
 		return
 	}
 
-	// 評価ジョブをキューに積む
-	s.jobQueue.Enqueue(queue.Job{
-		Type:    queue.JobEvaluateAlert,
-		Payload: id,
+	err = s.repositoryPolicy.WithAllowed(r.Context(), record.Alert.Owner, record.Alert.Repo, func(config.Snapshot) error {
+		claimed, err := s.store.ClaimEvaluation(r.Context(), id, true)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return errEvaluationBusy
+		}
+		if !s.jobQueue.TryEnqueue(queue.Job{Type: queue.JobEvaluateAlert, Payload: queue.EvaluationRequest{AlertID: id, Force: true}}) {
+			if err := s.store.UpdateEvalStatus(id, record.EvalStatus); err != nil {
+				return err
+			}
+			return fmt.Errorf("評価キューが利用できません")
+		}
+		return nil
 	})
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, policy.ErrNotMonitored) || errors.Is(err, errEvaluationBusy) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
 
 	if ref := r.Referer(); ref != "" {
 		http.Redirect(w, r, ref, http.StatusSeeOther)
@@ -464,14 +503,54 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	snapshot, snapshotErr := s.ConfigurationSnapshot()
+	if snapshotErr != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	cfg := snapshot.Config
+	timeline, err := s.store.LoadRiskTimeline(r.Context(), record.Alert.Owner+"/"+record.Alert.Repo, model.AdvisoryKey(record.Alert), 20)
+	if err != nil {
+		slog.Error("詳細の評価履歴取得失敗", "alertID", id, "error", err)
+		http.Error(w, "評価履歴取得失敗", http.StatusInternalServerError)
+		return
+	}
+	threats, err := s.store.ListThreatSnapshotsFor(r.Context(), []string{model.AdvisoryKey(record.Alert)})
+	if err != nil {
+		slog.Error("詳細の脅威情報取得失敗", "alertID", id, "error", err)
+		http.Error(w, "脅威情報取得失敗", http.StatusInternalServerError)
+		return
+	}
+	score := scoreAlertWithThreat(cfg.ServiceProfiles, cfg.Assessments, threats, record)
+	if record.ResolvedAt != nil && len(timeline.History) > 0 {
+		score = timeline.History[0].Result
+	}
 	s.render(w, "detail.html", struct {
 		*model.AlertRecord
 		DisableApproval bool
-	}{record, s.cfg.DisableApproval})
+		Monitored       bool
+		Risk            model.ScoreResult
+		Timeline        store.RiskTimeline
+		Now             time.Time
+	}{record, cfg.DisableApproval || !s.isMonitoredRecord(record), s.isMonitoredRecord(record), score, timeline, time.Now().UTC()})
+}
+
+func (s *Server) isMonitoredRecord(record *model.AlertRecord) bool {
+	if record == nil || record.ResolvedAt != nil {
+		return false
+	}
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return policy.IsMonitored(s.cfg.Targets, record.Alert.Owner, record.Alert.Repo)
 }
 
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DisableApproval {
+	snapshot, snapshotErr := s.ConfigurationSnapshot()
+	if snapshotErr != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	if snapshot.Config.DisableApproval {
 		http.Error(w, "承認機能は無効化されています", http.StatusForbidden)
 		return
 	}
@@ -481,10 +560,21 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "不正なID", http.StatusBadRequest)
 		return
 	}
+	if record, getErr := s.store.Get(id); getErr == nil && !s.isMonitoredRecord(record) {
+		http.Error(w, "監視対象外リポジトリです", http.StatusConflict)
+		return
+	}
 
 	if err := s.merger.Approve(r.Context(), id); err != nil {
 		slog.Error("マージ承認失敗", "alertID", id, "error", err)
-		http.Error(w, "マージ失敗: "+err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, policy.ErrNotMonitored) {
+			status = http.StatusConflict
+		}
+		if errors.Is(err, merger.ErrApprovalDisabled) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, "マージ失敗: "+err.Error(), status)
 		return
 	}
 
@@ -492,7 +582,12 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DisableApproval {
+	snapshot, snapshotErr := s.ConfigurationSnapshot()
+	if snapshotErr != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	if snapshot.Config.DisableApproval {
 		http.Error(w, "却下機能は無効化されています", http.StatusForbidden)
 		return
 	}
@@ -502,10 +597,21 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "不正なID", http.StatusBadRequest)
 		return
 	}
+	if record, getErr := s.store.Get(id); getErr == nil && !s.isMonitoredRecord(record) {
+		http.Error(w, "監視対象外リポジトリです", http.StatusConflict)
+		return
+	}
 
 	if err := s.merger.Reject(id); err != nil {
 		slog.Error("却下失敗", "alertID", id, "error", err)
-		http.Error(w, "却下失敗: "+err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, policy.ErrNotMonitored) {
+			status = http.StatusConflict
+		}
+		if errors.Is(err, merger.ErrApprovalDisabled) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, "却下失敗: "+err.Error(), status)
 		return
 	}
 
@@ -535,12 +641,45 @@ type settingsData struct {
 	EnvAppToken       bool   // SLACK_APP_TOKEN が環境変数で設定されているか
 	EnvDiscordWebhook bool   // DISCORD_WEBHOOK_URL が環境変数で設定されているか
 	AllowedUserIDsStr string // Config.Slack.AllowedUserIDs のカンマ区切り文字列（テンプレート表示用）
+	Repositories      []repositoryStatus
+	Revision          uint64
+	CSRFToken         string
+}
+
+type repositoryStatus struct {
+	Owner, Repo string
+	Configured  bool
+	Excluded    bool
+	AlertCount  int
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	s.cfgMu.RLock()
-	cfg := s.cfg
-	s.cfgMu.RUnlock()
+	snapshot, snapshotErr := s.ConfigurationSnapshot()
+	if snapshotErr != nil {
+		http.Error(w, "設定読み込み失敗", http.StatusInternalServerError)
+		return
+	}
+	cfg := &snapshot.Config
+	summaries, err := s.store.QueryRepositories(r.Context())
+	if err != nil {
+		slog.Error("設定画面リポジトリ集計失敗", "error", err)
+		http.Error(w, "リポジトリ一覧取得失敗", http.StatusInternalServerError)
+		return
+	}
+	repos := make([]repositoryStatus, 0, len(summaries))
+	for _, summary := range summaries {
+		v := repositoryStatus{Owner: summary.Owner, Repo: summary.Repo, AlertCount: summary.AlertCount}
+		for _, target := range cfg.Targets {
+			if policy.Matches(target, v.Owner, v.Repo) {
+				v.Configured = true
+				if target.IsExcluded(v.Repo) {
+					v.Excluded = true
+				}
+			}
+		}
+		repos = append(repos, v)
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i].Owner+"/"+repos[i].Repo < repos[j].Owner+"/"+repos[j].Repo })
 
 	s.render(w, "settings.html", settingsData{
 		Config:            cfg,
@@ -548,7 +687,126 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		EnvAppToken:       os.Getenv("SLACK_APP_TOKEN") != "",
 		EnvDiscordWebhook: os.Getenv("DISCORD_WEBHOOK_URL") != "",
 		AllowedUserIDsStr: strings.Join(cfg.Slack.AllowedUserIDs, ","),
+		Repositories:      repos,
+		Revision:          cfg.ConfigRevision,
+		CSRFToken:         issueCSRF(w, r),
 	})
+}
+
+func (s *Server) updateRepositoryExclude(w http.ResponseWriter, r *http.Request, exclude bool) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "フォームパース失敗", http.StatusBadRequest)
+		return
+	}
+	owner, repo := strings.TrimSpace(r.FormValue("owner")), strings.TrimSpace(r.FormValue("repo"))
+	if owner == "" || repo == "" {
+		http.Error(w, "owner/repoが必要です", http.StatusBadRequest)
+		return
+	}
+	unlock, lockErr := s.repositoryPolicy.LockUpdate(r.Context())
+	if lockErr != nil {
+		http.Error(w, "設定変更の待機を中止しました", http.StatusRequestTimeout)
+		return
+	}
+	defer unlock()
+	s.cfgMu.RLock()
+	currentRevision := s.cfg.ConfigRevision
+	baseCfg := *s.cfg
+	s.cfgMu.RUnlock()
+	if raw := strings.TrimSpace(r.FormValue("revision")); raw != "" {
+		if revision, err := strconv.ParseUint(raw, 10, 64); err != nil {
+			http.Error(w, "revisionが不正です", http.StatusBadRequest)
+			return
+		} else if revision != currentRevision {
+			http.Error(w, "設定が更新されています", http.StatusConflict)
+			return
+		}
+	}
+	knownRepo := false
+	for _, target := range baseCfg.Targets {
+		if !strings.EqualFold(target.Owner, owner) {
+			continue
+		}
+		if target.Repo == "" || strings.EqualFold(target.Repo, repo) {
+			knownRepo = true
+			break
+		}
+	}
+	if !knownRepo {
+		for _, existing := range s.store.ListReposByOwner(owner) {
+			if strings.EqualFold(existing, repo) {
+				knownRepo = true
+				break
+			}
+		}
+	}
+	if !knownRepo {
+		http.Error(w, "監視対象として取得済みのリポジトリではありません", http.StatusNotFound)
+		return
+	}
+	s.cfgMu.Lock()
+	if s.cfg.ConfigRevision != currentRevision {
+		s.cfgMu.Unlock()
+		http.Error(w, "設定が更新されています", http.StatusConflict)
+		return
+	}
+	next := *s.cfg
+	next.Targets = append([]config.Target(nil), s.cfg.Targets...)
+	for i := range next.Targets {
+		next.Targets[i].Excludes = append([]string(nil), next.Targets[i].Excludes...)
+	}
+	found := false
+	for i := range next.Targets {
+		if !policy.Matches(next.Targets[i], owner, repo) {
+			continue
+		}
+		found = true
+		ex := next.Targets[i].Excludes
+		if exclude {
+			exists := false
+			for _, v := range ex {
+				if strings.EqualFold(v, repo) {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				next.Targets[i].Excludes = append(ex, repo)
+			}
+		} else {
+			kept := ex[:0]
+			for _, v := range ex {
+				if !strings.EqualFold(v, repo) {
+					kept = append(kept, v)
+				}
+			}
+			next.Targets[i].Excludes = kept
+		}
+	}
+	if !found {
+		s.cfgMu.Unlock()
+		http.Error(w, "対象ownerの監視設定がありません", http.StatusUnprocessableEntity)
+		return
+	}
+	next.ConfigRevision = currentRevision + 1
+	if s.cfgPath != "" {
+		if err := config.Save(s.cfgPath, &next); err != nil {
+			s.cfgMu.Unlock()
+			http.Error(w, "設定保存失敗", http.StatusInternalServerError)
+			return
+		}
+	}
+	*s.cfg = next
+	s.notifyRiskConfigChanged()
+	s.cfgMu.Unlock()
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+func (s *Server) handleRepositoryExclude(w http.ResponseWriter, r *http.Request) {
+	s.updateRepositoryExclude(w, r, true)
+}
+func (s *Server) handleRepositoryInclude(w http.ResponseWriter, r *http.Request) {
+	s.updateRepositoryExclude(w, r, false)
 }
 
 func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
@@ -557,8 +815,27 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	unlock, lockErr := s.repositoryPolicy.LockUpdate(r.Context())
+	if lockErr != nil {
+		http.Error(w, "設定変更の待機を中止しました", http.StatusRequestTimeout)
+		return
+	}
+	defer unlock()
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
+	original, cloneErr := config.Clone(*s.cfg)
+	if cloneErr != nil {
+		http.Error(w, "設定の読み込みに失敗しました", http.StatusInternalServerError)
+		return
+	}
+	if raw := r.FormValue("notification_interval"); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil || interval < 0 {
+			http.Error(w, "通知をまとめる間隔は0以上の時間で指定してください", http.StatusBadRequest)
+			return
+		}
+		s.cfg.NotificationInterval = interval
+	}
 
 	// poll_interval
 	if v := r.FormValue("poll_interval"); v != "" {
@@ -575,6 +852,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	// claude_path / gh_path
 	if v := r.FormValue("claude_path"); v != "" {
 		s.cfg.ClaudePath = v
+	}
+	if v := r.FormValue("codex_path"); v != "" {
+		s.cfg.CodexPath = v
 	}
 	if v := r.FormValue("gh_path"); v != "" {
 		s.cfg.GhPath = v
@@ -635,6 +915,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	// AI自動評価ON/OFF
 	s.cfg.Evaluator.AutoEval = r.FormValue("auto_eval") == "true"
+	if v := r.FormValue("eval_provider"); v != "" {
+		s.cfg.Evaluator.Provider = v
+	}
+	s.cfg.Evaluator.CodexModel = strings.TrimSpace(r.FormValue("eval_codex_model"))
+	s.cfg.Evaluator.ClaudeModel = strings.TrimSpace(r.FormValue("eval_claude_model"))
 
 	// AI評価最低重要度
 	if v := r.FormValue("eval_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
@@ -643,8 +928,14 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	// evaluator sandbox
 	s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
+	if v := r.FormValue("sandbox_runtime"); v != "" {
+		s.cfg.Evaluator.Sandbox.Runtime = v
+	}
 	if v := r.FormValue("sandbox_image"); v != "" {
 		s.cfg.Evaluator.Sandbox.Image = v
+	}
+	if v := r.FormValue("sandbox_codex_image"); v != "" {
+		s.cfg.Evaluator.Sandbox.CodexImage = v
 	}
 	if v := r.FormValue("sandbox_memory"); v != "" {
 		s.cfg.Evaluator.Sandbox.MemoryLimit = v
@@ -658,9 +949,16 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := s.cfg.Validate(); err != nil {
+		*s.cfg = original
+		http.Error(w, "設定が不正です: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	// 保存
+	s.cfg.ConfigRevision++
 	if s.cfgPath != "" {
 		if err := config.Save(s.cfgPath, s.cfg); err != nil {
+			*s.cfg = original
 			slog.Error("設定保存失敗", "error", err)
 			s.render(w, "settings.html", settingsData{
 				Config: s.cfg,
@@ -669,6 +967,10 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.onEvaluatorConfigChanged != nil {
+		s.onEvaluatorConfigChanged(*s.cfg)
+	}
+	s.notifyRiskConfigChanged()
 
 	slog.Info("設定を保存しました")
 	s.store.AddLog(model.LogEntry{
@@ -693,15 +995,8 @@ func (s *Server) handleTargetAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cfgMu.Lock()
-	s.cfg.Targets = append(s.cfg.Targets, config.Target{Owner: owner, Repo: repo})
-	cfg := s.cfg
-	s.cfgMu.Unlock()
-
-	if s.cfgPath != "" {
-		if err := config.Save(s.cfgPath, cfg); err != nil {
-			slog.Error("設定保存失敗", "error", err)
-		}
+	if !s.updateMonitoringSettings(r.Context(), w, func(cfg *config.Config) { cfg.Targets = append(cfg.Targets, config.Target{Owner: owner, Repo: repo}) }) {
+		return
 	}
 
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
@@ -714,17 +1009,12 @@ func (s *Server) handleTargetDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cfgMu.Lock()
-	if idx >= 0 && idx < len(s.cfg.Targets) {
-		s.cfg.Targets = append(s.cfg.Targets[:idx], s.cfg.Targets[idx+1:]...)
-	}
-	cfg := s.cfg
-	s.cfgMu.Unlock()
-
-	if s.cfgPath != "" {
-		if err := config.Save(s.cfgPath, cfg); err != nil {
-			slog.Error("設定保存失敗", "error", err)
+	if !s.updateMonitoringSettings(r.Context(), w, func(cfg *config.Config) {
+		if idx >= 0 && idx < len(cfg.Targets) {
+			cfg.Targets = append(cfg.Targets[:idx], cfg.Targets[idx+1:]...)
 		}
+	}) {
+		return
 	}
 
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
@@ -746,28 +1036,23 @@ func (s *Server) handleExcludeAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cfgMu.Lock()
-	if idx >= 0 && idx < len(s.cfg.Targets) {
-		t := &s.cfg.Targets[idx]
-		// 重複チェック
-		exists := false
-		for _, ex := range t.Excludes {
-			if ex == repo {
-				exists = true
-				break
+	if !s.updateMonitoringSettings(r.Context(), w, func(cfg *config.Config) {
+		if idx >= 0 && idx < len(cfg.Targets) {
+			t := &cfg.Targets[idx]
+			// 重複チェック
+			exists := false
+			for _, ex := range t.Excludes {
+				if strings.EqualFold(ex, repo) {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				t.Excludes = append(t.Excludes, repo)
 			}
 		}
-		if !exists {
-			t.Excludes = append(t.Excludes, repo)
-		}
-	}
-	cfg := s.cfg
-	s.cfgMu.Unlock()
-
-	if s.cfgPath != "" {
-		if err := config.Save(s.cfgPath, cfg); err != nil {
-			slog.Error("設定保存失敗", "error", err)
-		}
+	}) {
+		return
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
@@ -784,20 +1069,15 @@ func (s *Server) handleExcludeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.cfgMu.Lock()
-	if i >= 0 && i < len(s.cfg.Targets) {
-		t := &s.cfg.Targets[i]
-		if j >= 0 && j < len(t.Excludes) {
-			t.Excludes = append(t.Excludes[:j], t.Excludes[j+1:]...)
+	if !s.updateMonitoringSettings(r.Context(), w, func(cfg *config.Config) {
+		if i >= 0 && i < len(cfg.Targets) {
+			t := &cfg.Targets[i]
+			if j >= 0 && j < len(t.Excludes) {
+				t.Excludes = append(t.Excludes[:j], t.Excludes[j+1:]...)
+			}
 		}
-	}
-	cfg := s.cfg
-	s.cfgMu.Unlock()
-
-	if s.cfgPath != "" {
-		if err := config.Save(s.cfgPath, cfg); err != nil {
-			slog.Error("設定保存失敗", "error", err)
-		}
+	}) {
+		return
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }

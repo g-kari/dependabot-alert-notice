@@ -11,7 +11,17 @@ import (
 )
 
 func (c *SlackClient) handleEvents(ctx context.Context) {
-	for evt := range c.socket.Events {
+	for {
+		var evt socketmode.Event
+		select {
+		case <-ctx.Done():
+			return
+		case next, ok := <-c.socket.Events:
+			if !ok {
+				return
+			}
+			evt = next
+		}
 		switch evt.Type {
 		case socketmode.EventTypeInteractive:
 			callback, ok := evt.Data.(slackgo.InteractionCallback)
@@ -52,6 +62,10 @@ func (c *SlackClient) isAllowedUser(userID string) bool {
 }
 
 func (c *SlackClient) handleApprove(ctx context.Context, action *slackgo.BlockAction, callback *slackgo.InteractionCallback) {
+	if c.approvalDisabled() {
+		c.postReply(callback.Channel.ID, callback.Message.Timestamp, "🚫 承認・却下は無効です")
+		return
+	}
 	if !c.isAllowedUser(callback.User.ID) {
 		slog.Warn("承認権限なし", "userID", callback.User.ID, "userName", callback.User.Name)
 		c.postReply(callback.Channel.ID, callback.Message.Timestamp,
@@ -79,6 +93,10 @@ func (c *SlackClient) handleApprove(ctx context.Context, action *slackgo.BlockAc
 }
 
 func (c *SlackClient) handleReject(action *slackgo.BlockAction, callback *slackgo.InteractionCallback) {
+	if c.approvalDisabled() {
+		c.postReply(callback.Channel.ID, callback.Message.Timestamp, "🚫 承認・却下は無効です")
+		return
+	}
 	if !c.isAllowedUser(callback.User.ID) {
 		slog.Warn("却下権限なし", "userID", callback.User.ID, "userName", callback.User.Name)
 		c.postReply(callback.Channel.ID, callback.Message.Timestamp,
@@ -96,6 +114,7 @@ func (c *SlackClient) handleReject(action *slackgo.BlockAction, callback *slackg
 
 	if err := c.merger.Reject(alertID); err != nil {
 		slog.Error("却下失敗", "alertID", alertID, "error", err)
+		c.postReply(callback.Channel.ID, callback.Message.Timestamp, fmt.Sprintf("❌ 却下失敗: %v", err))
 		return
 	}
 

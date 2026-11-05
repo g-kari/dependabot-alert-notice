@@ -1,5 +1,16 @@
 bin/
+dist/
+mac-artifacts/
 tmp/
 config.yaml
 tunnel.yml
 store.db
+store.db-journal
+store.db-wal
+store.db-shm
+coverage.out
+*.test
+
+*.credentials.json
+*.credentials.json.lock/
+.credentials-*.tmp

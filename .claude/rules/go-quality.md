@@ -5,6 +5,8 @@ paths:
 
 # Go コーディング規約
 
+> 互換メモ: Codex を含む共通ルールの正本は `internal/AGENTS.md`。このファイルは Claude Code の既存設定との互換用。
+
 ## 静的解析
 
 - `go vet ./...` を編集後に必ず実行

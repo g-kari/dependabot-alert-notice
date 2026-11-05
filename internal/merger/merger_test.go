@@ -33,7 +33,7 @@ func (m *mockGHClient) FindDependabotPR(ctx context.Context, owner, repo, pkgNam
 func setupMerger(t *testing.T, ghClient *mockGHClient, ghPath string) (*Merger, *store.Store) {
 	t.Helper()
 	s := store.New()
-	cfg := &config.Config{GhPath: ghPath}
+	cfg := &config.Config{GhPath: ghPath, Targets: []config.Target{{Owner: "org"}}}
 	return New(cfg, s, ghClient), s
 }
 

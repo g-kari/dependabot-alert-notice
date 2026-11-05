@@ -1,0 +1,36 @@
+# 初回起動用。Start.command がユーザーの Application Support に一度だけコピーします。
+# 本体のGo環境・GitHub/AI認証・Dockerは、RSS閲覧だけなら不要です。
+poll_interval: 30m
+notification_interval: 1h
+targets: []
+gh_path: gh
+claude_path: claude
+codex_path: codex
+log_level: info
+data_path: store.db
+web:
+  host: 127.0.0.1
+  port: 8999
+disable_approval: true
+evaluator:
+  provider: codex
+  auto_eval: false
+  sandbox:
+    enabled: true
+    runtime: auto # auto / apple / docker / podman。autoはApple SiliconでApple container、その他でDocker
+    container_path: container
+    container_cpus: 1
+    apple_claude_image: security-notice-apple-claude:latest
+    apple_codex_image: security-notice-apple-codex:latest
+    image: dependabot-evaluator:latest
+    codex_image: dependabot-codex-evaluator:latest
+    memory_limit: 512m
+    cpu_limit: "0.5"
+    timeout: 60s
+rss:
+  enabled: true
+# feeds は本体の既定フィードを使用します。設定画面で追加・停止できます。
+service_profiles: []
+assessments: []
+threat:
+  enabled: false

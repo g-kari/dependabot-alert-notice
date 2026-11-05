@@ -34,6 +34,34 @@ type Client interface {
 	FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error)
 }
 
+// FetchResult carries completeness information so callers never infer
+// resolution from a filtered or partial response.
+type FetchResult struct {
+	Alerts        []model.Alert
+	CompleteRepos []string
+	SkippedRepos  []string
+}
+
+// ResultClient is an optional richer fetch contract kept separate from the
+// legacy Client interface for compatibility with existing fakes.
+type ResultClient interface {
+	FetchAlertsResult(context.Context, config.Target) (FetchResult, error)
+}
+
+// ConfigClient binds one detached configuration generation to an operation.
+type ConfigClient interface {
+	WithConfig(config.Config) (Client, error)
+}
+
+// WithConfig returns a client bound to the supplied frozen configuration.
+func (c *ghClient) WithConfig(cfg config.Config) (Client, error) {
+	clone, err := config.Clone(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub取得設定複製失敗: %w", err)
+	}
+	return New(&clone), nil
+}
+
 type ghClient struct {
 	cfg *config.Config // 設定への参照（動的変更をリアルタイムに反映するためポインタ保持）
 }
@@ -368,6 +396,20 @@ func (c *ghClient) FetchAlerts(ctx context.Context, target config.Target) ([]mod
 		return c.fetchUserRepoAlerts(ctx, target.Owner, target.Excludes)
 	}
 	return alerts, nil
+}
+
+// FetchAlertsResult adapts the legacy fetcher to the completeness-aware
+// contract. A successful unfiltered response is complete; failures return no
+// completeness claim and therefore cannot resolve stored records.
+func (c *ghClient) FetchAlertsResult(ctx context.Context, target config.Target) (FetchResult, error) {
+	alerts, err := c.FetchAlerts(ctx, target)
+	if err != nil {
+		return FetchResult{}, err
+	}
+	if target.Repo != "" {
+		return FetchResult{Alerts: alerts, CompleteRepos: []string{target.Owner + "/" + target.Repo}}, nil
+	}
+	return FetchResult{Alerts: alerts}, nil
 }
 
 // alertNumberMarker は gh api --paginate の出力から取得件数を数えるためのマーカー
