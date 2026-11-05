@@ -54,15 +54,21 @@ type Asset struct {
 // Finding holds an asset-specific security issue. CanonicalKey is a correlation
 // hint only; source-native identity must not be replaced by advisory grouping.
 type Finding struct {
-	ID           string       `json:"id"`
-	Category     string       `json:"category"`
-	AssetID      string       `json:"asset_id"`
-	CanonicalKey string       `json:"canonical_key"`
-	Severity     Severity     `json:"severity"`
-	TriageStatus TriageStatus `json:"triage_status"`
-	SourceStatus SourceStatus `json:"source_status"`
-	FirstSeen    time.Time    `json:"first_seen"`
-	LastSeen     time.Time    `json:"last_seen"`
+	Title            string       `json:"title,omitempty"`
+	VulnerabilityID  string       `json:"vulnerability_id,omitempty"`
+	PackageName      string       `json:"package_name,omitempty"`
+	PackageEcosystem string       `json:"package_ecosystem,omitempty"`
+	InstalledVersion string       `json:"installed_version,omitempty"`
+	FixedVersion     string       `json:"fixed_version,omitempty"`
+	ID               string       `json:"id"`
+	Category         string       `json:"category"`
+	AssetID          string       `json:"asset_id"`
+	CanonicalKey     string       `json:"canonical_key"`
+	Severity         Severity     `json:"severity"`
+	TriageStatus     TriageStatus `json:"triage_status"`
+	SourceStatus     SourceStatus `json:"source_status"`
+	FirstSeen        time.Time    `json:"first_seen"`
+	LastSeen         time.Time    `json:"last_seen"`
 }
 
 // Observation preserves a source-native finding's evidence in an ingestion run.
@@ -103,4 +109,12 @@ type IngestRun struct {
 	Coverage   string     `json:"coverage"`
 	Cursor     string     `json:"cursor"`
 	Error      string     `json:"error"`
+}
+
+// SecurityFinding carries one normalized finding together with its source
+// observation and affected asset. It contains no source report or credentials.
+type SecurityFinding struct {
+	Asset       Asset       `json:"asset"`
+	Finding     Finding     `json:"finding"`
+	Observation Observation `json:"observation"`
 }

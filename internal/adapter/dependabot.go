@@ -67,6 +67,11 @@ func NormalizeDependabot(record model.AlertRecord, runID string, observedAt time
 		firstSeen = observedAt
 	}
 
+	vulnerabilityID := strings.ToUpper(strings.TrimSpace(record.Alert.CVEID))
+	if vulnerabilityID == "" {
+		vulnerabilityID = strings.ToUpper(strings.TrimSpace(record.Alert.GHSAID))
+	}
+
 	return DependabotFinding{
 		Asset: model.Asset{
 			ID: assetID, Type: "repository", Provider: "github", Account: owner, NativeID: nativeAssetID,
@@ -76,6 +81,8 @@ func NormalizeDependabot(record model.AlertRecord, runID string, observedAt time
 			CanonicalKey: canonicalKey, Severity: record.Alert.Severity,
 			TriageStatus: model.TriageStatusNew, SourceStatus: sourceStatus,
 			FirstSeen: firstSeen, LastSeen: observedAt,
+			Title: record.Alert.Summary, VulnerabilityID: vulnerabilityID,
+			PackageName: record.Alert.PackageName, PackageEcosystem: record.Alert.PackageEcosystem, FixedVersion: record.Alert.FixedIn,
 		},
 		Observation: model.Observation{
 			ID:     stableSecurityID("observation", findingID, runID, fingerprint),

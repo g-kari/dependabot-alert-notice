@@ -60,3 +60,25 @@ func TestSecurityModelsPreserveFieldContracts(t *testing.T) {
 		})
 	}
 }
+
+func TestSecurityFindingMetadataRoundTrip(t *testing.T) {
+	bundle := SecurityFinding{Finding: Finding{ID: "finding", Title: "Example vulnerability", VulnerabilityID: "CVE-2026-1234", PackageName: "example", PackageEcosystem: "npm", InstalledVersion: "1.0.0", FixedVersion: "1.1.0"}}
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored SecurityFinding
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Finding != bundle.Finding {
+		t.Fatalf("metadata roundtrip=%+v", restored.Finding)
+	}
+	var legacy Finding
+	if err := json.Unmarshal([]byte(`{"id":"legacy","category":"vulnerability"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ID != "legacy" || legacy.VulnerabilityID != "" {
+		t.Fatal("old findings no longer decode")
+	}
+}
