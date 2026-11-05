@@ -41,6 +41,7 @@ func saveRecord(s *store.Store, id int, pkg, owner, repo string) {
 	s.Save(&model.AlertRecord{
 		Alert: model.Alert{
 			ID:          id,
+			Number:      id, // Source-native identity is required by the security adapter.
 			PackageName: pkg,
 			Owner:       owner,
 			Repo:        repo,
