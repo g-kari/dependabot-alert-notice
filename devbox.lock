@@ -1,51 +1,41 @@
 {
   "lockfile_version": "1",
   "packages": {
-    "air@latest": {
-      "last_modified": "2026-04-06T08:39:25Z",
-      "resolved": "github:NixOS/nixpkgs/83e29f2b8791f6dec20804382fcd9a666d744c07#air",
+    "air@1.67.4": {
+      "last_modified": "2026-11-03T19:55:20Z",
+      "resolved": "github:NixOS/nixpkgs/9d3b8db48266c17be0b5f9c6360c3ecfbac3d1f5#air",
       "source": "devbox-search",
-      "version": "1.65.0",
+      "version": "1.67.4",
       "systems": {
         "aarch64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/632bb7zdv53x436iys8ax4hh6rlb60s3-air-1.65.0",
+              "path": "/nix/store/gbmfsywigcz63xndsagvv716anx2zabb-air-1.67.4",
               "default": true
             }
           ],
-          "store_path": "/nix/store/632bb7zdv53x436iys8ax4hh6rlb60s3-air-1.65.0"
+          "store_path": "/nix/store/gbmfsywigcz63xndsagvv716anx2zabb-air-1.67.4"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/hc3yxyrmgl04jv5gik56pyiavfg04w60-air-1.65.0",
+              "path": "/nix/store/dxayndvi8iqn9gx5a99pfp5ywy3p54xx-air-1.67.4",
               "default": true
             }
           ],
-          "store_path": "/nix/store/hc3yxyrmgl04jv5gik56pyiavfg04w60-air-1.65.0"
-        },
-        "x86_64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/cxx8pyribc0bmy79px2r5ylr82qk0dxl-air-1.65.0",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/cxx8pyribc0bmy79px2r5ylr82qk0dxl-air-1.65.0"
+          "store_path": "/nix/store/dxayndvi8iqn9gx5a99pfp5ywy3p54xx-air-1.67.4"
         },
         "x86_64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/hhj7waynkpjz8bc88jscqi6w8kwklxbg-air-1.65.0",
+              "path": "/nix/store/vzk3wfankvq3wcf5g3iml30z1lma1yka-air-1.67.4",
               "default": true
             }
           ],
-          "store_path": "/nix/store/hhj7waynkpjz8bc88jscqi6w8kwklxbg-air-1.65.0"
+          "store_path": "/nix/store/vzk3wfankvq3wcf5g3iml30z1lma1yka-air-1.67.4"
         }
       }
     },
