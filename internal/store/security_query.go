@@ -193,7 +193,7 @@ func findingQuerySQL(query FindingQuery) (string, []any) {
 		var searches []string
 		for _, field := range []string{
 			`f.canonical_key`, `a.native_id`, `f.id`,
-			`json_extract(f.body_json,'$.title')`, `json_extract(f.body_json,'$.rule_id')`, `json_extract(f.body_json,'$.tool_name')`, `json_extract(f.body_json,'$.file_path')`, `json_extract(f.body_json,'$.vulnerability_id')`,
+			`json_extract(f.body_json,'$.title')`, `json_extract(f.body_json,'$.secret_type')`, `json_extract(f.body_json,'$.secret_resolution')`, `json_extract(f.body_json,'$.rule_id')`, `json_extract(f.body_json,'$.tool_name')`, `json_extract(f.body_json,'$.file_path')`, `json_extract(f.body_json,'$.vulnerability_id')`,
 			`json_extract(f.body_json,'$.package_name')`, `json_extract(f.body_json,'$.package_ecosystem')`,
 			`json_extract(f.body_json,'$.installed_version')`, `json_extract(f.body_json,'$.fixed_version')`,
 		} {
