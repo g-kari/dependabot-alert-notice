@@ -82,3 +82,31 @@ func TestSecurityFindingMetadataRoundTrip(t *testing.T) {
 		t.Fatal("old findings no longer decode")
 	}
 }
+
+func TestCodeScanningFindingMetadataRoundTripPreservesLegacyShape(t *testing.T) {
+	original := Finding{ID: "code-finding", RuleID: "go/example", ToolName: "CodeQL", FilePath: "src/example.go", StartLine: 12}
+	body, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Finding
+	if err := json.Unmarshal(body, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored != original {
+		t.Fatalf("metadata roundtrip=%+v", restored)
+	}
+	legacy, err := json.Marshal(Finding{ID: "legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(legacy, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"rule_id", "tool_name", "file_path", "start_line"} {
+		if _, ok := fields[field]; ok {
+			t.Fatalf("empty metadata changed legacy JSON shape: %s", legacy)
+		}
+	}
+}

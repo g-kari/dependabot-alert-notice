@@ -4,7 +4,7 @@ GitHub Dependabotアラートと脆弱性RSSを収集し、対応緊急度評価
 
 普段の確認にはWeb UI/TUIを使います。Slack/Discordは既定で1時間ごとのリポジトリ別サマリーとし、件数とAI評価状況だけを知らせます。アラートの詳細やAI評価の全文は画面で確認してください。
 
-共通セキュリティ基盤は [Phase 0](docs/security-phase0.md)、Trivy JSONのoffline取込と読み取り専用Findings APIは [Phase 1の最初の実装](docs/security-phase1.md) を参照してください。既存Dependabotの承認・評価・通知フローは維持します。
+共通セキュリティ基盤は [Phase 0](docs/security-phase0.md)、Trivy JSONのoffline取込と読み取り専用Findings APIは [Phase 1の最初の実装](docs/security-phase1.md) を参照してください。GitHub Code Scanning JSONのoffline取込は [Phase 1の次の実装](docs/security-code-scanning.md) を参照してください。既存Dependabotの承認・評価・通知フローは維持します。
 
 ## Macでセットアップ・常駐運用（ビルド済み配布）
 

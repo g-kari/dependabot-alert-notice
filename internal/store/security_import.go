@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/g-kari/dependabot-alert-notice/internal/adapter"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
@@ -35,7 +37,7 @@ func ValidateSecurityImport(run model.IngestRun, items []model.SecurityFinding) 
 	return err
 }
 
-// ImportSecurityFindings atomically imports a bounded, offline Trivy report.
+// ImportSecurityFindings atomically imports a bounded, offline security report.
 // Cursor must be sha256:<original input digest>. A versioned receipt binds that
 // digest, normalized entities and timestamps; reused IDs cannot silently replace
 // evidence. Imports are partial coverage and never close absent findings or
@@ -85,8 +87,14 @@ func (s *Store) ImportSecurityFindings(ctx context.Context, run model.IngestRun,
 }
 
 func validateSecurityImport(run model.IngestRun, items []model.SecurityFinding) ([]model.SecurityFinding, string, error) {
-	if !securityUUID(run.ID) || run.Connector != "trivy" || !securityField(run.Scope, true, 256) || strings.TrimSpace(run.Scope) != run.Scope || !securityTime(run.StartedAt) || run.FinishedAt == nil || !securityTime(*run.FinishedAt) || run.FinishedAt.Before(run.StartedAt) || run.Result != model.IngestResultSuccess || run.Coverage != model.IngestCoveragePartial || run.Error != "" || !strings.HasPrefix(run.Cursor, "sha256:") || !securityDigest(strings.TrimPrefix(run.Cursor, "sha256:")) {
+	if !securityUUID(run.ID) || (run.Connector != "trivy" && run.Connector != "github_code_scanning") || !securityField(run.Scope, true, 256) || strings.TrimSpace(run.Scope) != run.Scope || !securityTime(run.StartedAt) || run.FinishedAt == nil || !securityTime(*run.FinishedAt) || run.FinishedAt.Before(run.StartedAt) || run.Result != model.IngestResultSuccess || run.Coverage != model.IngestCoveragePartial || run.Error != "" || !strings.HasPrefix(run.Cursor, "sha256:") || !securityDigest(strings.TrimPrefix(run.Cursor, "sha256:")) {
 		return nil, "", errors.New("invalid offline run metadata")
+	}
+	if run.Connector == "github_code_scanning" {
+		repository, err := adapter.CodeScanningRepository(run.Scope)
+		if err != nil || repository != run.Scope {
+			return nil, "", errors.New("invalid offline repository scope")
+		}
 	}
 	if len(items) > 20000 {
 		return nil, "", errors.New("import item limit exceeded")
@@ -95,18 +103,18 @@ func validateSecurityImport(run model.IngestRun, items []model.SecurityFinding) 
 	encoded := make(map[string]string, len(items))
 	for _, item := range items {
 		a, f, o := item.Asset, item.Finding, item.Observation
-		if !securityUUID(a.ID) || !securityUUID(f.ID) || !securityUUID(o.ID) || a.Provider != "trivy" || (a.Type != "filesystem" && a.Type != "container_image") || a.Account != run.Scope || !securityField(a.NativeID, true, 4096) || f.AssetID != a.ID || f.Category != "vulnerability" || o.Source != "trivy" || o.Account != run.Scope || o.FindingID != f.ID || o.IngestRunID != run.ID || !securityField(o.SourceFindingID, true, 4096) || !securityDigest(o.Fingerprint) || !o.ObservedAt.Equal(run.StartedAt) || !f.LastSeen.Equal(o.ObservedAt) || !f.FirstSeen.Equal(o.ObservedAt) || f.TriageStatus != model.TriageStatusNew || f.SourceStatus != model.SourceStatusActive {
+		if !securityUUID(a.ID) || !securityUUID(f.ID) || !securityUUID(o.ID) || !securityField(a.NativeID, true, 4096) || f.AssetID != a.ID || !validOfflineSource(run, item) || o.FindingID != f.ID || o.IngestRunID != run.ID || !securityField(o.SourceFindingID, true, 4096) || !securityDigest(o.Fingerprint) || !o.ObservedAt.Equal(run.StartedAt) || !f.LastSeen.Equal(o.ObservedAt) || !f.FirstSeen.Equal(o.ObservedAt) || f.TriageStatus != model.TriageStatusNew {
 			return nil, "", errors.New("invalid normalized entity identity, scope or lifecycle")
 		}
 		if f.Severity != model.SeverityCritical && f.Severity != model.SeverityHigh && f.Severity != model.SeverityMedium && f.Severity != model.SeverityLow && f.Severity != "unknown" {
 			return nil, "", errors.New("invalid normalized severity")
 		}
-		for _, value := range []string{a.Region, a.Environment, a.Criticality, f.Title, f.VulnerabilityID, f.PackageName, f.PackageEcosystem, f.InstalledVersion, f.FixedVersion, o.RawRef} {
+		for _, value := range []string{a.Region, a.Environment, a.Criticality, f.Title, f.VulnerabilityID, f.PackageName, f.PackageEcosystem, f.InstalledVersion, f.FixedVersion, f.RuleID, f.ToolName, f.FilePath, o.RawRef} {
 			if !securityField(value, false, 4096) {
 				return nil, "", errors.New("invalid normalized field")
 			}
 		}
-		if !securityField(f.CanonicalKey, false, 20000) || !securityRawRef(o.RawRef) {
+		if f.StartLine < 0 || f.StartLine > 2147483647 || !securityField(f.CanonicalKey, false, 20000) || !securityRawRef(o.RawRef) {
 			return nil, "", errors.New("invalid normalized correlation or reference")
 		}
 		item.Finding.FirstSeen = item.Finding.FirstSeen.UTC()
@@ -137,7 +145,7 @@ func validateSecurityImport(run model.IngestRun, items []model.SecurityFinding) 
 		return nil, "", fmt.Errorf("encode import receipt: %w", err)
 	}
 	digest := sha256.Sum256(body)
-	return normalized, "trivy-v1:" + run.Cursor + ":" + hex.EncodeToString(digest[:]), nil
+	return normalized, run.Connector + "-v1:" + run.Cursor + ":" + hex.EncodeToString(digest[:]), nil
 }
 
 func securityField(value string, required bool, limit int) bool {
@@ -164,4 +172,28 @@ func securityRawRef(value string) bool {
 	}
 	u, err := url.Parse(value)
 	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" && u.Opaque == "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && !strings.Contains(value, "#")
+}
+
+// Source-specific validation keeps each offline adapter inside its own scope
+// and lifecycle contract. Enabling one source does not weaken Trivy validation.
+func validOfflineSource(run model.IngestRun, item model.SecurityFinding) bool {
+	a, f, o := item.Asset, item.Finding, item.Observation
+	if o.Source != run.Connector {
+		return false
+	}
+	switch run.Connector {
+	case "trivy":
+		return a.Provider == "trivy" && (a.Type == "filesystem" || a.Type == "container_image") && a.Account == run.Scope && o.Account == run.Scope && f.Category == "vulnerability" && f.SourceStatus == model.SourceStatusActive && f.RuleID == "" && f.ToolName == "" && f.FilePath == "" && f.StartLine == 0
+	case "github_code_scanning":
+		repository, err := adapter.CodeScanningRepository(run.Scope)
+		owner, _, _ := strings.Cut(repository, "/")
+		numberText, hasNumber := strings.CutPrefix(o.SourceFindingID, repository+":")
+		number, numberErr := strconv.ParseInt(numberText, 10, 64)
+		if !hasNumber || numberErr != nil || number <= 0 || strconv.FormatInt(number, 10) != numberText || o.RawRef != "https://github.com/"+repository+"/code-scanning/"+numberText {
+			return false
+		}
+		return err == nil && repository == run.Scope && a.Provider == "github" && a.Type == "repository" && a.NativeID == repository && a.Account == owner && o.Account == owner && f.Category == "code_scanning" && securityField(f.RuleID, true, 4096) && securityField(f.ToolName, true, 4096) && (f.SourceStatus == model.SourceStatusActive || f.SourceStatus == model.SourceStatusResolved || f.SourceStatus == model.SourceStatusSuppressed)
+	default:
+		return false
+	}
 }

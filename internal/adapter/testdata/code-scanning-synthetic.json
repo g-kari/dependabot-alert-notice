@@ -1,0 +1,19 @@
+[
+  {
+    "number": 42,
+    "state": "open",
+    "html_url": "https://github.com/example/repo/security/code-scanning/42",
+    "rule": {
+      "id": "go/example-rule",
+      "severity": "error",
+      "security_severity_level": "high",
+      "description": "Synthetic description, intentionally not persisted"
+    },
+    "tool": {"name": "CodeQL", "guid": null, "version": "synthetic"},
+    "most_recent_instance": {
+      "ref": "refs/heads/main",
+      "location": {"path": "src/example.go", "start_line": 12},
+      "message": {"text": "Synthetic source message, intentionally not persisted"}
+    }
+  }
+]
