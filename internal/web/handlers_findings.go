@@ -14,6 +14,7 @@ import (
 
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
+	"github.com/g-kari/dependabot-alert-notice/internal/threat"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 func (s *Server) registerFindingsAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/findings", s.handleFindingsAPI)
 	mux.HandleFunc("GET /api/v1/findings/{id}", s.handleFindingDetailAPI)
+	mux.HandleFunc("GET /api/v1/findings/{id}/related", s.handleRelatedFindingsAPI)
 	mux.HandleFunc("GET /api/v1/assets", s.handleAssetsAPI)
 	// The legacy GET / dashboard is a subtree route. Keep unknown API paths
 	// from silently rendering that HTML page with a successful status.
@@ -49,7 +51,7 @@ func (s *Server) handleFindingsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page.Items == nil {
-		page.Items = []model.Finding{}
+		page.Items = []store.FindingView{}
 	}
 	writeFindingsAPIJSON(w, http.StatusOK, page)
 }
@@ -83,6 +85,33 @@ func (s *Server) handleFindingDetailAPI(w http.ResponseWriter, r *http.Request) 
 	writeFindingsAPIJSON(w, http.StatusOK, detail)
 }
 
+func (s *Server) handleRelatedFindingsAPI(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validFindingAPIID(id) {
+		findingsAPIError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	query, err := parseFindingsAPIQueryFor(r.URL.RawQuery, false)
+	if err != nil {
+		findingsAPIError(w, http.StatusBadRequest, "invalid_query")
+		return
+	}
+	page, err := s.store.QueryRelatedFindings(r.Context(), id, query)
+	if errors.Is(err, store.ErrFindingNotFound) {
+		findingsAPIError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "Findings API read failed", "operation", "query_related_findings", "finding_id", id, "error", err)
+		findingsAPIError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if page.Items == nil {
+		page.Items = []store.FindingView{}
+	}
+	writeFindingsAPIJSON(w, http.StatusOK, page)
+}
+
 func (s *Server) handleAssetsAPI(w http.ResponseWriter, r *http.Request) {
 	values, err := parseFindingsAPIValues(r.URL.RawQuery, "limit", "offset")
 	if err != nil {
@@ -107,7 +136,15 @@ func (s *Server) handleAssetsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseFindingsAPIQuery(raw string) (store.FindingQuery, error) {
-	values, err := parseFindingsAPIValues(raw, "q", "source", "severity", "source_status", "asset_id", "limit", "offset")
+	return parseFindingsAPIQueryFor(raw, true)
+}
+
+func parseFindingsAPIQueryFor(raw string, allowCVE bool) (store.FindingQuery, error) {
+	allowed := []string{"q", "source", "severity", "source_status", "asset_id", "limit", "offset"}
+	if allowCVE {
+		allowed = append(allowed, "cve")
+	}
+	values, err := parseFindingsAPIValues(raw, allowed...)
 	if err != nil {
 		return store.FindingQuery{}, err
 	}
@@ -118,6 +155,18 @@ func parseFindingsAPIQuery(raw string) (store.FindingQuery, error) {
 	query := store.FindingQuery{
 		Search: values.Get("q"), Source: values.Get("source"), Severity: values.Get("severity"),
 		SourceStatus: values.Get("source_status"), AssetID: values.Get("asset_id"), Limit: limit, Offset: offset,
+	}
+	if values.Has("cve") {
+		// Only explicit CVE identifiers are canonicalized. Never infer a CVE
+		// from a GHSA, source rule, title, package or arbitrary substring.
+		if !validFindingsAPIText(values.Get("cve"), 28) {
+			return store.FindingQuery{}, fmt.Errorf("invalid findings CVE")
+		}
+		cves, err := threat.NormalizeOfflineCVEs([]string{values.Get("cve")})
+		if err != nil {
+			return store.FindingQuery{}, fmt.Errorf("invalid findings CVE")
+		}
+		query.CVEID = cves[0]
 	}
 	if !validFindingsAPIText(query.Search, 256) {
 		return store.FindingQuery{}, fmt.Errorf("invalid findings search")

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -106,20 +107,28 @@ func TestFetchRateLimitHonorsRetryAfter(t *testing.T) {
 }
 
 func TestFetchTimeoutAppliesToInjectedClient(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-time.After(200 * time.Millisecond):
-			_, _ = w.Write([]byte(`<rss><channel/></rss>`))
+	// A real server returning on cancellation can race an empty response against
+	// the client's deadline. Test the injected-client contract with virtual time
+	// and a transport that waits for the request context, without network I/O.
+	synctest.Test(t, func(t *testing.T) {
+		client := &http.Client{Transport: deadlineTransport(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+		start := time.Now()
+		_, err := Fetch(context.Background(), "https://example.invalid/feed", FetchOptions{HTTPClient: client, AllowPrivateNetwork: true, Timeout: 20 * time.Millisecond})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("configured deadline ignored: %v", err)
 		}
-	}))
-	defer srv.Close()
-	_, err := Fetch(context.Background(), srv.URL, FetchOptions{HTTPClient: srv.Client(), AllowPrivateNetwork: true, Timeout: 20 * time.Millisecond})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("configured deadline ignored: %v", err)
-	}
+		if elapsed := time.Since(start); elapsed != 20*time.Millisecond {
+			t.Fatalf("configured timeout changed: elapsed=%v, want 20ms", elapsed)
+		}
+	})
 }
+
+type deadlineTransport func(*http.Request) (*http.Response, error)
+
+func (f deadlineTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestRetryAfterBounds(t *testing.T) {
 	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
