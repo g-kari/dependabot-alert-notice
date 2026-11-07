@@ -54,6 +54,10 @@ type Asset struct {
 // Finding holds an asset-specific security issue. CanonicalKey is a correlation
 // hint only; source-native identity must not be replaced by advisory grouping.
 type Finding struct {
+	RuleID           string       `json:"rule_id,omitempty"`
+	ToolName         string       `json:"tool_name,omitempty"`
+	FilePath         string       `json:"file_path,omitempty"`
+	StartLine        int          `json:"start_line,omitempty"`
 	Title            string       `json:"title,omitempty"`
 	VulnerabilityID  string       `json:"vulnerability_id,omitempty"`
 	PackageName      string       `json:"package_name,omitempty"`
