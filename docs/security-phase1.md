@@ -1,6 +1,6 @@
 # Phase 1, first slice: offline Trivy ingestion and common read API
 
-This is the first incremental Phase 1 change in the [architecture roadmap](https://devsecops-architecture-ggg.mail590137.chatgpt.site/), built on Phase 0 (PR #17). It is not completion of the whole phase. The [second slice](security-code-scanning.md) adds offline GitHub Code Scanning ingestion. The [third slice](security-secret-scanning.md) adds secret-free offline Secret Scanning metadata. The [fourth slice](security-enrichment.md) adds offline EPSS/KEV evidence to common findings without changing legacy risk decisions. Correlation/search UI remains separate work. No running deployment or operational database is assumed or created by this development change.
+This is the first incremental Phase 1 change in the [architecture roadmap](https://devsecops-architecture-ggg.mail590137.chatgpt.site/), built on Phase 0 (PR #17). It is not completion of the whole phase. The [second slice](security-code-scanning.md) adds offline GitHub Code Scanning ingestion. The [third slice](security-secret-scanning.md) adds secret-free offline Secret Scanning metadata. The [fourth slice](security-enrichment.md) adds offline EPSS/KEV evidence to common findings without changing legacy risk decisions. The [fifth slice](security-correlation.md) adds read-only provenance, native-ID search and same-CVE associations. The separate correlation/search UI wiring remains independent work. No running deployment or operational database is assumed or created by this development change.
 
 ## Offline input
 
@@ -36,8 +36,9 @@ go run ./cmd/import-trivy --input report.json --scope example-project \
 
 The normal Web handler adds GET-only routes:
 
-- `/api/v1/findings`: `q`, `source`, `severity`, `source_status`, `asset_id`, `limit`, `offset`.
+- `/api/v1/findings`: `q`, `cve`, `source`, `severity`, `source_status`, `asset_id`, `limit`, `offset`.
 - `/api/v1/findings/{id}`: finding, affected asset, latest 200 observations and events. Explicit truncation flags indicate omitted older history; retained histories are returned chronologically.
+- `/api/v1/findings/{id}/related`: exact same-CVE association, existing candidate filters and pagination; anchor scope cannot be overridden.
 - `/api/v1/assets`: `limit`, `offset`.
 
 Collections return `items`, `total`, `limit` and `offset`; limit defaults to 50 and is restricted to 1–200, offset to 0–1,000,000. Search is a literal substring across title, advisory, package/ecosystem/version, correlation key and asset identity; SQL wildcard characters are literal. Duplicate/unknown query parameters and invalid values are rejected. Unknown API paths return JSON 404; writes are not supported. Responses use `Cache-Control: no-store`, with bounded JSON errors rather than source or DB error text.

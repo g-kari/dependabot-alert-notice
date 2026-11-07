@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
+	"github.com/g-kari/dependabot-alert-notice/internal/threat"
 )
 
 const (
@@ -28,6 +29,7 @@ var ErrFindingNotFound = errors.New("finding not found")
 // FindingQuery selects a bounded page of normalized findings. Search is a
 // literal substring, and an empty filter retains all source lifecycle states.
 type FindingQuery struct {
+	CVEID        string
 	Search       string
 	Source       string
 	Severity     string
@@ -37,10 +39,17 @@ type FindingQuery struct {
 	Offset       int
 }
 
+// FindingView adds read-only source provenance without changing persisted findings.
+type FindingView struct {
+	model.Finding
+	Source          string `json:"source,omitempty"`
+	SourceFindingID string `json:"source_finding_id,omitempty"`
+}
+
 // FindingPage contains filtered findings and the matching total before paging.
 type FindingPage struct {
 	Enrichments map[string]model.FindingEnrichment `json:"enrichments,omitempty"`
-	Items       []model.Finding                    `json:"items"`
+	Items       []FindingView                      `json:"items"`
 	Total       int                                `json:"total"`
 	Limit       int                                `json:"limit"`
 	Offset      int                                `json:"offset"`
@@ -59,7 +68,7 @@ type AssetPage struct {
 // retained evidence that is not included in this response.
 type FindingDetail struct {
 	Enrichment            *model.FindingEnrichment `json:"enrichment,omitempty"`
-	Finding               model.Finding            `json:"finding"`
+	Finding               FindingView              `json:"finding"`
 	Asset                 model.Asset              `json:"asset"`
 	Observations          []model.Observation      `json:"observations"`
 	Events                []model.Event            `json:"events"`
@@ -80,20 +89,9 @@ func (s *Store) QueryFindingsPage(ctx context.Context, query FindingQuery) (Find
 		return FindingPage{}, fmt.Errorf("begin finding page: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	where, args := findingQuerySQL(query)
-	from := ` FROM findings AS f JOIN assets AS a ON a.id=f.asset_id` + where
-	page := FindingPage{Limit: query.Limit, Offset: query.Offset}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&page.Total); err != nil {
-		return FindingPage{}, fmt.Errorf("count finding page: %w", err)
-	}
-	pageArgs := append(slices.Clone(args), query.Limit, query.Offset)
-	page.Items, err = readSecurityPageItems[model.Finding](ctx, tx, `SELECT f.body_json`+from+` ORDER BY `+securityTimeDescending("f.last_seen")+`, f.id ASC LIMIT ? OFFSET ?`, pageArgs...)
+	page, err := readFindingPage(ctx, tx, query, "")
 	if err != nil {
-		return FindingPage{}, fmt.Errorf("read finding page: %w", err)
-	}
-	page.Enrichments, err = readFindingEnrichments(ctx, tx, page.Items, time.Now().UTC())
-	if err != nil {
-		return FindingPage{}, fmt.Errorf("read finding enrichments: %w", err)
+		return FindingPage{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return FindingPage{}, fmt.Errorf("finish finding page: %w", err)
@@ -148,8 +146,13 @@ func (s *Store) GetFindingDetail(ctx context.Context, id string) (FindingDetail,
 		return FindingDetail{}, fmt.Errorf("read finding detail: %w", err)
 	}
 	var detail FindingDetail
-	if err := json.Unmarshal([]byte(findingBody), &detail.Finding); err != nil {
+	var finding model.Finding
+	if err := json.Unmarshal([]byte(findingBody), &finding); err != nil {
 		return FindingDetail{}, fmt.Errorf("decode finding detail: %w", err)
+	}
+	detail.Finding, err = projectFinding(ctx, tx, finding, "")
+	if err != nil {
+		return FindingDetail{}, fmt.Errorf("project finding detail: %w", err)
 	}
 	if err := json.Unmarshal([]byte(assetBody), &detail.Asset); err != nil {
 		return FindingDetail{}, fmt.Errorf("decode finding asset: %w", err)
@@ -172,7 +175,7 @@ func (s *Store) GetFindingDetail(ctx context.Context, id string) (FindingDetail,
 	}
 	slices.Reverse(detail.Observations)
 	slices.Reverse(detail.Events)
-	enrichments, err := readFindingEnrichments(ctx, tx, []model.Finding{detail.Finding}, time.Now().UTC())
+	enrichments, err := readFindingEnrichments(ctx, tx, []model.Finding{finding}, time.Now().UTC())
 	if err != nil {
 		return FindingDetail{}, fmt.Errorf("read detail enrichment: %w", err)
 	}
@@ -202,6 +205,10 @@ func findingQuerySQL(query FindingQuery) (string, []any) {
 			args = append(args, filter.value)
 		}
 	}
+	if query.CVEID != "" {
+		clauses = append(clauses, "f.category='vulnerability' AND json_extract(f.body_json,'$.category')='vulnerability' AND json_extract(f.body_json,'$.vulnerability_id')=?")
+		args = append(args, query.CVEID)
+	}
 	if query.Search != "" {
 		literal := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query.Search) + "%"
 		var searches []string
@@ -214,6 +221,8 @@ func findingQuerySQL(query FindingQuery) (string, []any) {
 			searches = append(searches, field+` LIKE ? ESCAPE '\'`)
 			args = append(args, literal)
 		}
+		searches = append(searches, `EXISTS (SELECT 1 FROM observations AS search_o WHERE search_o.finding_id=f.id AND (search_o.source_finding_id LIKE ? ESCAPE '\' OR search_o.source LIKE ? ESCAPE '\'))`)
+		args = append(args, literal, literal)
 		clauses = append(clauses, "("+strings.Join(searches, " OR ")+")")
 	}
 	if len(clauses) == 0 {
@@ -258,6 +267,9 @@ func readSecurityPageItems[T any](ctx context.Context, tx *sql.Tx, query string,
 }
 
 func validateFindingQuery(query FindingQuery) error {
+	if query.CVEID != "" && !canonicalFindingCVE(query.CVEID) {
+		return fmt.Errorf("invalid canonical CVE ID")
+	}
 	if err := validateSecurityPagination(query.Limit, query.Offset); err != nil {
 		return err
 	}
@@ -291,4 +303,61 @@ func validateSecurityPagination(limit, offset int) error {
 
 func validSecurityQueryText(value string, maxBytes int) bool {
 	return len(value) <= maxBytes && utf8.ValidString(value) && !strings.ContainsFunc(value, unicode.IsControl)
+}
+
+func canonicalFindingCVE(id string) bool {
+	ids, err := threat.NormalizeOfflineCVEs([]string{id})
+	return err == nil && len(ids) == 1 && ids[0] == id
+}
+
+// projectFinding reads provenance in the caller's snapshot. A source filter
+// chooses the latest matching observation, not unrelated newer provenance.
+func projectFinding(ctx context.Context, tx *sql.Tx, finding model.Finding, source string) (FindingView, error) {
+	view := FindingView{Finding: finding}
+	query := "SELECT source,source_finding_id FROM observations WHERE finding_id=?"
+	args := []any{finding.ID}
+	if source != "" {
+		query += " AND source=?"
+		args = append(args, source)
+	}
+	err := tx.QueryRowContext(ctx, query+" ORDER BY "+securityTimeDescending("observed_at")+", id DESC LIMIT 1", args...).Scan(&view.Source, &view.SourceFindingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return FindingView{}, fmt.Errorf("read finding provenance: %w", err)
+	}
+	return view, nil
+}
+
+func readFindingPage(ctx context.Context, tx *sql.Tx, query FindingQuery, excludedID string) (FindingPage, error) {
+	where, args := findingQuerySQL(query)
+	if excludedID != "" {
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		where += "f.id<>?"
+		args = append(args, excludedID)
+	}
+	from := ` FROM findings AS f JOIN assets AS a ON a.id=f.asset_id` + where
+	page := FindingPage{Items: make([]FindingView, 0), Limit: query.Limit, Offset: query.Offset}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&page.Total); err != nil {
+		return FindingPage{}, fmt.Errorf("count finding page: %w", err)
+	}
+	pageArgs := append(slices.Clone(args), query.Limit, query.Offset)
+	findings, err := readSecurityPageItems[model.Finding](ctx, tx, "SELECT f.body_json"+from+" ORDER BY "+securityTimeDescending("f.last_seen")+", f.id ASC LIMIT ? OFFSET ?", pageArgs...)
+	if err != nil {
+		return FindingPage{}, fmt.Errorf("read finding page: %w", err)
+	}
+	for _, finding := range findings {
+		view, err := projectFinding(ctx, tx, finding, query.Source)
+		if err != nil {
+			return FindingPage{}, fmt.Errorf("project finding page: %w", err)
+		}
+		page.Items = append(page.Items, view)
+	}
+	page.Enrichments, err = readFindingEnrichments(ctx, tx, findings, time.Now().UTC())
+	if err != nil {
+		return FindingPage{}, fmt.Errorf("read finding enrichments: %w", err)
+	}
+	return page, nil
 }

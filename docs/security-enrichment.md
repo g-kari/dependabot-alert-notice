@@ -1,6 +1,6 @@
 # Phase 1, fourth slice: offline EPSS/KEV evidence
 
-This adds selected CVE evidence to the [common Findings read API](security-phase1.md), after [Code Scanning](security-code-scanning.md) and [secret-free Secret Scanning](security-secret-scanning.md). It is independent of the separate dashboard UI and the existing legacy threat/risk workflow. It does not complete the whole phase, fetch feeds, recalculate priorities, or change source severity, triage, approvals, notifications or deadlines.
+This adds selected CVE evidence to the [common Findings read API](security-phase1.md), after [Code Scanning](security-code-scanning.md) and [secret-free Secret Scanning](security-secret-scanning.md). The [fifth slice](security-correlation.md) adds source provenance and same-CVE association reads. It is independent of the separate dashboard UI and the existing legacy threat/risk workflow. It does not complete the whole phase, fetch feeds, recalculate priorities, or change source severity, triage, approvals, notifications or deadlines.
 
 ## Explicit local inputs
 
