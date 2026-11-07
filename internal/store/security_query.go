@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -38,10 +39,11 @@ type FindingQuery struct {
 
 // FindingPage contains filtered findings and the matching total before paging.
 type FindingPage struct {
-	Items  []model.Finding `json:"items"`
-	Total  int             `json:"total"`
-	Limit  int             `json:"limit"`
-	Offset int             `json:"offset"`
+	Enrichments map[string]model.FindingEnrichment `json:"enrichments,omitempty"`
+	Items       []model.Finding                    `json:"items"`
+	Total       int                                `json:"total"`
+	Limit       int                                `json:"limit"`
+	Offset      int                                `json:"offset"`
 }
 
 // AssetPage contains a bounded, deterministic page of normalized assets.
@@ -56,12 +58,13 @@ type AssetPage struct {
 // records in chronological order. Truncation flags explicitly identify older
 // retained evidence that is not included in this response.
 type FindingDetail struct {
-	Finding               model.Finding       `json:"finding"`
-	Asset                 model.Asset         `json:"asset"`
-	Observations          []model.Observation `json:"observations"`
-	Events                []model.Event       `json:"events"`
-	ObservationsTruncated bool                `json:"observations_truncated"`
-	EventsTruncated       bool                `json:"events_truncated"`
+	Enrichment            *model.FindingEnrichment `json:"enrichment,omitempty"`
+	Finding               model.Finding            `json:"finding"`
+	Asset                 model.Asset              `json:"asset"`
+	Observations          []model.Observation      `json:"observations"`
+	Events                []model.Event            `json:"events"`
+	ObservationsTruncated bool                     `json:"observations_truncated"`
+	EventsTruncated       bool                     `json:"events_truncated"`
 }
 
 // QueryFindingsPage returns retained normalized findings without changing their
@@ -87,6 +90,10 @@ func (s *Store) QueryFindingsPage(ctx context.Context, query FindingQuery) (Find
 	page.Items, err = readSecurityPageItems[model.Finding](ctx, tx, `SELECT f.body_json`+from+` ORDER BY `+securityTimeDescending("f.last_seen")+`, f.id ASC LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return FindingPage{}, fmt.Errorf("read finding page: %w", err)
+	}
+	page.Enrichments, err = readFindingEnrichments(ctx, tx, page.Items, time.Now().UTC())
+	if err != nil {
+		return FindingPage{}, fmt.Errorf("read finding enrichments: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return FindingPage{}, fmt.Errorf("finish finding page: %w", err)
@@ -165,6 +172,13 @@ func (s *Store) GetFindingDetail(ctx context.Context, id string) (FindingDetail,
 	}
 	slices.Reverse(detail.Observations)
 	slices.Reverse(detail.Events)
+	enrichments, err := readFindingEnrichments(ctx, tx, []model.Finding{detail.Finding}, time.Now().UTC())
+	if err != nil {
+		return FindingDetail{}, fmt.Errorf("read detail enrichment: %w", err)
+	}
+	if enrichment, ok := enrichments[detail.Finding.ID]; ok {
+		detail.Enrichment = &enrichment
+	}
 	if err := tx.Commit(); err != nil {
 		return FindingDetail{}, fmt.Errorf("finish finding detail: %w", err)
 	}

@@ -17,6 +17,9 @@ import (
 //go:embed migrations/002_security.sql
 var securitySchema string
 
+//go:embed migrations/003_security_enrichment.sql
+var securityEnrichmentSchema string
+
 func securityID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -99,6 +102,9 @@ func (s *Store) migrateSecurity() error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO app_migrations(version,applied_at) VALUES(2,?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return fmt.Errorf("security migration記録失敗: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, securityEnrichmentSchema); err != nil {
+		return fmt.Errorf("security enrichment migration: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("security migration確定失敗: %w", err)

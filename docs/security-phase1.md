@@ -1,6 +1,6 @@
 # Phase 1, first slice: offline Trivy ingestion and common read API
 
-This is the first incremental Phase 1 change in the [architecture roadmap](https://devsecops-architecture-ggg.mail590137.chatgpt.site/), built on Phase 0 (PR #17). It is not completion of the whole phase. The [second slice](security-code-scanning.md) adds offline GitHub Code Scanning ingestion. The [third slice](security-secret-scanning.md) adds secret-free offline Secret Scanning metadata. Correlation/search UI and EPSS/KEV enrichment remain separate work. No running deployment or operational database is assumed or created by this development change.
+This is the first incremental Phase 1 change in the [architecture roadmap](https://devsecops-architecture-ggg.mail590137.chatgpt.site/), built on Phase 0 (PR #17). It is not completion of the whole phase. The [second slice](security-code-scanning.md) adds offline GitHub Code Scanning ingestion. The [third slice](security-secret-scanning.md) adds secret-free offline Secret Scanning metadata. The [fourth slice](security-enrichment.md) adds offline EPSS/KEV evidence to common findings without changing legacy risk decisions. Correlation/search UI remains separate work. No running deployment or operational database is assumed or created by this development change.
 
 ## Offline input
 
