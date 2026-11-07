@@ -194,6 +194,11 @@ func parseOptions(args []string) (options, error) {
 }
 
 func localPath(path string) bool {
+	// Windows treats either slash as a separator. Reject UNC, mixed-separator
+	// and device namespace paths before Stat/Open can initiate SMB access.
+	if len(path) >= 2 && strings.ContainsRune("/\\", rune(path[0])) && strings.ContainsRune("/\\", rune(path[1])) {
+		return false
+	}
 	if strings.IndexByte(path, 0) >= 0 {
 		return false
 	}

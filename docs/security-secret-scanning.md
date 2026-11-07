@@ -1,6 +1,6 @@
 # Phase 1, third slice: secret-free offline Secret Scanning metadata
 
-This extends the [Trivy/API](security-phase1.md) and [Code Scanning](security-code-scanning.md) slices. It does not complete Phase 1 or change the separate dashboard UI. Authenticated collection, correlation UI and EPSS/KEV enrichment remain separate work.
+This extends the [Trivy/API](security-phase1.md) and [Code Scanning](security-code-scanning.md) slices. It does not complete Phase 1 or change the separate dashboard UI. The [fourth slice](security-enrichment.md) adds offline EPSS/KEV evidence for explicit CVE findings. Authenticated collection and correlation UI remain separate work.
 
 ## Secret-free input only
 

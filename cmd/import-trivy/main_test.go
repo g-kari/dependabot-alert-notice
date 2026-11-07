@@ -430,3 +430,26 @@ func TestRunEmptyPartialImportRetainsPreviouslyObservedFindings(t *testing.T) {
 		}
 	}
 }
+
+func TestRunRejectsUNCAndDevicePathsBeforeInputAccess(t *testing.T) {
+	for _, path := range []string{`\\server\share\feed.json`, `//server/share/feed.json`, `\/server/share/feed.json`, `/\server\share\feed.json`, `\\?\C:\feed.json`, `\\.\pipe\synthetic`} {
+		if localPath(path) {
+			t.Fatalf("network/device path accepted by local validator: %q", path)
+		}
+		for _, target := range []string{"input", "database"} {
+			t.Run(target+path, func(t *testing.T) {
+				args := requiredArgs()
+				if target == "input" {
+					args[1] = path
+					args = append(args, "--dry-run")
+				} else {
+					args = append(args, "--db", path)
+				}
+				var out, errout bytes.Buffer
+				if code := run(args, &failOnRead{t: t}, &out, &errout); code == 0 || out.Len() != 0 || errout.Len() == 0 {
+					t.Fatalf("network path accepted: code=%d", code)
+				}
+			})
+		}
+	}
+}
