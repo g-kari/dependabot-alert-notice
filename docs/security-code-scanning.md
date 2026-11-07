@@ -1,6 +1,6 @@
 # Phase 1, second slice: offline GitHub Code Scanning ingestion
 
-This extends the [Phase 1 Trivy/API slice](security-phase1.md). It does not complete Phase 1 or change the separate dashboard design/UI. Secret Scanning, authenticated live collection, correlation UI and EPSS/KEV enrichment remain future work.
+This extends the [Phase 1 Trivy/API slice](security-phase1.md). It does not complete Phase 1 or change the separate dashboard design/UI. The [third slice](security-secret-scanning.md) adds secret-free offline Secret Scanning metadata. Authenticated live collection, correlation UI and EPSS/KEV enrichment remain future work.
 
 ## Input and scope
 

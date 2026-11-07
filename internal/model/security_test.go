@@ -104,9 +104,31 @@ func TestCodeScanningFindingMetadataRoundTripPreservesLegacyShape(t *testing.T) 
 	if err := json.Unmarshal(legacy, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"rule_id", "tool_name", "file_path", "start_line"} {
+	for _, field := range []string{"rule_id", "tool_name", "file_path", "start_line", "secret_type", "secret_resolution"} {
 		if _, ok := fields[field]; ok {
 			t.Fatalf("empty metadata changed legacy JSON shape: %s", legacy)
 		}
+	}
+}
+
+func TestSecretScanningMetadataRoundTripWithoutSecretValueField(t *testing.T) {
+	original := Finding{ID: "secret-finding", SecretType: "synthetic_example", SecretResolution: "revoked"}
+	body, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Finding
+	if err := json.Unmarshal(body, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored != original {
+		t.Fatalf("roundtrip=%+v", restored)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fields["secret"]; ok {
+		t.Fatal("secret-value field exists")
 	}
 }

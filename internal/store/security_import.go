@@ -87,10 +87,10 @@ func (s *Store) ImportSecurityFindings(ctx context.Context, run model.IngestRun,
 }
 
 func validateSecurityImport(run model.IngestRun, items []model.SecurityFinding) ([]model.SecurityFinding, string, error) {
-	if !securityUUID(run.ID) || (run.Connector != "trivy" && run.Connector != "github_code_scanning") || !securityField(run.Scope, true, 256) || strings.TrimSpace(run.Scope) != run.Scope || !securityTime(run.StartedAt) || run.FinishedAt == nil || !securityTime(*run.FinishedAt) || run.FinishedAt.Before(run.StartedAt) || run.Result != model.IngestResultSuccess || run.Coverage != model.IngestCoveragePartial || run.Error != "" || !strings.HasPrefix(run.Cursor, "sha256:") || !securityDigest(strings.TrimPrefix(run.Cursor, "sha256:")) {
+	if !securityUUID(run.ID) || (run.Connector != "trivy" && run.Connector != "github_code_scanning" && run.Connector != "github_secret_scanning") || !securityField(run.Scope, true, 256) || strings.TrimSpace(run.Scope) != run.Scope || !securityTime(run.StartedAt) || run.FinishedAt == nil || !securityTime(*run.FinishedAt) || run.FinishedAt.Before(run.StartedAt) || run.Result != model.IngestResultSuccess || run.Coverage != model.IngestCoveragePartial || run.Error != "" || !strings.HasPrefix(run.Cursor, "sha256:") || !securityDigest(strings.TrimPrefix(run.Cursor, "sha256:")) {
 		return nil, "", errors.New("invalid offline run metadata")
 	}
-	if run.Connector == "github_code_scanning" {
+	if run.Connector == "github_code_scanning" || run.Connector == "github_secret_scanning" {
 		repository, err := adapter.CodeScanningRepository(run.Scope)
 		if err != nil || repository != run.Scope {
 			return nil, "", errors.New("invalid offline repository scope")
@@ -109,7 +109,7 @@ func validateSecurityImport(run model.IngestRun, items []model.SecurityFinding) 
 		if f.Severity != model.SeverityCritical && f.Severity != model.SeverityHigh && f.Severity != model.SeverityMedium && f.Severity != model.SeverityLow && f.Severity != "unknown" {
 			return nil, "", errors.New("invalid normalized severity")
 		}
-		for _, value := range []string{a.Region, a.Environment, a.Criticality, f.Title, f.VulnerabilityID, f.PackageName, f.PackageEcosystem, f.InstalledVersion, f.FixedVersion, f.RuleID, f.ToolName, f.FilePath, o.RawRef} {
+		for _, value := range []string{a.Region, a.Environment, a.Criticality, f.Title, f.VulnerabilityID, f.PackageName, f.PackageEcosystem, f.InstalledVersion, f.FixedVersion, f.RuleID, f.ToolName, f.FilePath, f.SecretType, f.SecretResolution, o.RawRef} {
 			if !securityField(value, false, 4096) {
 				return nil, "", errors.New("invalid normalized field")
 			}
@@ -183,8 +183,14 @@ func validOfflineSource(run model.IngestRun, item model.SecurityFinding) bool {
 	}
 	switch run.Connector {
 	case "trivy":
+		if f.SecretType != "" || f.SecretResolution != "" {
+			return false
+		}
 		return a.Provider == "trivy" && (a.Type == "filesystem" || a.Type == "container_image") && a.Account == run.Scope && o.Account == run.Scope && f.Category == "vulnerability" && f.SourceStatus == model.SourceStatusActive && f.RuleID == "" && f.ToolName == "" && f.FilePath == "" && f.StartLine == 0
 	case "github_code_scanning":
+		if f.SecretType != "" || f.SecretResolution != "" {
+			return false
+		}
 		repository, err := adapter.CodeScanningRepository(run.Scope)
 		owner, _, _ := strings.Cut(repository, "/")
 		numberText, hasNumber := strings.CutPrefix(o.SourceFindingID, repository+":")
@@ -193,6 +199,29 @@ func validOfflineSource(run model.IngestRun, item model.SecurityFinding) bool {
 			return false
 		}
 		return err == nil && repository == run.Scope && a.Provider == "github" && a.Type == "repository" && a.NativeID == repository && a.Account == owner && o.Account == owner && f.Category == "code_scanning" && securityField(f.RuleID, true, 4096) && securityField(f.ToolName, true, 4096) && (f.SourceStatus == model.SourceStatusActive || f.SourceStatus == model.SourceStatusResolved || f.SourceStatus == model.SourceStatusSuppressed)
+	case "github_secret_scanning":
+		repository, err := adapter.SecretScanningRepository(run.Scope)
+		owner, _, _ := strings.Cut(repository, "/")
+		numberText, hasNumber := strings.CutPrefix(o.SourceFindingID, repository+":")
+		number, numberErr := strconv.ParseInt(numberText, 10, 64)
+		if !hasNumber || numberErr != nil || number <= 0 || strconv.FormatInt(number, 10) != numberText || o.RawRef != "https://github.com/"+repository+"/security/secret-scanning/"+numberText {
+			return false
+		}
+		if len(f.SecretType) == 0 || len(f.SecretType) > 128 || strings.IndexFunc(f.SecretType, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') }) >= 0 {
+			return false
+		}
+		expectedStatus := model.SourceStatusActive
+		switch f.SecretResolution {
+		case "":
+		case "revoked":
+			expectedStatus = model.SourceStatusResolved
+		case "false_positive", "wont_fix", "used_in_tests", "pattern_edited", "pattern_deleted":
+			expectedStatus = model.SourceStatusSuppressed
+		default:
+			return false
+		}
+		canonical, marshalErr := json.Marshal([2]string{"github_secret_scanning", f.SecretType})
+		return err == nil && marshalErr == nil && repository == run.Scope && a.Provider == "github" && a.Type == "repository" && a.NativeID == repository && a.Account == owner && o.Account == owner && f.Category == "secret_scanning" && f.SourceStatus == expectedStatus && f.Severity == "unknown" && f.Title == "Secret Scanning: "+f.SecretType && f.CanonicalKey == string(canonical) && f.RuleID == "" && f.ToolName == "" && f.FilePath == "" && f.StartLine == 0 && f.VulnerabilityID == "" && f.PackageName == "" && f.PackageEcosystem == "" && f.InstalledVersion == "" && f.FixedVersion == ""
 	default:
 		return false
 	}
