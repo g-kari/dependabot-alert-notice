@@ -42,7 +42,7 @@ func TestW09ProductionBoundary(t *testing.T) {
 						if id.Name == "io" && s.Sel.Name != "EOF" {
 							t.Error("I/O forbidden")
 						}
-						if id.Name == "findingpreview" && s.Sel.Name != "Input" && s.Sel.Name != "Result" && s.Sel.Name != "Calculate" {
+						if id.Name == "findingpreview" && s.Sel.Name != "Input" && s.Sel.Name != "Binding" && s.Sel.Name != "Result" && s.Sel.Name != "Calculate" {
 							t.Error("unexpected adapter selector")
 						}
 					}

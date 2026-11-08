@@ -110,3 +110,6 @@ Fixtures use fixed clocks and fictional identifiers (`CVE-2099-0001`); these
 checks do not assert actual feed data, real vulnerabilities, production access,
 or operational deployment. Runtime integration and broader schemas are future
 work requiring their own contracts and validation.
+
+The separate [explicit bound profile input](finding-priority-preview-profile-input.md)
+uses its own version and entry point. It does not expand this base schema.
