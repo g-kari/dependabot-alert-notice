@@ -1,0 +1,13 @@
+{
+  "schema_version": "finding-preview-base-v0.1",
+  "as_of": "2026-11-08T00:00:00Z",
+  "finding": {
+    "id": "finding-a",
+    "asset_id": "asset-a",
+    "category": "vulnerability",
+    "vulnerability_id": "CVE-2099-0001"
+  },
+  "asset": {
+    "id": "asset-a"
+  }
+}

@@ -715,3 +715,9 @@ Podman実機とMac mini M4 Proでの動作は未検証です。隔離の引数�
 設定画面でCodexの認証状態を確認し、未認証なら同じPCから「ブラウザでCodexを認証」を選びます。CLIからの `codex login` でも認証できます。続いて「評価エンジン」を「Codex」に変更して保存します。「Codex Model」と「Claude Model」には各CLIに渡すモデルIDを個別に指定できます。空欄の場合はCLIの既定モデルを使い、設定保存後の評価から反映されます。既定のDocker隔離を使う場合は、事前に `docker build -f Dockerfile.codex-evaluator -t dependabot-codex-evaluator:latest .` で専用イメージをビルドしてください。認証情報はアプリの設定ファイルには保存しません。DockerコンテナにはCLI認証ディレクトリを読み取り専用で渡します。
 
 画面の共通スタイルは `internal/web/templates/layout.html` のMaterial Design 3カラー役割・形状・状態トークンで管理します。画面固有のCSSでも共通変数を再利用してください。
+
+### Offline finding priority preview
+
+Use the [stdin-only preview command](docs/finding-priority-preview-cli.md) to inspect
+synthetic snapshots through the existing priority model, including missing inputs
+and evidence warnings, without starting services or writing a database.
