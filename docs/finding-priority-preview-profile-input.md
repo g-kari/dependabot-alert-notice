@@ -106,3 +106,7 @@ Fixtures use fictional identities and fixed clocks. Tests do not establish real
 feed data, service ownership, authorized access, or production deployment.
 Broader profile metadata, Assessment/CVSS schemas and runtime integration remain
 separate future contracts.
+
+The separately opted-in [assessment core input](finding-priority-preview-assessment-input.md)
+adds one bound, expiring evidence claim. It does not expand this profile version;
+`DecodeProfile` continues to reject assessment fields and the assessment version.

@@ -19,13 +19,17 @@ func DecodeProfile(data []byte) (findingpreview.Result, error) {
 }
 
 func profileInput(root object) (findingpreview.Input, error) {
+	return boundProfileInput(root, ProfileSchemaVersion)
+}
+
+func boundProfileInput(root object, version string) (findingpreview.Input, error) {
 	f := fields{m: root}
 	profile := f.obj("profile", true)
 	binding := f.obj("binding", true)
 	if f.err != nil {
 		return findingpreview.Input{}, f.err
 	}
-	in, err := baseInput(root, ProfileSchemaVersion)
+	in, err := baseInput(root, version)
 	if err != nil {
 		return in, err
 	}
