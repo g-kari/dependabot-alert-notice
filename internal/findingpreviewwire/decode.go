@@ -34,6 +34,10 @@ func (e Error) Error() string { return "finding preview input: " + string(e) }
 // Errors return a zero Result, never a partially populated input projection.
 // Valid unsupported findings retain the adapter's unsupported result, without a score.
 func Decode(data []byte) (findingpreview.Result, error) {
+	return decode(data, input)
+}
+
+func decode(data []byte, convert func(object) (findingpreview.Input, error)) (findingpreview.Result, error) {
 	fail := func(e error) (findingpreview.Result, error) { return findingpreview.Result{}, e }
 	if len(data) > MaxBytes {
 		return fail(Error("size"))
@@ -54,7 +58,7 @@ func Decode(data []byte) (findingpreview.Result, error) {
 	if !ok {
 		return fail(Error("type"))
 	}
-	in, err := input(root)
+	in, err := convert(root)
 	if err != nil {
 		return fail(err)
 	}
@@ -349,10 +353,14 @@ func oneOf(s string, values ...string) bool {
 }
 
 func input(root object) (findingpreview.Input, error) {
+	return baseInput(root, SchemaVersion)
+}
+
+func baseInput(root object, expectedVersion string) (findingpreview.Input, error) {
 	var in findingpreview.Input
 	f := fields{m: root}
 	version := f.str("schema_version", true, true, 256)
-	if version != SchemaVersion {
+	if version != expectedVersion {
 		f.bad(Error("version"))
 	}
 	in.At = f.stamp("as_of")
