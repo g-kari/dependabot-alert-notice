@@ -721,3 +721,10 @@ Podman実機とMac mini M4 Proでの動作は未検証です。隔離の引数�
 Use the [stdin-only preview command](docs/finding-priority-preview-cli.md) to inspect
 synthetic snapshots through the existing priority model, including missing inputs
 and evidence warnings, without starting services or writing a database.
+
+### Read-only finding priority preview API
+
+The [explicit-clock preview endpoint](docs/finding-priority-preview-api.md) connects
+one current common Finding to the existing base preview and returns a replayable
+stdin CLI snapshot. Scores are diagnostic only; no triage, risk, notification or
+production deployment changes are made.
