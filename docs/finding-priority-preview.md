@@ -81,3 +81,7 @@ Profiles and assessments are internal, previously validated snapshots. Their
 enum and fact vocabulary validation remains the caller's responsibility, just
 like complete CVSS specification validation; this package is not a general
 external-input validation boundary.
+
+A separate [bounded base-enrichment JSON input](finding-priority-preview-input.md)
+now validates an in-memory subset before calling this adapter. It does not
+expose the full internal Input or connect preview to an application runtime.
