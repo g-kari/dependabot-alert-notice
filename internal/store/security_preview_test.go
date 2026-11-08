@@ -240,3 +240,17 @@ func TestPreviewSnapshotLeavesEveryStoredTableUnchanged(t *testing.T) {
 		t.Fatal("read changed database rows")
 	}
 }
+
+func TestPreviewStoredKeysUseJSONUnicodeFolding(t *testing.T) {
+	for _, raw := range []string{`{"severity":"low","ſeverity":"high"}`, `{"id":"one","ID":"two"}`, `{"version":"one","verſion":"two"}`} {
+		var out map[string]any
+		if err := decodePreviewStoredJSON(raw, &out); err == nil {
+			t.Fatalf("accepted alias overwrite: %s", raw)
+		}
+	}
+	for _, pair := range [][2]string{{"severity", "ſeverity"}, {"k", "K"}, {"Σ", "ς"}, {"ID", "id"}} {
+		if !strings.EqualFold(pair[0], pair[1]) || previewFoldKey(pair[0]) != previewFoldKey(pair[1]) {
+			t.Fatalf("fold mismatch: %q", pair)
+		}
+	}
+}

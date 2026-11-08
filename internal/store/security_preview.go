@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
@@ -201,10 +202,10 @@ func checkPreviewStoredValue(d *json.Decoder, depth int) error {
 				return fmt.Errorf("invalid stored JSON")
 			}
 			name, ok := key.(string)
-			if !ok || keys[strings.ToLower(name)] {
+			if !ok || keys[previewFoldKey(name)] {
 				return fmt.Errorf("duplicate stored JSON key")
 			}
-			keys[strings.ToLower(name)] = true
+			keys[previewFoldKey(name)] = true
 			if err := checkPreviewStoredValue(d, depth+1); err != nil {
 				return err
 			}
@@ -223,4 +224,18 @@ func checkPreviewStoredValue(d *json.Decoder, depth int) error {
 		return fmt.Errorf("invalid stored JSON")
 	}
 	return nil
+}
+
+// Match encoding/json's Unicode SimpleFold field-name equivalence, including
+// long s and Kelvin sign, without quadratic pairwise comparisons of object keys.
+func previewFoldKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		start := r
+		for next := unicode.SimpleFold(r); next != start; next = unicode.SimpleFold(next) {
+			if next < r {
+				r = next
+			}
+		}
+		return r
+	}, s)
 }
