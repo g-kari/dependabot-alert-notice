@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.1/.schema/devbox.schema.json",
   "packages": [
     "go@latest",
-    "golangci-lint@1.64.8",
+    "golangci-lint@2.15.0",
     "pre-commit@2.20.0",
     "cloudflared@2026.10.7",
     "air@1.67.4"
