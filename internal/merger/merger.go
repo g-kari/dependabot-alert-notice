@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os/exec"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 	"github.com/g-kari/dependabot-alert-notice/internal/github"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 	"github.com/g-kari/dependabot-alert-notice/internal/policy"
@@ -15,7 +15,6 @@ import (
 )
 
 type Merger struct {
-	ghPath   string
 	store    *store.Store
 	ghClient github.Client
 	policy   *policy.Guard
@@ -26,7 +25,6 @@ var ErrApprovalDisabled = errors.New("承認機能は無効化されています
 
 func New(cfg *config.Config, s *store.Store, ghClient github.Client) *Merger {
 	return &Merger{
-		ghPath:   cfg.GhPath,
 		store:    s,
 		ghClient: ghClient,
 		policy: policy.NewGuard(func() (config.Snapshot, error) {
@@ -78,6 +76,17 @@ func (m *Merger) merge(ctx context.Context, record *model.AlertRecord, cfg confi
 		client = bound
 	}
 
+	var runner ghcommand.Runner
+	var authErr error
+	if bound, ok := client.(github.CommandClient); ok {
+		runner, authErr = bound.GitHubRunner()
+	} else {
+		runner, authErr = ghcommand.New(cfg.GhPath, cfg.GitHubAuth)
+	}
+	if authErr != nil {
+		return fmt.Errorf("GitHubマージ認証設定: %w", authErr)
+	}
+
 	alert := record.Alert
 	slog.Info("マージ処理開始", "alertID", alertID, "pkg", alert.PackageName, "repo", fmt.Sprintf("%s/%s", alert.Owner, alert.Repo), "prNumber", alert.PRNumber)
 
@@ -97,13 +106,12 @@ func (m *Merger) merge(ctx context.Context, record *model.AlertRecord, cfg confi
 	// PRをマージ
 	repo := fmt.Sprintf("%s/%s", alert.Owner, alert.Repo)
 	prNumStr := github.PRNumberToString(prNum)
-	cmd := exec.CommandContext(ctx, m.ghPath, "pr", "merge", prNumStr,
+	_, err := runner.Output(ctx, "pr", "merge", prNumStr,
 		"--repo", repo,
 		"--squash", "--delete-branch", "--auto",
 	)
-	out, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("PRマージ失敗", "pr", prNum, "repo", repo, "output", string(out), "error", err)
+		slog.Error("PRマージ失敗", "pr", prNum, "repo", repo, "error", err)
 		return fmt.Errorf("PRマージ失敗 (#%d): %w", prNum, err)
 	}
 

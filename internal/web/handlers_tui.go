@@ -174,7 +174,7 @@ func validateTUISettings(next, old config.Config) error {
 	return next.Validate()
 }
 func restartForSettings(a, b config.Config) bool {
-	return a.PollInterval != b.PollInterval || a.Web != b.Web || a.DataPath != b.DataPath || a.GhPath != b.GhPath || a.LogLevel != b.LogLevel || !reflect.DeepEqual(a.Slack, b.Slack) || a.Discord != b.Discord || a.Threat != b.Threat
+	return a.PollInterval != b.PollInterval || a.Web != b.Web || a.DataPath != b.DataPath || a.GhPath != b.GhPath || a.GitHubAuth != b.GitHubAuth || a.LogLevel != b.LogLevel || !reflect.DeepEqual(a.Slack, b.Slack) || a.Discord != b.Discord || a.Threat != b.Threat
 }
 func (s *Server) handleTUISave(w http.ResponseWriter, r *http.Request) {
 	var request control.Settings

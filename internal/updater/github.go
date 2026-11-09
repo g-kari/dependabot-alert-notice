@@ -4,15 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"regexp"
+
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 )
 
 // GitHubSource retrieves published releases through the user's gh authentication.
 type GitHubSource struct {
 	Repository string
 	Path       string
+	Auth       ghcommand.Settings
+	Runner     ghcommand.Runner
 	Run        func(context.Context, ...string) ([]byte, error)
+}
+
+// NewGitHubSource freezes one authentication context for release lookup and download.
+func NewGitHubSource(repository, path string, auth ghcommand.Settings) (GitHubSource, error) {
+	runner, err := ghcommand.New(path, auth)
+	if err != nil {
+		return GitHubSource{}, err
+	}
+	return GitHubSource{Repository: repository, Path: path, Auth: auth, Runner: runner}, nil
 }
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
@@ -24,12 +36,18 @@ func (s GitHubSource) command(ctx context.Context, args ...string) ([]byte, erro
 	if s.Run != nil {
 		return s.Run(ctx, args...)
 	}
-	path := s.Path
-	if path == "" {
-		path = "gh"
+	runner := s.Runner
+	if runner == nil {
+		if s.Auth.Mode == "token_env" {
+			return nil, fmt.Errorf("explicit updater authentication requires a frozen runner")
+		}
+		var err error
+		runner, err = ghcommand.New(s.Path, s.Auth)
+		if err != nil {
+			return nil, err
+		}
 	}
-	// Output keeps release JSON separate from stderr and avoids logging credentials.
-	out, err := exec.CommandContext(ctx, path, args...).Output()
+	out, err := runner.Output(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GitHub Release取得（ghの認証・リポジトリアクセスを確認）: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 	"gopkg.in/yaml.v3"
 )
@@ -142,6 +143,7 @@ type Config struct {
 	ClaudePath           string                 `yaml:"claude_path"`
 	CodexPath            string                 `yaml:"codex_path"`
 	GhPath               string                 `yaml:"gh_path"`
+	GitHubAuth           ghcommand.Settings     `yaml:"github_auth,omitempty" json:"github_auth,omitempty"`
 	LogLevel             string                 `yaml:"log_level"`
 	DataPath             string                 `yaml:"data_path"`
 	Web                  WebConfig              `yaml:"web"`

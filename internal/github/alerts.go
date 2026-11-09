@@ -1,20 +1,18 @@
 package github
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
@@ -59,15 +57,51 @@ func (c *ghClient) WithConfig(cfg config.Config) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GitHub取得設定複製失敗: %w", err)
 	}
-	return New(&clone), nil
+	bound := New(&clone).(*ghClient)
+	if bound.runnerErr != nil {
+		return nil, bound.runnerErr
+	}
+	return bound, nil
 }
 
 type ghClient struct {
-	cfg *config.Config // 設定への参照（動的変更をリアルタイムに反映するためポインタ保持）
+	cfg        *config.Config
+	runner     ghcommand.Runner
+	runnerErr  error
+	runnerOnce sync.Once
 }
 
 func New(cfg *config.Config) Client {
-	return &ghClient{cfg: cfg}
+	c := &ghClient{cfg: cfg}
+	c.initRunner()
+	return c
+}
+
+// CommandClient exposes the same frozen context for a lookup and its subsequent merge.
+type CommandClient interface {
+	GitHubRunner() (ghcommand.Runner, error)
+}
+
+func (c *ghClient) initRunner() {
+	c.runnerOnce.Do(func() {
+		if c.runner == nil {
+			c.runner, c.runnerErr = ghcommand.New(c.cfg.GhPath, c.cfg.GitHubAuth)
+		}
+	})
+}
+
+// GitHubRunner returns the operation's authentication context without exposing secrets.
+func (c *ghClient) GitHubRunner() (ghcommand.Runner, error) {
+	c.initRunner()
+	return c.runner, c.runnerErr
+}
+
+func (c *ghClient) command(ctx context.Context, args ...string) ([]byte, error) {
+	runner, err := c.GitHubRunner()
+	if err != nil {
+		return nil, err
+	}
+	return runner.Output(ctx, args...)
 }
 
 // buildSeverityParam は最低重要度から GitHub API の severity クエリパラメータ文字列を生成する。
@@ -111,9 +145,9 @@ func parseContributorLogins(data []byte) []string {
 // fetchContributors はリポジトリのコントリビューターlogin一覧を最大100件返す（貢献数降順）。
 // 取得失敗時は nil を返す（致命的エラーとして扱わない）。
 func (c *ghClient) fetchContributors(ctx context.Context, owner, repo string) []string {
-	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "api",
+	out, err := c.command(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/contributors?per_page=100", owner, repo),
-	).Output()
+	)
 	if err != nil {
 		slog.Warn("コントリビューター取得失敗", "owner", owner, "repo", repo, "error", err)
 		return nil
@@ -258,7 +292,7 @@ type rateLimitInfo struct {
 
 // checkRateLimit はREST APIの残りリクエスト数とリセット時刻を返す
 func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
-	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "api", "rate_limit", "--jq", "[.rate.remaining, .rate.reset] | @tsv").Output()
+	out, err := c.command(ctx, "api", "rate_limit", "--jq", "[.rate.remaining, .rate.reset] | @tsv")
 	if err != nil {
 		return rateLimitInfo{Remaining: 5000}, nil // 取得失敗時は続行
 	}
@@ -276,11 +310,11 @@ func (c *ghClient) checkRateLimit(ctx context.Context) (rateLimitInfo, error) {
 
 // fetchHomepage はリポジトリに設定されている公開URL（Settings > Website）を返す。取得失敗時は空文字列。
 func (c *ghClient) fetchHomepage(ctx context.Context, owner, repo string) string {
-	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
+	out, err := c.command(ctx, "repo", "view",
 		fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "homepageUrl",
 		"--jq", ".homepageUrl",
-	).Output()
+	)
 	if err != nil {
 		slog.Debug("公開URL取得失敗", "owner", owner, "repo", repo, "error", err)
 		return ""
@@ -290,11 +324,11 @@ func (c *ghClient) fetchHomepage(ctx context.Context, owner, repo string) string
 
 // fetchDefaultBranch はリポジトリのデフォルトブランチ名を返す。取得失敗時は空文字列。
 func (c *ghClient) fetchDefaultBranch(ctx context.Context, owner, repo string) string {
-	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
+	out, err := c.command(ctx, "repo", "view",
 		fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "defaultBranchRef",
 		"--jq", ".defaultBranchRef.name",
-	).Output()
+	)
 	if err != nil {
 		slog.Debug("デフォルトブランチ取得失敗", "owner", owner, "repo", repo, "error", err)
 		return ""
@@ -323,11 +357,11 @@ func supplementMetadata(alerts []model.Alert, repoList []repoListItem) {
 
 // isRepoArchived はリポジトリがアーカイブ済みかを返す。取得失敗時は false（続行）。
 func (c *ghClient) isRepoArchived(ctx context.Context, owner, repo string) bool {
-	out, err := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "view",
+	out, err := c.command(ctx, "repo", "view",
 		fmt.Sprintf("%s/%s", owner, repo),
 		"--json", "isArchived",
 		"--jq", ".isArchived",
-	).Output()
+	)
 	if err != nil {
 		return false
 	}
@@ -412,9 +446,6 @@ func (c *ghClient) FetchAlertsResult(ctx context.Context, target config.Target) 
 	return FetchResult{Alerts: alerts}, nil
 }
 
-// alertNumberMarker は gh api --paginate の出力から取得件数を数えるためのマーカー
-var alertNumberMarker = []byte(`"number":`)
-
 func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []string) ([]model.Alert, error) {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open&per_page=100", owner)
 	if sev := buildSeverityParam(c.cfg.FetchMinSeverity); sev != "" {
@@ -422,42 +453,12 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 	}
 	slog.Info("org APIアラート取得開始", "owner", owner, "fetchMinSeverity", c.cfg.FetchMinSeverity)
 
-	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", endpoint, "--paginate")
-	stdout, err := cmd.StdoutPipe()
+	out, err := c.command(ctx, "api", endpoint, "--paginate")
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe 失敗: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("org API 起動失敗: %w", err)
+		return nil, fmt.Errorf("org API取得失敗: %w", err)
 	}
 
-	// ストリームを読みながら取得件数をカウント（100件≒1ページごとにログ）
-	var buf bytes.Buffer
-	fetched := 0
-	chunk := make([]byte, 32*1024)
-	for {
-		n, readErr := stdout.Read(chunk)
-		if n > 0 {
-			buf.Write(chunk[:n])
-			prev := fetched / 100
-			fetched += bytes.Count(chunk[:n], alertNumberMarker)
-			if fetched/100 > prev {
-				slog.Info("org APIアラート取得中", "owner", owner, "fetched", fetched)
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			_ = cmd.Wait()
-			return nil, fmt.Errorf("stdout 読み込み失敗: %w", readErr)
-		}
-	}
-	if err := cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("org API 失敗: %w", err)
-	}
-
-	alerts, err := c.parseAlerts(buf.Bytes(), owner, "", excludes)
+	alerts, err := c.parseAlerts(out, owner, "", excludes)
 	if err != nil {
 		return nil, err
 	}
@@ -510,11 +511,10 @@ func (c *ghClient) fetchOrgAlerts(ctx context.Context, owner string, excludes []
 
 // fetchRepoList は gh repo list でリポジトリ一覧（名前・アーカイブ状態・pushedAt）を取得する
 func (c *ghClient) fetchRepoList(ctx context.Context, owner string) ([]repoListItem, error) {
-	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "repo", "list", owner,
+	out, err := c.command(ctx, "repo", "list", owner,
 		"--json", "name,isArchived,pushedAt,defaultBranchRef,homepageUrl",
 		"--limit", "1000",
 	)
-	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("リポジトリ一覧取得失敗: %w", err)
 	}
@@ -715,8 +715,7 @@ func (c *ghClient) fetchRepoAlerts(ctx context.Context, owner, repo string) ([]m
 		endpoint += "&severity=" + sev
 	}
 	slog.Debug("gh api実行（リポジトリ）", "endpoint", endpoint)
-	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", endpoint, "--paginate")
-	out, err := cmd.CombinedOutput()
+	out, err := c.command(ctx, "api", endpoint, "--paginate")
 	if err != nil {
 		msg := strings.ToLower(strings.TrimSpace(string(out)))
 		// レート制限は403で返るが権限エラーと区別する（先にチェック）
@@ -935,22 +934,11 @@ func parseUpdateErrors(data []byte) map[int]*model.DependabotUpdateError {
 
 // fetchGraphQLUpdates はGraphQL APIでdependabotUpdateの全情報（エラー + PR番号）を取得する
 func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) graphqlUpdateInfo {
-	query := fmt.Sprintf(`query {
-		repository(owner: %q, name: %q) {
-			vulnerabilityAlerts(first: 100, states: OPEN) {
-				nodes {
-					number
-					dependabotUpdate {
-						error { errorType title body }
-						pullRequest { number }
-					}
-				}
-			}
-		}
-	}`, owner, repo)
-
-	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "api", "graphql", "-f", "query="+query)
-	out, err := cmd.Output()
+	query, err := ghcommand.DependabotUpdatesQuery(owner, repo)
+	var out []byte
+	if err == nil {
+		out, err = c.command(ctx, "api", "graphql", "-f", "query="+query)
+	}
 	if err != nil {
 		slog.Debug("GraphQL API失敗（dependabotUpdate取得）", "owner", owner, "repo", repo, "error", err)
 		return graphqlUpdateInfo{
@@ -965,14 +953,13 @@ func (c *ghClient) fetchGraphQLUpdates(ctx context.Context, owner, repo string) 
 
 func (c *ghClient) FindDependabotPR(ctx context.Context, owner, repo, pkgName string) (int, error) {
 	// dependabot PRを検索
-	cmd := exec.CommandContext(ctx, c.cfg.GhPath, "pr", "list",
+	out, err := c.command(ctx, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--author", "app/dependabot",
 		"--state", "open",
 		"--json", "number,title",
 		"--limit", "100",
 	)
-	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("gh pr list 実行失敗: %w", err)
 	}

@@ -50,7 +50,7 @@ func runApplication() string {
 	checkUpdate := flag.Bool("check-update", false, "公開済み安定版Releaseの更新確認だけを行って終了")
 	applyUpdate := flag.Bool("update", false, "新しい安定版Releaseへ更新して終了（Mac/Linux、次回起動から適用）")
 	updateRepo := flag.String("update-repo", "g-kari/dependabot-alert-notice", "更新元GitHubリポジトリ (owner/repo)")
-	updateGHPath := flag.String("update-gh-path", "", "Release取得用GitHub CLIパス（省略時: 常駐は設定のgh_path、手動更新はgh）")
+	updateGHPath := flag.String("update-gh-path", "", "Release取得用GitHub CLIパス（省略時: 設定のgh_path）")
 	autoUpdate := flag.Bool("auto-update", os.Getenv("SECURITY_NOTICE_AUTO_UPDATE") != "0", "常駐中にReleaseを定期確認し更新後に自動再起動（Mac/Linuxのリリース版）")
 	updateInterval := flag.Duration("update-interval", 6*time.Hour, "常駐中のRelease更新確認間隔")
 	flag.Parse()
@@ -112,8 +112,19 @@ func runApplication() string {
 		defer stop()
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
+		updateConfig, err := loadUpdateConfig(*configPath, !flagWasSet("config"))
+		if err != nil {
+			slog.Error("更新用設定読み込み失敗", "error", err)
+			os.Exit(1)
+		}
+		source, err := releaseSource(*updateRepo, *updateGHPath, *updateConfig)
+		if err != nil {
+			slog.Error("更新用GitHub認証設定失敗", "error", err)
+			os.Exit(1)
+		}
+		warnInheritedGitHub(updateConfig.GitHubAuth)
 		u := updater.Updater{
-			Source:  updater.GitHubSource{Repository: *updateRepo, Path: *updateGHPath},
+			Source:  source,
 			Current: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Executable: executable,
 		}
 		if err := runReleaseUpdate(ctx, u, *applyUpdate, os.Stdout); err != nil {
@@ -143,6 +154,7 @@ func runApplication() string {
 		level = *logLevel
 	}
 	setupLogger(level)
+	warnInheritedGitHub(cfg.GitHubAuth)
 
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
@@ -275,11 +287,11 @@ func runApplication() string {
 					if err != nil {
 						return updater.Result{}, fmt.Errorf("更新用設定取得: %w", err)
 					}
-					path := *updateGHPath
-					if path == "" {
-						path = snapshot.Config.GhPath
+					source, err := releaseSource(*updateRepo, *updateGHPath, snapshot.Config)
+					if err != nil {
+						return updater.Result{}, fmt.Errorf("更新用GitHub認証設定: %w", err)
 					}
-					u.Source = updater.GitHubSource{Repository: *updateRepo, Path: path}
+					u.Source = source
 					return u.Apply(attempt)
 				}
 				result, err := updater.Schedule(ctx, *updateInterval, 2*time.Minute, apply)
