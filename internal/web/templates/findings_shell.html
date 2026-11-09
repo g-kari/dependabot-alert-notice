@@ -1,0 +1,60 @@
+{{define "pageTitle"}}{{.Title}} | DevSecOps Console{{end}}
+{{define "bodyClass"}}findings-console{{end}}
+{{define "fontResources"}}<!-- Native console uses locally available fonts. -->{{end}}
+{{define "liveUpdates"}}<!-- Read-only native pages do not open a live stream. -->{{end}}
+{{define "navigation"}}
+<a href="#main-content" class="finding-skip">本文へ移動</a>
+<aside class="finding-sidebar" aria-label="DevSecOps Console">
+  <a href="/findings" class="finding-brand"><span class="finding-brand-mark" aria-hidden="true">▥</span><span>DevSecOps<span class="finding-brand-sub">Findings console</span></span></a>
+  <nav class="finding-nav" aria-label="メインナビゲーション">
+    <a class="nav-link interactive-scale" href="/findings" aria-current="page"><span aria-hidden="true">▤</span> Findings</a>
+    <a class="nav-link interactive-scale" href="/"><span aria-hidden="true">▦</span> Alerts / 承認</a>
+    <a class="nav-link interactive-scale" href="/reports/vulnerabilities"><span aria-hidden="true">◫</span> 脆弱性レポート</a>
+    <a class="nav-link interactive-scale" href="/logs"><span aria-hidden="true">≡</span> ログ</a>
+    <a class="nav-link interactive-scale" href="/settings"><span aria-hidden="true">⚙</span> 設定</a>
+  </nav>
+  <div class="card finding-sidebar-note"><h2>Source-native records</h2><p>検出元ごとの ID を保持。同じ CVE も別々の Finding として追跡します。</p><a href="/api/v1/assets" class="finding-api-link">Assets API (JSON)</a></div>
+  <p class="finding-sidebar-footer"><span class="finding-live-dot" aria-hidden="true"></span> 読み取り専用コンソール</p>
+</aside>
+{{end}}
+
+{{define "nativeFindingRows"}}
+<ul class="finding-list">
+{{range .}}
+<li><article class="finding-item">
+  <div class="finding-item-main">
+    <div class="finding-inline"><span class="badge {{findingSeverityClass .Severity}}">{{if .Severity}}{{.Severity}}{{else}}unknown{{end}}</span><span class="finding-caption">{{.Category}}</span></div>
+    <h3><a href="/findings/{{.ID}}">{{if .Title}}{{.Title}}{{else if .VulnerabilityID}}{{.VulnerabilityID}}{{else if .RuleID}}{{.RuleID}}{{else}}Finding {{.ID}}{{end}}</a></h3>
+    <p class="finding-source"><span class="finding-source-label">{{findingOrUnknown .Source}}</span><span>{{findingOrUnknown .SourceFindingID}}</span></p>
+    {{if .PackageName}}<p class="finding-caption">{{.PackageName}}{{if .InstalledVersion}} @ {{.InstalledVersion}}{{end}}{{if .FixedVersion}} → {{.FixedVersion}}{{end}}</p>{{end}}
+    <p class="finding-caption">Asset ID: <a href="/findings?asset_id={{.AssetID}}">{{.AssetID}}</a></p>
+    <p class="finding-caption">Finding ID: {{.ID}}{{if .VulnerabilityID}} / {{.VulnerabilityID}}{{end}}</p>
+  </div>
+  <dl class="finding-row-states">
+    <div><dt>検出元の状態</dt><dd>{{if .SourceStatus}}{{.SourceStatus}}{{else}}unknown{{end}}</dd></div>
+    <div><dt>ローカルトリアージ</dt><dd>{{if .TriageStatus}}{{.TriageStatus}}{{else}}不明{{end}}</dd></div>
+    <div><dt>EPSS</dt><dd>{{.EPSS.Value}}<span class="finding-caption">{{.EPSS.Freshness}}</span></dd></div>
+    <div><dt>KEV</dt><dd>{{.KEV.Value}}<span class="finding-caption">{{.KEV.Freshness}}</span></dd></div>
+  </dl>
+</article></li>
+{{end}}
+</ul>
+{{end}}
+
+{{define "nativeFindingSignal"}}
+<section class="card finding-signal" aria-label="{{.Name}} evidence">
+  <div class="section-heading"><h3>{{.Name}}</h3><span class="badge badge-pending">{{.Freshness}}</span></div>
+  <p class="finding-signal-value">{{.Value}}</p>
+  {{with .Evidence}}
+  <dl class="finding-facts finding-facts-compact">
+    <div><dt>Source / version</dt><dd>{{.Source}} / {{.Version}}</dd></div>
+    <div><dt>公開時点 (UTC)</dt><dd>{{findingTime .PublishedAt}}</dd></div>
+    <div><dt>観測時点 (UTC)</dt><dd>{{findingTime .ObservedAt}}</dd></div>
+    <div><dt>Run ID</dt><dd>{{.RunID}}</dd></div>
+    <div><dt>証拠参照</dt><dd>{{.RawRef}}</dd></div>
+    {{if .Percentile}}<div><dt>EPSS percentile</dt><dd>{{.Percentile}}</dd></div>{{end}}
+    {{if .KEVDateAdded}}<div><dt>KEV 掲載日</dt><dd>{{findingTime .KEVDateAdded}}</dd></div>{{end}}
+  </dl>
+  {{else}}<p class="text-muted">この Finding に対応する証拠はありません。不明は 0% や「掲載なし」を意味しません。</p>{{end}}
+</section>
+{{end}}

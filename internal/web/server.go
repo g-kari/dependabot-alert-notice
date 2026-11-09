@@ -146,6 +146,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerTUI(mux)
 	s.registerFindingsAPI(mux)
+	s.registerFindingsConsole(mux)
 	mux.HandleFunc("GET /", s.handleDashboard)
 	mux.HandleFunc("GET /alerts/{id}", s.handleDetail)
 	mux.HandleFunc("POST /alerts/{id}/approve", s.handleApprove)
@@ -188,6 +189,11 @@ func (s *Server) Handler() http.Handler {
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("HTTP", "method", r.Method, "path", r.URL.Path)
+		if r.URL.Path == "/findings" || strings.HasPrefix(r.URL.Path, "/findings/") {
+			if !s.nativeFindingsGET(w, r) {
+				return
+			}
+		}
 		if r.Method == http.MethodPost && (r.URL.Path == "/reports/vulnerabilities/refresh" || r.URL.Path == "/settings/repositories/exclude" || r.URL.Path == "/settings/repositories/include" || r.URL.Path == "/settings/codex/login" || strings.HasPrefix(r.URL.Path, "/settings/rss/")) {
 			if !validCSRF(w, r) {
 				return
@@ -230,48 +236,6 @@ func validCSRF(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) Start(ctx context.Context) error {
 	s.appCtx = ctx
-	mux := http.NewServeMux()
-	s.registerTUI(mux)
-	mux.HandleFunc("GET /", s.handleDashboard)
-	mux.HandleFunc("GET /alerts/{id}", s.handleDetail)
-	mux.HandleFunc("POST /alerts/{id}/approve", s.handleApprove)
-	mux.HandleFunc("POST /alerts/{id}/reject", s.handleReject)
-	mux.HandleFunc("GET /logs", s.handleLogs)
-	mux.HandleFunc("GET /reports/vulnerabilities", s.handleVulnerabilityReport)
-	mux.HandleFunc("POST /reports/vulnerabilities/refresh", s.handleVulnerabilityRefresh)
-	mux.HandleFunc("GET /api/logs-stream", s.handleLogsStream)
-	mux.HandleFunc("GET /settings", s.handleSettings)
-	mux.HandleFunc("GET /settings/repositories", s.handleSettings)
-	mux.HandleFunc("POST /settings", s.handleSettingsSave)
-	mux.HandleFunc("POST /settings/targets/add", s.handleTargetAdd)
-	mux.HandleFunc("POST /settings/targets/{i}/delete", s.handleTargetDelete)
-	mux.HandleFunc("POST /settings/targets/{i}/excludes/add", s.handleExcludeAdd)
-	mux.HandleFunc("POST /settings/targets/{i}/excludes/{j}/delete", s.handleExcludeDelete)
-	mux.HandleFunc("POST /settings/repositories/exclude", s.handleRepositoryExclude)
-	mux.HandleFunc("POST /settings/repositories/include", s.handleRepositoryInclude)
-	mux.HandleFunc("POST /settings/rss/add", s.handleRSSAdd)
-	mux.HandleFunc("POST /settings/rss/config", s.handleRSSConfig)
-	mux.HandleFunc("POST /settings/rss/{i}/toggle", s.handleRSSToggle)
-	mux.HandleFunc("POST /settings/rss/{i}/delete", s.handleRSSDelete)
-	mux.HandleFunc("GET /settings/codex/status", s.handleCodexAuthStatus)
-	mux.HandleFunc("POST /settings/codex/login", s.handleCodexLogin)
-	mux.HandleFunc("GET /settings/connectivity", s.handleConnectivity)
-	mux.HandleFunc("POST /api/connectivity-test", s.handleConnectivityTest)
-	mux.HandleFunc("GET /api/connectivity-stream", s.handleConnectivityStream)
-	mux.HandleFunc("POST /api/poll", s.handlePoll)
-	mux.HandleFunc("POST /api/poll/repo", s.handlePollRepo)
-	mux.HandleFunc("POST /api/poll/target/{i}", s.handlePollTarget)
-	mux.HandleFunc("POST /api/evaluate/{id}", s.handleEnqueueEvaluate)
-	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		data, err := templateFS.ReadFile("static/favicon.ico")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "image/x-icon")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		_, _ = w.Write(data)
-	})
 
 	s.server = &http.Server{
 		Addr:    s.address,

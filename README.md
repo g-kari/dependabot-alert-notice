@@ -1,8 +1,10 @@
-# dependabot-alert-notice
+# DevSecOps Console
 
 GitHub Dependabotアラートと脆弱性RSSを収集し、対応緊急度評価、Codex/ClaudeによるAI評価、Slack/Discord通知、承認後のPRマージを提供するGoアプリケーション。
 
 普段の確認にはWeb UI/TUIを使います。Slack/Discordは既定で1時間ごとのリポジトリ別サマリーとし、件数とAI評価状況だけを知らせます。アラートの詳細やAI評価の全文は画面で確認してください。
+
+`/findings` に読み取り専用の [ネイティブ Findings Console](docs/native-findings-console.md) を追加しています。検出元の ID、状態、Asset、証拠・履歴、独立した EPSS/KEV と同一 CVE の関連 Finding を確認できます。既存の Alerts 承認フローとは分離し、Go module・配布バイナリ・データ保存先の互換性は維持します。
 
 共通セキュリティ基盤は [Phase 0](docs/security-phase0.md)、Trivy JSONのoffline取込と読み取り専用Findings APIは [Phase 1の最初の実装](docs/security-phase1.md) を参照してください。GitHub Code Scanning JSONのoffline取込は [Phase 1の次の実装](docs/security-code-scanning.md) を参照してください。Secret Scanningの秘密値を含まないoffline metadata取込は [Phase 1の第三の実装](docs/security-secret-scanning.md) を参照してください。EPSS/KEVのoffline証拠付加は [Phase 1の第四の実装](docs/security-enrichment.md) を参照してください。出典ID・native ID検索・同一CVEの関連Finding APIは [Phase 1の第五の実装](docs/security-correlation.md) を参照してください。既存Dependabotの承認・評価・通知フローは維持します。
 
