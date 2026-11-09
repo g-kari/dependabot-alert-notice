@@ -39,11 +39,43 @@
         }
       }
     },
-    "cloudflared@2020.11.11": {
-      "last_modified": "2021-01-18T12:47:57Z",
-      "resolved": "github:NixOS/nixpkgs/4eccd6f731627ba5ad9915bcf600c9329a34ca78#cloudflared",
+    "cloudflared@2026.10.7": {
+      "last_modified": "2026-11-06T15:06:19Z",
+      "resolved": "github:NixOS/nixpkgs/4fe25e12eb9f4c744966dd3de5a05246cf098601#cloudflared",
       "source": "devbox-search",
-      "version": "2020.11.11"
+      "version": "2026.10.7",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/0gzrbgjiiks4n1g4y6jd9hy42awwisja-cloudflared-2026.10.7",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/0gzrbgjiiks4n1g4y6jd9hy42awwisja-cloudflared-2026.10.7"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/rnf0k05fp7249wn4hbmdffj8k4dwh28c-cloudflared-2026.10.7",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/rnf0k05fp7249wn4hbmdffj8k4dwh28c-cloudflared-2026.10.7"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/jnxm3a3s20p2wlsq536haj6dis2ckjn3-cloudflared-2026.10.7",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/jnxm3a3s20p2wlsq536haj6dis2ckjn3-cloudflared-2026.10.7"
+        }
+      }
     },
     "github:NixOS/nixpkgs/nixpkgs-unstable": {
       "last_modified": "2026-03-16T02:27:38Z",

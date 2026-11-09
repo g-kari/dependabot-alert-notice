@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Check formatting
@@ -31,3 +31,25 @@ jobs:
         run: go build ./...
       - name: Verify Mac packaging helpers
         run: python3 scripts/test_macos_tools.py
+      - name: Native console browser acceptance
+        env:
+          DEVSECOPS_BROWSER_QA: "1"
+          DEVSECOPS_BROWSER_QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEVSECOPS_BROWSER_QA_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DEVSECOPS_BROWSER_QA_DIR: ${{ runner.temp }}/devsecops-browser-qa
+        run: go test ./internal/web -run '^TestNativeConsoleBrowserQA$' -count=1 -timeout=4m
+      - name: Retain synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: devsecops-browser-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/devsecops-browser-qa/*.png
+            ${{ runner.temp }}/devsecops-browser-qa/checks.json
+            ${{ runner.temp }}/devsecops-browser-qa/manifest.json
+            ${{ runner.temp }}/devsecops-browser-qa/stability.json
+          retention-days: 1
+          if-no-files-found: error
+          include-hidden-files: false
+          overwrite: false
+          compression-level: 9
