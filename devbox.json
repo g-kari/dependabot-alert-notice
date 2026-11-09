@@ -3,7 +3,7 @@
   "packages": [
     "go@latest",
     "golangci-lint@2.15.0",
-    "pre-commit@2.20.0",
+    "pre-commit@4.7.0",
     "cloudflared@2026.10.7",
     "air@1.67.4"
   ],
