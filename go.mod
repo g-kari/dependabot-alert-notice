@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/slack-go/slack v0.35.0
 	github.com/yuin/goldmark v1.8.7
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.62.0
 )
