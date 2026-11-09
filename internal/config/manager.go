@@ -147,6 +147,9 @@ func (c *Config) Validate() error {
 	if c == nil {
 		return errors.New("config is nil")
 	}
+	if err := c.GitHubAuth.Validate(); err != nil {
+		return fmt.Errorf("GitHub authentication: %w", err)
+	}
 	if c.NotificationInterval < 0 {
 		return errors.New("notification_intervalは0以上で指定してください")
 	}

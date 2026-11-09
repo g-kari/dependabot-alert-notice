@@ -12,6 +12,9 @@ discord:
 claude_path: claude
 codex_path: codex
 gh_path: gh
+# Legacy compatibility; see docs/github-auth-context.md for explicit token_env mode.
+github_auth:
+    mode: inherited
 log_level: info
 data_path: store.db
 web:

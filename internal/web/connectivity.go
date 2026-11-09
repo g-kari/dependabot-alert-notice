@@ -14,6 +14,7 @@ import (
 	slackgo "github.com/slack-go/slack"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 )
 
 type streamEvent struct {
@@ -68,6 +69,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	s.cfgMu.RLock()
 	cfg, _ := config.Clone(*s.cfg)
 	s.cfgMu.RUnlock()
+	gh := newConnectivityGitHub(cfg)
 
 	var sendMu sync.Mutex
 	send := func(ev streamEvent) {
@@ -83,7 +85,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		res := testGH(ctx, cfg.GhPath)
+		res := testGH(ctx, gh)
 		send(streamEvent{Type: "gh", OK: res.OK, Message: res.Message})
 	}()
 
@@ -121,11 +123,11 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 			defer wg.Done()
 			var res targetResult
 			if t.Repo != "" {
-				res = testRepoTarget(ctx, cfg.GhPath, t.Owner, t.Repo)
+				res = testRepoTarget(ctx, gh, t.Owner, t.Repo)
 			} else {
-				res = testOrgTarget(ctx, cfg.GhPath, t.Owner)
+				res = testOrgTarget(ctx, gh, t.Owner)
 				if !res.OK {
-					res = testUserRepoTarget(ctx, cfg.GhPath, t.Owner)
+					res = testUserRepoTarget(ctx, gh, t.Owner)
 				}
 			}
 			send(streamEvent{Type: "target", OK: res.OK, Message: res.Message, Owner: res.Owner, Repo: res.Repo, Count: res.Count})
@@ -143,6 +145,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 	s.cfgMu.RLock()
 	cfg, _ := config.Clone(*s.cfg)
 	s.cfgMu.RUnlock()
+	gh := newConnectivityGitHub(cfg)
 
 	var (
 		res connectivityResult
@@ -154,7 +157,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
-		r := testGH(ctx, cfg.GhPath)
+		r := testGH(ctx, gh)
 		mu.Lock()
 		res.GH = r
 		mu.Unlock()
@@ -193,22 +196,41 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 	}()
 
 	wg.Wait()
-	res.Targets = testTargets(ctx, cfg.GhPath, cfg.Targets)
+	res.Targets = testTargets(ctx, gh, cfg.Targets)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-func testGH(ctx context.Context, ghPath string) toolResult {
-	out, err := exec.CommandContext(ctx, ghPath, "auth", "status").CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return toolResult{OK: false, Message: msg}
+// connectivityGitHub shares one immutable authentication context across all probes.
+type connectivityGitHub struct {
+	runner interface {
+		ghcommand.Runner
+		Identity(context.Context) (string, error)
+		Description() string
 	}
-	return toolResult{OK: true, Message: strings.TrimSpace(string(out))}
+	err error
+}
+
+func newConnectivityGitHub(cfg config.Config) connectivityGitHub {
+	runner, err := ghcommand.New(cfg.GhPath, cfg.GitHubAuth)
+	return connectivityGitHub{runner: runner, err: err}
+}
+func (g connectivityGitHub) Output(ctx context.Context, args ...string) ([]byte, error) {
+	if g.err != nil {
+		return nil, g.err
+	}
+	return g.runner.Output(ctx, args...)
+}
+func testGH(ctx context.Context, gh connectivityGitHub) toolResult {
+	if gh.err != nil {
+		return toolResult{Message: gh.err.Error()}
+	}
+	login, err := gh.runner.Identity(ctx)
+	if err != nil {
+		return toolResult{Message: gh.runner.Description() + ": " + err.Error()}
+	}
+	return toolResult{OK: true, Message: gh.runner.Description() + ": " + login}
 }
 
 func testClaude(ctx context.Context, claudePath string) toolResult {
@@ -257,7 +279,7 @@ func testSlack(ctx context.Context, slackCfg config.SlackConfig) toolResult {
 	return toolResult{OK: true, Message: fmt.Sprintf("接続OK: @%s (%s)", resp.User, resp.Team)}
 }
 
-func testTargets(ctx context.Context, ghPath string, targets []config.Target) []targetResult {
+func testTargets(ctx context.Context, gh connectivityGitHub, targets []config.Target) []targetResult {
 	results := make([]targetResult, len(targets))
 	var wg sync.WaitGroup
 	for i, t := range targets {
@@ -265,13 +287,13 @@ func testTargets(ctx context.Context, ghPath string, targets []config.Target) []
 		go func(i int, t config.Target) {
 			defer wg.Done()
 			if t.Repo != "" {
-				results[i] = testRepoTarget(ctx, ghPath, t.Owner, t.Repo)
+				results[i] = testRepoTarget(ctx, gh, t.Owner, t.Repo)
 				return
 			}
 			// repo未指定 → org APIを試してダメなら全リポジトリにフォールバック
-			r := testOrgTarget(ctx, ghPath, t.Owner)
+			r := testOrgTarget(ctx, gh, t.Owner)
 			if !r.OK {
-				r = testUserRepoTarget(ctx, ghPath, t.Owner)
+				r = testUserRepoTarget(ctx, gh, t.Owner)
 			}
 			results[i] = r
 		}(i, t)
@@ -280,9 +302,9 @@ func testTargets(ctx context.Context, ghPath string, targets []config.Target) []
 	return results
 }
 
-func testRepoTarget(ctx context.Context, ghPath, owner, repo string) targetResult {
+func testRepoTarget(ctx context.Context, gh connectivityGitHub, owner, repo string) targetResult {
 	endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
-	out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").CombinedOutput()
+	out, err := gh.Output(ctx, "api", endpoint, "--jq", "length")
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
@@ -295,9 +317,9 @@ func testRepoTarget(ctx context.Context, ghPath, owner, repo string) targetResul
 	return targetResult{Owner: owner, Repo: repo, OK: true, Count: count, Message: fmt.Sprintf("%d 件のアラートを取得", count)}
 }
 
-func testOrgTarget(ctx context.Context, ghPath, owner string) targetResult {
+func testOrgTarget(ctx context.Context, gh connectivityGitHub, owner string) targetResult {
 	endpoint := fmt.Sprintf("/orgs/%s/dependabot/alerts?state=open", owner)
-	out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").CombinedOutput()
+	out, err := gh.Output(ctx, "api", endpoint, "--jq", "length")
 	if err != nil {
 		return targetResult{Owner: owner, OK: false, Message: strings.TrimSpace(string(out))}
 	}
@@ -331,11 +353,11 @@ func testSandbox(ctx context.Context, sandboxCfg config.SandboxConfig) toolResul
 	return toolResult{OK: true, Message: fmt.Sprintf("Docker OK, イメージ %q 確認済み (%s)", sandboxCfg.Image, imageID)}
 }
 
-func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult {
+func testUserRepoTarget(ctx context.Context, gh connectivityGitHub, owner string) targetResult {
 	// ユーザーリポジトリ一覧を取得して総アラート数をカウント
-	reposOut, err := exec.CommandContext(ctx, ghPath, "repo", "list", owner,
+	reposOut, err := gh.Output(ctx, "repo", "list", owner,
 		"--json", "name", "--jq", ".[].name", "--limit", "1000",
-	).Output()
+	)
 	if err != nil {
 		return targetResult{Owner: owner, OK: false, Message: "リポジトリ一覧取得失敗: " + err.Error()}
 	}
@@ -354,6 +376,7 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 	var (
 		totalMu sync.Mutex
 		total   int
+		failed  int
 		wg      sync.WaitGroup
 	)
 	for _, repo := range repos {
@@ -363,8 +386,11 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			endpoint := fmt.Sprintf("/repos/%s/%s/dependabot/alerts?state=open", owner, repo)
-			out, err := exec.CommandContext(ctx, ghPath, "api", endpoint, "--jq", "length").Output()
+			out, err := gh.Output(ctx, "api", endpoint, "--jq", "length")
 			if err != nil {
+				totalMu.Lock()
+				failed++
+				totalMu.Unlock()
 				return
 			}
 			count := 0
@@ -375,6 +401,9 @@ func testUserRepoTarget(ctx context.Context, ghPath, owner string) targetResult 
 		}(repo)
 	}
 	wg.Wait()
+	if failed > 0 {
+		return targetResult{Owner: owner, Message: "GitHub repository checks incomplete"}
+	}
 	return targetResult{
 		Owner:   owner,
 		OK:      true,

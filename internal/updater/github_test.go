@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"fmt"
+	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 	"reflect"
 	"testing"
 )
@@ -26,6 +27,31 @@ func TestGitHubSourcePinsRepositoryTagAndAssets(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls=%v", calls)
+	}
+}
+
+type recordingRunner struct{ calls [][]string }
+
+func (r *recordingRunner) Output(_ context.Context, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	return []byte(`{"tag_name":"v1.2.3"}`), nil
+}
+
+func TestGitHubSourceSharesFrozenRunnerAcrossLookupAndDownload(t *testing.T) {
+	runner := &recordingRunner{}
+	s := GitHubSource{Repository: "org/repo", Path: "must-not-execute", Auth: ghcommand.Settings{Mode: "token_env", TokenEnv: "MISSING_SOURCE"}, Runner: runner}
+	if _, err := s.Latest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Download(context.Background(), "v1.2.3", "archive.tar.gz", "destination"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 2 || runner.calls[0][0] != "api" || runner.calls[1][0] != "release" {
+		t.Fatalf("calls=%v", runner.calls)
+	}
+	s.Runner = nil
+	if _, err := s.Latest(context.Background()); err == nil {
+		t.Fatal("explicit updater source fell back to console")
 	}
 }
 
