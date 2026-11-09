@@ -54,7 +54,7 @@ jobs:
           python3 scripts/test_macos_tools.py
           go run ./cmd/package-macos -version "$RELEASE_TAG" -out dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac-distributions
           path: dist/*
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mac-distributions
           path: mac-artifacts
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mac-distributions
           path: mac-artifacts
