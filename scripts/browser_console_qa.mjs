@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { isIP } from 'node:net';
 import { PassThrough } from 'node:stream';
 const MAX_PACKET=16*1024*1024, MAX_PNG=512*1024, IMAGE_BUDGET=7*1024*1024;
 const sha256=b=>createHash('sha256').update(b).digest('hex');
@@ -150,6 +151,190 @@ function internalTarget(info) {
   return ['browser_ui', 'background_page', 'service_worker'].includes(info.type)&& (info.url===''||info.url==='about:blank'||/^(chrome|chrome-untrusted|chrome-extension|devtools):\/\//.test(info.url));
 }
 const CODEX_READY="(()=>{const n=document.querySelector('#codex-auth-status');return !!n&&n.textContent.includes('Synthetic offline browser QA; no CLI invoked')})()";
+const UDP_DETAIL_LIMITS=Object.freeze({sources:64,events:256,edges:128,depth:8,bytes:64*1024});
+const UDP_TYPES=new Set(['UDP_SOCKET','UDP_CLIENT_SOCKET']);
+const UDP_EVENTS=new Set(['UDP_CONNECT','UDP_LOCAL_ADDRESS','UDP_BYTES_SENT','UDP_BYTES_RECEIVED','UDP_SEND_ERROR','UDP_RECEIVE_ERROR']);
+const UDP_CONTEXT_EVENTS=new Set(['SOCKET_ALIVE','SOCKET_OPEN','SOCKET_CONNECT','HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK']);
+const NET_SOURCE_NAMES=new Set(('NONE URL_REQUEST PAC_FILE_DECIDER HTTP_PROXY_CONNECT_JOB SOCKS_CONNECT_JOB SSL_CONNECT_JOB TRANSPORT_CONNECT_JOB TCP_CONNECT_JOB TCP_STREAM_ATTEMPT TLS_STREAM_ATTEMPT SOCKET HTTP2_SESSION QUIC_CONNECTION_MIGRATION QUIC_SESSION HOST_RESOLVER_IMPL_JOB DISK_CACHE_ENTRY MEMORY_CACHE_ENTRY HTTP_STREAM_JOB HTTP_STREAM_POOL HTTP_STREAM_POOL_JOB HTTP_STREAM_POOL_GROUP HTTP_STREAM_POOL_ATTEMPT_MANAGER HTTP_STREAM_POOL_QUIC_ATTEMPT EXPONENTIAL_BACKOFF_THROTTLING UDP_SOCKET CERT_VERIFY_PROC_CREATED CERT_VERIFIER_JOB CERT_VERIFIER_2QWAC_JOB CERT_VERIFIER_TASK PROXY_CLIENT_SOCKET BIDIRECTIONAL_STREAM NETWORK_QUALITY_ESTIMATOR HTTP_STREAM_JOB_CONTROLLER CT_TREE_STATE_TRACKER QUIC_SESSION_POOL_ASYNC_DNS_JOB QUIC_SESSION_POOL_DIRECT_JOB QUIC_SESSION_POOL_PROXY_JOB HTTP_SERVER_PROPERTIES HOST_CACHE_PERSISTENCE_MANAGER COOKIE_STORE HTTP_AUTH_CONTROLLER HTTP3_SESSION WEB_TRANSPORT_CLIENT NETWORK_SERVICE_HOST_RESOLVER DNS_OVER_HTTPS DNS_TRANSACTION DNS_TRANSACTION_PLATFORM_ATTEMPT NETWORK_CHANGE_NOTIFIER QUIC_SESSION_POOL UDP_CLIENT_SOCKET QUIC_PROXY_DATAGRAM_CLIENT_SOCKET PROXY_OVERRIDE_HOST_RESOLUTION CANARY_DOMAIN_SERVICE WEBSOCKET_CHANNEL ENTERPRISE_PROXY_SERVICE').split(' '));
+function literalEndpoint(raw) {
+  if(typeof raw!=='string'||raw.length>128)return null;
+  const match=raw.startsWith('[')?raw.match(/^\[([0-9a-fA-F:.]+)\]:([0-9]{1,5})$/):raw.match(/^([0-9.]+):([0-9]{1,5})$/);
+  if(!match||match[0]!==raw)return null;
+  const family=isIP(match[1]),port=Number(match[2]);
+  if(!family||!Number.isInteger(port)||port>65535||(family===6)!==raw.startsWith('['))return null;
+  const host=family===6?new URL(`http://[${match[1]}]/`).hostname:match[1];
+  const bare=host.replace(/^\[|\]$/g,'');
+  const loopback=family===4?/^127\./.test(bare):bare==='::1';
+  const first=family===6?Number.parseInt(bare.split(':')[0],16):0;
+  const linkLocal=family===4?/^169\.254\./.test(bare):first>=0xfe80&&first<=0xfebf;
+  return {endpoint:`${host}:${port}`,family,scope:loopback?'loopback':linkLocal?'link_local':'non_loopback'};
+}
+// Diagnostics never authorize transport. V5's UDP/DNS failures remain intact.
+// No raw params/URLs/payload bytes/local IPs enter this bounded projection.
+function udpNetlogDetails(log) {
+  const limits=UDP_DETAIL_LIMITS,reasons=new Map(),sources=new Map(),allEdges=new Map(),seeds=new Set();
+  const types=new Map(Object.entries(log.constants?.logEventTypes??{}).map(([k,v])=>[v,k]));
+  const sourceTypes=new Map(Object.entries(log.constants?.logSourceType??{}).map(([k,v])=>[v,k]));
+  const phaseTypes=new Map(Object.entries(log.constants?.logEventPhase??{}).map(([k,v])=>[v,k]));
+  const errors=new Set(Object.values(log.constants?.netError??{}));
+  const fail=reason=>reasons.set(reason,(reasons.get(reason)??0)+1);
+  const sourceName=value=>NET_SOURCE_NAMES.has(sourceTypes.get(value))?sourceTypes.get(value):'UNKNOWN_SOURCE_TYPE';
+  const validID=id=>Number.isSafeInteger(id)&&id>0;
+  const dnsEvent=name=>typeof name==='string'&&(/^(DNS_TRANSACTION|MDNS_)/.test(name));
+  const knownName=name=>UDP_EVENTS.has(name)||UDP_CONTEXT_EVENTS.has(name);
+  let observedUDP=0,observedSends=0,observedSendErrors=0;
+  function source(raw,seen) {
+    if(!validID(raw?.id)||!Number.isSafeInteger(raw?.type)){return null;}
+    let node=sources.get(raw.id);
+    if(!node){node={id:raw.id,type:raw.type,seen:false,conflict:false};sources.set(raw.id,node);}
+    if(node.type!==raw.type)node.conflict=true;
+    node.seen||=seen;
+    return node;
+  }
+  // Bounded input (16MiB/100000 events) was checked by the caller. Build only
+  // identity/dependency indexes, not copies of arbitrary event parameters.
+  for(const event of log.events) {
+    const name=types.get(event.type),node=source(event.source,true);
+    const udp=typeof name==='string'&&name.startsWith('UDP_');
+    if(udp){observedUDP++;if(node)seeds.add(node.id);else fail('udp_source_identity_missing');}
+    if(name==='UDP_BYTES_SENT'){observedSends++;fail('udp_send_event_including_zero_bytes');}
+    if(name==='UDP_SEND_ERROR')observedSendErrors++;
+    if(node&&UDP_TYPES.has(sourceName(node.type)))seeds.add(node.id);
+    const raw=event.params?.source_dependency;
+    if(raw!==undefined&&node) {
+      const dependency=source(raw,false);
+      if(dependency)allEdges.set(`${node.id}:${dependency.id}`,{from:node.id,to:dependency.id});
+      else if(udp||UDP_TYPES.has(sourceName(node.type)))fail('dependency_identity_missing');
+    }
+  }
+  const result={scope:'captured Chromium NetLog source chains only; not OS packet capture',probe_attribution:'unknown; endpoint/marker alone do not establish a call site',limitations:['AddressSorter can use a non-capturing null NetLog; absence of events is not global zero-egress proof'],limits,observed_udp_events:observedUDP,observed_send_events:observedSends,observed_send_errors:observedSendErrors,has_send_event:observedSends>0,has_send_attempt:observedSends+observedSendErrors>0,details_complete:false,sources:[],dependencies:[],events:[],components:[],failure_reasons:[],overflow:false};
+  if(!seeds.size&&!observedUDP){result.details_complete=true;return result;}
+  if(!Number.isInteger(log.constants?.logEventPhase?.PHASE_NONE)||!errors.size)fail('diagnostic_constants_missing');
+  const adjacent=new Map();
+  for(const edge of allEdges.values())for(const [a,b]of [[edge.from,edge.to],[edge.to,edge.from]]){
+    if(!adjacent.has(a))adjacent.set(a,new Set());adjacent.get(a).add(b);
+  }
+  const selected=new Set(),queue=[];
+  function select(id,depth) {
+    if(selected.has(id))return;
+    if(selected.size>=limits.sources){result.overflow=true;fail('source_bound_exceeded');return;}
+    selected.add(id);queue.push([id,depth]);
+  }
+  for(const id of seeds)select(id,0);
+  for(let i=0;i<queue.length;i++) {
+    const [id,depth]=queue[i];
+    for(const next of adjacent.get(id)??[])if(!selected.has(next)) {
+      if(depth>=limits.depth){result.overflow=true;fail('dependency_depth_exceeded');}
+      else select(next,depth+1);
+    }
+  }
+  for(const edge of allEdges.values())if(selected.has(edge.from)&&selected.has(edge.to)) {
+    if(result.dependencies.length<limits.edges)result.dependencies.push(edge);
+    else {result.overflow=true;fail('dependency_edge_bound_exceeded');}
+  }
+  const states=new Map(),connects=new Map(),connectedDestinations=new Map(),alive=new Map();
+  for(const id of selected) {
+    const node=sources.get(id),type=sourceName(node?.type);
+    if(!node||!node.seen)fail('dependency_source_event_missing');
+    if(node?.conflict)fail('source_type_conflict');
+    if(type==='UNKNOWN_SOURCE_TYPE')fail('source_type_unknown');
+    const row={id,type,type_value:node?.type??null,seen_event_source:node?.seen??false,connect_operations:0,send_events:0,send_attempt_errors:0,has_send_event:false,has_send_attempt:false,socket_lifetime:UDP_TYPES.has(type)?{begin_index:null,end_index:null,complete:false}:null};
+    result.sources.push(row);states.set(id,row);
+  }
+  function endpoint(params,row,key) {
+    const parsed=literalEndpoint(params.address);
+    if(!parsed){fail('endpoint_not_literal_ip_port');row.endpoint_status='unknown';return;}
+    if(key==='local')row.local_address={family:parsed.family,scope:parsed.scope};
+    else row.destination=parsed;
+  }
+  function errorResult(params,row,successOmission) {
+    if(params.net_error===undefined&&successOmission){row.net_error=0;row.result_basis='verified_schema_omission';return;}
+    if(!Number.isSafeInteger(params.net_error)||params.net_error>0||!errors.has(params.net_error)) {
+      fail('net_error_unknown');row.result_basis='unknown';return;
+    }
+    row.net_error=params.net_error;row.result_basis='recorded_net_error';
+  }
+  for(let index=0;index<log.events.length;index++) {
+    const event=log.events[index],id=event.source?.id;
+    if(!selected.has(id))continue;
+    const name=types.get(event.type),node=states.get(id),udpSocket=UDP_TYPES.has(node.type),udpName=typeof name==='string'&&name.startsWith('UDP_');
+    if(!knownName(name)&&!dnsEvent(name)&&!udpName)continue;
+    if(!udpSocket&&!udpName&&!dnsEvent(name)&&name!=='HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK')continue;
+    const phase=phaseTypes.get(event.phase),params=event.params??{};
+    const row={event_index:index,source_id:id,event_type:knownName(name)?name:dnsEvent(name)?'DNS_OR_MDNS_EVENT':'UNKNOWN_UDP_EVENT',event_type_value:Number.isSafeInteger(event.type)?event.type:null,phase:['PHASE_BEGIN','PHASE_END','PHASE_NONE'].includes(phase)?phase:'UNKNOWN_PHASE'};
+    if(row.phase==='UNKNOWN_PHASE')fail('event_phase_unknown');
+    if(udpName&&!UDP_EVENTS.has(name))fail('udp_event_unknown');
+    if(udpName&&!udpSocket)fail('udp_event_source_type_unexpected');
+    if(dnsEvent(name))fail('dns_or_mdns_event');
+    if(name==='UDP_CONNECT') {
+      if(phase==='PHASE_BEGIN') {
+        endpoint(params,row,'remote');
+        connectedDestinations.delete(id);
+        if(connects.has(id))fail('duplicate_connect_begin');
+        connects.set(id,{index,destination:row.destination?.endpoint??null});node.connect_operations++;
+      } else if(phase==='PHASE_END') {
+        const begin=connects.get(id);
+        if(!begin)fail('unpaired_connect_end');
+        else {row.begin_index=begin.index;row.matched_destination=begin.destination;connects.delete(id);}
+        errorResult(params,row,!!begin);
+        if(row.net_error===0&&begin?.destination)connectedDestinations.set(id,begin.destination);
+      } else fail('connect_phase_invalid');
+    }
+    if(name==='SOCKET_CONNECT') {endpoint(params,row,'remote');errorResult(params,row,true);if(phase!=='PHASE_NONE')fail('socket_connect_phase_invalid');}
+    if(name==='SOCKET_OPEN') {errorResult(params,row,true);if(phase!=='PHASE_NONE')fail('socket_open_phase_invalid');}
+    if(name==='SOCKET_ALIVE') {
+      if(phase==='PHASE_BEGIN') {
+        if(alive.has(id))fail('duplicate_socket_lifetime_begin');
+        alive.set(id,index);node.socket_lifetime.begin_index=index;
+        if(params.source_dependency===undefined)fail('socket_dependency_missing');
+      } else if(phase==='PHASE_END') {
+        if(!alive.has(id))fail('unpaired_socket_lifetime_end');
+        else {node.socket_lifetime.complete=true;alive.delete(id);}
+        node.socket_lifetime.end_index=index;
+      } else fail('socket_lifetime_phase_invalid');
+    }
+    if(name==='UDP_LOCAL_ADDRESS')endpoint(params,row,'local');
+    if(name==='UDP_BYTES_SENT'||name==='UDP_BYTES_RECEIVED') {
+      if(!Number.isSafeInteger(params.byte_count)||params.byte_count<0||params.byte_count>65535)fail('datagram_byte_count_unknown');
+      else row.byte_count=params.byte_count;
+      if(params.address!==undefined)endpoint(params,row,'remote');
+      else if(connectedDestinations.has(id))row.connected_destination=connectedDestinations.get(id);
+      else {row.destination_status='unknown';fail('datagram_destination_unknown');}
+      if(name==='UDP_BYTES_SENT'){node.send_events++;node.has_send_event=true;node.has_send_attempt=true;}
+      else fail('unexpected_udp_receive');
+    }
+    if(name==='UDP_SEND_ERROR'||name==='UDP_RECEIVE_ERROR') {
+      errorResult(params,row,false);
+      if(name==='UDP_SEND_ERROR'){node.send_attempt_errors++;node.has_send_attempt=true;}
+      fail(name==='UDP_SEND_ERROR'?'udp_send_attempt_error':'unexpected_udp_receive_error');
+    }
+    if(name==='HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK')for(const key of ['ipv6_available','cached']) {
+      if(typeof params[key]==='boolean')row[key]=params[key];else fail('reachability_marker_incomplete');
+    }
+    if(params.source_dependency!==undefined) {
+      const dependency=params.source_dependency;
+      if(validID(dependency?.id)&&sources.get(dependency.id)?.type===dependency?.type)row.dependency_source_id=dependency.id;
+      else fail('dependency_identity_missing');
+    }
+    if(result.events.length<limits.events)result.events.push(row);
+    else {result.overflow=true;fail('event_detail_bound_exceeded');}
+  }
+  for(const id of connects.keys())fail('connect_end_missing');
+  for(const row of result.sources)if(UDP_TYPES.has(row.type)&&(!row.socket_lifetime.complete||alive.has(row.id)))fail('socket_lifetime_incomplete');
+  const grouped=new Set();
+  for(const id of selected)if(!grouped.has(id)) {
+    const ids=[],pending=[id];grouped.add(id);
+    for(let i=0;i<pending.length;i++)for(const next of adjacent.get(pending[i])??[])if(selected.has(next)&&!grouped.has(next)){grouped.add(next);pending.push(next);}
+    ids.push(...pending);
+    result.components.push({source_ids:ids,udp_source_ids:ids.filter(x=>UDP_TYPES.has(states.get(x).type)),has_send_event:ids.some(x=>states.get(x).has_send_event),has_send_attempt:ids.some(x=>states.get(x).has_send_attempt),send_events:ids.reduce((n,x)=>n+states.get(x).send_events,0),send_attempt_errors:ids.reduce((n,x)=>n+states.get(x).send_attempt_errors,0)});
+  }
+  result.failure_reasons=[...reasons].map(([reason,count])=>({reason,count}));
+  result.details_complete=!result.overflow&&!result.failure_reasons.length;
+  if(Buffer.byteLength(JSON.stringify(result))>limits.bytes) {
+    return {scope:result.scope,probe_attribution:result.probe_attribution,limitations:result.limitations,limits,observed_udp_events:observedUDP,observed_send_events:observedSends,observed_send_errors:observedSendErrors,has_send_event:observedSends>0,has_send_attempt:observedSends+observedSendErrors>0,details_complete:false,overflow:true,sources:[],dependencies:[],events:[],components:[],failure_reasons:[{reason:'diagnostic_byte_bound_exceeded',count:1}]};
+  }
+  return result;
+}
 function netlogAudit(log, origins, endpoints) {
   assert(log&&Array.isArray(log.events)&&log.events.length<=100000, 'invalid/bounded NetLog events');
   const types=log.constants?.logEventTypes, phases=log.constants?.logEventPhase;
@@ -207,6 +392,8 @@ function netlogAudit(log, origins, endpoints) {
   }
   if(attempts.size)bad('unfinished TCP attempt; transport outcome unknown');
   if(report.tcp_endpoint_events===0||report.tcp_bytes_sent_events===0)bad('no actual loopback socket traffic evidence');
+  report.udp_diagnostics=udpNetlogDetails(log);
+  for(const {reason}of report.udp_diagnostics.failure_reasons)bad(`UDP diagnostic incomplete/prohibited: ${reason}`);
   return report;
 }
 // This only observes/signals the Chrome parent. Linux Go supervision separately
@@ -237,6 +424,101 @@ function chromeParentCleanupFailure(result) {
   if(!result.parent_exit_observed)return 'Chrome parent exit unknown after bounded cleanup';
   if(result.term_sent||result.kill_sent)return 'Chrome parent required signal-based cleanup';
   return null;
+}
+function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
+  for(const raw of ['https://user:secret@example.invalid/?token=secret','localhost:53','127.1:53','[fe80::1%eth0]:443','[::1]:65536','127.0.0.1','1.2.3.4:secret','127.0.0.1:443\n','[::1]:443\n'])assert.equal(literalEndpoint(raw),null);
+  assert.equal(literalEndpoint('[2001:0DB8:0:0::1]:00443').endpoint,'[2001:db8::1]:443');
+  assert.equal(literalEndpoint('127.0.0.1:0').scope,'loopback');
+  const constants={...structuredClone(baseLog.constants),logEventTypes:{...baseLog.constants.logEventTypes,SOCKET_ALIVE:6,SOCKET_OPEN:7,SOCKET_CONNECT:8,UDP_LOCAL_ADDRESS:9,UDP_BYTES_RECEIVED:10,UDP_SEND_ERROR:11,UDP_RECEIVE_ERROR:12,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:13,DNS_TRANSACTION_ATTEMPT:14,UDP_PRIVATE_SECRET:15},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},logSourceType:{HOST_RESOLVER_IMPL_JOB:20,UDP_CLIENT_SOCKET:21,UDP_SOCKET:22,DNS_TRANSACTION:23},netError:{OK:0,ADDRESS_UNREACHABLE:-109}};
+  const event=(type,phase,id,sourceType,params={})=>({type,phase,source:{id,type:sourceType},params});
+  const fixture={constants,events:[
+    event(13,0,100,20,{ipv6_available:false,cached:false,secret:'do-not-persist'}),
+    event(6,1,101,21,{source_dependency:{id:100,type:20}}),
+    event(6,1,102,22,{source_dependency:{id:101,type:21}}),
+    event(7,0,101,21),
+    event(4,1,102,22,{address:'[2001:db8::1]:443',bytes:'secret-payload',url:'https://user:secret@example.invalid/path?token=secret'}),
+    event(4,2,102,22),
+    event(8,0,101,21,{address:'[2001:db8::1]:443'}),
+    event(9,0,102,22,{address:'[fe80::1234]:54321'}),
+    event(6,2,102,22),event(6,2,101,21)
+  ]};
+  const details=udpNetlogDetails(fixture);
+  assert.equal(details.details_complete,true);
+  assert.deepEqual(details.failure_reasons,[]);
+  assert.equal(details.sources.length,3);
+  assert.equal(details.components.length,1);
+  assert.equal(details.has_send_event,false);
+  assert.equal(details.events.find(e=>e.event_type==='UDP_CONNECT'&&e.phase==='PHASE_END').net_error,0);
+  assert(details.sources.filter(s=>UDP_TYPES.has(s.type)).every(s=>s.socket_lifetime.complete));
+  assert.equal(details.events.find(e=>e.event_type==='UDP_LOCAL_ADDRESS').local_address.scope,'link_local');
+  for(const text of ['secret','fe80::1234','54321'])assert(!JSON.stringify(details).includes(text));
+  assert(details.probe_attribution.startsWith('unknown'));
+  assert(details.limitations.some(s=>s.includes('non-capturing')));
+  // Complete connect-only metadata must NOT remove the existing UDP failure.
+  const combined={constants,events:[...baseLog.events,...fixture.events]};
+  const guarded=netlogAudit(combined,origins,endpoints);
+  assert.equal(guarded.udp_events,2);
+  assert.equal(guarded.violations.filter(x=>x==='unexpected UDP_CONNECT; no UDP/DNS transport permitted').length,2);
+  assert.equal(guarded.udp_diagnostics.details_complete,true);
+  const failures=input=>udpNetlogDetails(input).failure_reasons.map(r=>r.reason);
+  const change=fn=>{const f=structuredClone(fixture);fn(f);return f;};
+  const zero=change(f=>f.events.splice(8,0,event(5,0,102,22,{byte_count:0,bytes:'secret-zero'})));
+  const z=udpNetlogDetails(zero);
+  assert.equal(z.observed_send_events,1);assert(z.has_send_event&&z.has_send_attempt);
+  assert(z.components[0].has_send_event);assert(z.events.some(e=>e.event_type==='UDP_BYTES_SENT'&&e.byte_count===0));
+  assert(failures(zero).includes('udp_send_event_including_zero_bytes'));
+  assert(netlogAudit({constants,events:[...baseLog.events,...zero.events]},origins,endpoints).violations.some(x=>x==='unexpected UDP_BYTES_SENT; no UDP/DNS transport permitted'));
+  const failedReconnect=change(f=>f.events.splice(8,0,event(4,1,102,22,{address:'[2001:db8::2]:443'}),event(4,2,102,22,{net_error:-109}),event(5,0,102,22,{byte_count:0})));
+  assert(failures(failedReconnect).includes('datagram_destination_unknown'));
+  const sendError=change(f=>f.events.splice(8,0,event(11,0,102,22,{net_error:-109})));
+  const failedSend=udpNetlogDetails(sendError);
+  assert.equal(failedSend.observed_send_errors,1);assert(failedSend.has_send_attempt&&!failedSend.has_send_event);
+  assert(failures(sendError).includes('udp_send_attempt_error'));
+  for(const [edit,reason]of [
+    [f=>f.events[4].params.address='http://user:secret@bad/?token=secret','endpoint_not_literal_ip_port'],
+    [f=>f.events.splice(5,1),'connect_end_missing'],
+    [f=>f.events[5].params.net_error='secret','net_error_unknown'],
+    [f=>delete f.events[2].params.source_dependency,'socket_dependency_missing'],
+    [f=>f.events[2].params.source_dependency=null,'dependency_identity_missing'],
+    [f=>f.events.pop(),'socket_lifetime_incomplete'],
+    [f=>f.events[5].phase=99,'event_phase_unknown'],
+    [f=>delete f.constants.logSourceType,'source_type_unknown'],
+    [f=>delete f.constants.netError,'diagnostic_constants_missing'],
+    [f=>f.events[5].source.type=21,'source_type_conflict'],
+    [f=>f.events[5].source.id=0,'udp_source_identity_missing'],
+    [f=>f.events.splice(8,0,event(15,0,102,22,{secret:'private'})),'udp_event_unknown'],
+    [f=>f.events.splice(8,0,event(14,0,100,20,{source_dependency:{id:102,type:22},qname:'secret.invalid'})),'dns_or_mdns_event'],
+    [f=>f.events.splice(8,0,event(5,0,102,22,{byte_count:-1})),'datagram_byte_count_unknown']
+  ]) {
+    const f=change(edit),r=udpNetlogDetails(f);
+    assert(r.failure_reasons.some(x=>x.reason===reason),`missing negative ${reason}`);
+    assert.equal(r.details_complete,false);
+    assert(!JSON.stringify(r).includes('secret'));
+    assert(Buffer.byteLength(JSON.stringify(r))<=UDP_DETAIL_LIMITS.bytes);
+  }
+  const eventOverflow=change(f=>{for(let i=0;i<300;i++)f.events.push(event(13,0,100,20,{ipv6_available:false,cached:true}));});
+  const bounded=udpNetlogDetails(eventOverflow);
+  assert(bounded.overflow&&!bounded.details_complete);
+  assert(bounded.events.length<=UDP_DETAIL_LIMITS.events);
+  assert(failures(eventOverflow).includes('event_detail_bound_exceeded'));
+  const sourceOverflow=change(f=>{for(let i=200;i<270;i++)f.events.push(event(4,1,i,22,{address:'127.0.0.1:443'}));});
+  const sourceBounded=udpNetlogDetails(sourceOverflow);
+  assert(sourceBounded.overflow&&sourceBounded.sources.length<=UDP_DETAIL_LIMITS.sources);
+  assert(failures(sourceOverflow).includes('source_bound_exceeded'));
+  const depthOverflow=change(f=>{for(let i=0;i<12;i++)f.events.push(event(13,0,100+i*100,20,{source_dependency:{id:200+i*100,type:20},ipv6_available:false,cached:false}));});
+  assert(failures(depthOverflow).includes('dependency_depth_exceeded'));
+  const edgeOverflow=change(f=>{for(let a=100;a<114;a++)for(let b=100;b<114;b++)if(a!==b)f.events.push(event(13,0,a,20,{source_dependency:{id:b,type:20},ipv6_available:false,cached:false}));});
+  assert(failures(edgeOverflow).includes('dependency_edge_bound_exceeded'));
+  assert(Buffer.byteLength(JSON.stringify(udpNetlogDetails(edgeOverflow)))<=UDP_DETAIL_LIMITS.bytes);
+  const byteOverflow={constants,events:[event(13,0,100,20,{ipv6_available:false,cached:false})]};
+  for(let i=0;i<63;i++) {
+    const id=9000000000000000+i;
+    byteOverflow.events.push(event(6,1,id,22,{source_dependency:{id:100,type:20}}),event(4,1,id,22,{address:'[2001:db8:1234:5678:9abc:def0:1111:2222]:65535'}),event(4,2,id,22),event(6,2,id,22));
+  }
+  const byteBounded=udpNetlogDetails(byteOverflow);
+  assert(byteBounded.overflow&&!byteBounded.details_complete);
+  assert(byteBounded.failure_reasons.some(x=>x.reason==='diagnostic_byte_bound_exceeded'));
+  assert(Buffer.byteLength(JSON.stringify(byteBounded))<=UDP_DETAIL_LIMITS.bytes);
 }
 async function selfTest() {
   const input=new PassThrough(), output=new PassThrough(), client=new CDP(input, output);
@@ -300,6 +582,7 @@ async function selfTest() {
       }
     }]
   };
+  udpDiagnosticSelfTest(log,origins,policy.endpoints);
   const audit=netlogAudit(log, origins, policy.endpoints);
   assert.deepEqual(audit.violations, []);
   assert.deepEqual(audit.non_fixture_url_attempts, ['https://example.invalid/path']);
@@ -383,7 +666,7 @@ async function selfTest() {
     width:1440, height:1000
   });
   assert.throws(()=>pngSize(Buffer.alloc(24)));
-  console.log('PASS stdlib-only framing/error/origin/DNS-policy/transport-audit/readiness-negative/bounded-parent-cleanup/TERM-zero-exit-rejection/contrast/PNG-header/argument self-tests; no Chrome, application, screenshot or network used');
+  console.log('PASS stdlib-only framing/error/origin/DNS-policy/transport-audit/readiness-negative/bounded-parent-cleanup/TERM-zero-exit-rejection/UDP-source-chain-phase-result-lifetime-sanitization-and-bounds/contrast/PNG-header/argument self-tests; no Chrome, application, screenshot or network used');
 }
 async function main() {
   assert([22, 24].includes(Number(process.versions.node.split('.')[0])), 'requested QA requires reviewed Node 22 or 24');
