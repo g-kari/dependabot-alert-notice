@@ -1,0 +1,39 @@
+{{define "content"}}
+<div class="finding-topline"><a href="/findings">Security / Findings</a><a href="/api/v1/findings/{{.Detail.Finding.ID}}" class="btn btn-ghost btn-sm interactive-scale">この Finding の JSON</a></div>
+<header class="finding-page-heading"><div><p class="finding-caption">{{.Detail.Finding.Source}} / {{.Detail.Finding.SourceFindingID}}</p><h1>{{if .Detail.Finding.Title}}{{.Detail.Finding.Title}}{{else if .Detail.Finding.VulnerabilityID}}{{.Detail.Finding.VulnerabilityID}}{{else}}Finding 詳細{{end}}</h1><p class="finding-caption">Finding ID: {{.Detail.Finding.ID}}</p></div><span class="badge {{findingSeverityClass .Detail.Finding.Severity}}">{{if .Detail.Finding.Severity}}{{.Detail.Finding.Severity}}{{else}}unknown{{end}}</span></header>
+<p class="finding-notice">この画面は読み取り専用です。同じ CVE の Finding も検出元ごとの記録を保持し、承認状態には変換しません。</p>
+<div class="finding-detail-grid">
+  <section class="card" aria-labelledby="finding-object-heading"><h2 id="finding-object-heading">Finding</h2><dl class="finding-facts">
+    <div><dt>検出元</dt><dd>{{findingOrUnknown .Detail.Finding.Source}}</dd></div>
+    <div><dt>検出元の ID</dt><dd>{{findingOrUnknown .Detail.Finding.SourceFindingID}}</dd></div>
+    <div><dt>検出元の状態</dt><dd><span class="badge badge-info">{{if .Detail.Finding.SourceStatus}}{{.Detail.Finding.SourceStatus}}{{else}}unknown{{end}}</span></dd></div>
+    <div><dt>ローカルトリアージ</dt><dd><span class="badge badge-pending">{{if .Detail.Finding.TriageStatus}}{{.Detail.Finding.TriageStatus}}{{else}}不明{{end}}</span></dd></div>
+    <div><dt>Category</dt><dd>{{.Detail.Finding.Category}}</dd></div>
+    <div><dt>Advisory / CVE</dt><dd>{{findingOrUnknown .Detail.Finding.VulnerabilityID}}</dd></div>
+    <div><dt>初回検出 (UTC)</dt><dd>{{findingTime .Detail.Finding.FirstSeen}}</dd></div>
+    <div><dt>最終検出 (UTC)</dt><dd>{{findingTime .Detail.Finding.LastSeen}}</dd></div>
+    {{if .Detail.Finding.PackageName}}<div><dt>パッケージ</dt><dd>{{.Detail.Finding.PackageName}} / {{.Detail.Finding.PackageEcosystem}}</dd></div><div><dt>Installed / Fixed</dt><dd>{{findingOrUnknown .Detail.Finding.InstalledVersion}} / {{findingOrUnknown .Detail.Finding.FixedVersion}}</dd></div>{{end}}
+    {{if .Detail.Finding.RuleID}}<div><dt>Rule / Tool</dt><dd>{{.Detail.Finding.RuleID}} / {{.Detail.Finding.ToolName}}</dd></div>{{end}}
+    {{if .Detail.Finding.FilePath}}<div><dt>Location</dt><dd>{{.Detail.Finding.FilePath}}{{if .Detail.Finding.StartLine}}:{{.Detail.Finding.StartLine}}{{end}}</dd></div>{{end}}
+    {{if .Detail.Finding.SecretType}}<div><dt>Secret type / Resolution</dt><dd>{{.Detail.Finding.SecretType}} / {{findingOrUnknown .Detail.Finding.SecretResolution}}</dd></div>{{end}}
+  </dl></section>
+  <section class="card" aria-labelledby="finding-asset-heading"><div class="section-heading"><h2 id="finding-asset-heading">Asset</h2><a href="/findings?asset_id={{.Detail.Asset.ID}}">この Asset の一覧</a></div><dl class="finding-facts">
+    <div><dt>Native ID</dt><dd>{{findingOrUnknown .Detail.Asset.NativeID}}</dd></div>
+    <div><dt>Asset ID</dt><dd>{{.Detail.Asset.ID}}</dd></div>
+    <div><dt>Type / Provider</dt><dd>{{.Detail.Asset.Type}} / {{.Detail.Asset.Provider}}</dd></div>
+    <div><dt>Account</dt><dd>{{findingOrUnknown .Detail.Asset.Account}}</dd></div>
+    <div><dt>Region</dt><dd>{{findingOrUnknown .Detail.Asset.Region}}</dd></div>
+    <div><dt>Environment</dt><dd>{{findingOrUnknown .Detail.Asset.Environment}}</dd></div>
+    <div><dt>Criticality</dt><dd>{{findingOrUnknown .Detail.Asset.Criticality}}</dd></div>
+  </dl><p class="finding-section-note">Asset の属性は保存された値です。ここでは重要度やリスクスコアを推測しません。</p></section>
+</div>
+<section aria-labelledby="finding-threat-heading"><div class="section-heading"><h2 id="finding-threat-heading">脅威情報の根拠</h2></div><p class="finding-section-note">EPSS と KEV の鮮度は独立です。Fresh は公開・観測がともに 72 時間以内。欠落は安全や非掲載の証拠ではありません。</p><div class="finding-detail-grid">{{template "nativeFindingSignal" .EPSS}}{{template "nativeFindingSignal" .KEV}}</div></section>
+<section class="card" id="related" aria-labelledby="related-heading"><div class="section-heading"><div><h2 id="related-heading">同じ CVE の関連 Findings</h2><p class="text-muted">{{if .Related.CVEID}}{{.Related.CVEID}} / {{.Related.Total}} 件。関連付けのみ。Finding の統合や重複排除ではありません。{{else}}明示的な CVE がないため関連付けしません。{{end}}</p></div><a href="{{.RelatedURL}}">関連 JSON</a></div>
+{{if .Rows}}{{template "nativeFindingRows" .Rows}}{{else}}<p class="finding-empty">このページに関連 Finding はありません。</p>{{end}}
+<nav class="pagination" aria-label="関連 Findings のページ">{{if .PreviousURL}}<a class="btn btn-ghost" rel="prev" href="{{.PreviousURL}}">前へ</a>{{end}}<span class="pagination-info">Offset {{.Related.Offset}} / 最大 {{.Related.Limit}} 件</span>{{if .NextURL}}<a class="btn btn-ghost" rel="next" href="{{.NextURL}}">次へ</a>{{end}}</nav></section>
+<section class="card" aria-labelledby="observations-heading"><div class="section-heading"><h2 id="observations-heading">検出元の証拠</h2><span class="text-muted">{{len .Detail.Observations}} 件</span></div>{{if .Detail.ObservationsTruncated}}<p class="finding-notice">最新 200 件のみ表示しています。古い証拠も保存されています。</p>{{end}}
+{{if .Detail.Observations}}<div class="table-wrap finding-evidence" tabindex="0" role="region" aria-label="観測された証拠 (横スクロール可能)"><table><thead><tr><th scope="col">観測 (UTC)</th><th scope="col">検出元 / Native ID</th><th scope="col">証拠参照</th><th scope="col">Run / Observation</th></tr></thead><tbody>{{range .Detail.Observations}}<tr><td>{{findingTime .ObservedAt}}</td><td>{{.Source}}<br>{{.SourceFindingID}}</td><td>{{.RawRef}}<br><span class="finding-caption">Fingerprint: {{.Fingerprint}}</span></td><td>{{.IngestRunID}}<br><span class="finding-caption">{{.ID}}</span></td></tr>{{end}}</tbody></table></div>{{else}}<p class="text-muted">観測証拠はありません。</p>{{end}}</section>
+<section class="card" aria-labelledby="events-heading"><div class="section-heading"><h2 id="events-heading">履歴</h2><span class="text-muted">{{len .Detail.Events}} 件</span></div>{{if .Detail.EventsTruncated}}<p class="finding-notice">最新 200 件のみ表示しています。古い履歴も保存されています。</p>{{end}}
+{{if .Detail.Events}}<div class="table-wrap finding-evidence" tabindex="0" role="region" aria-label="履歴 (横スクロール可能)"><table><thead><tr><th scope="col">時刻 (UTC)</th><th scope="col">Event / Actor</th><th scope="col">Before / After</th></tr></thead><tbody>{{range .Detail.Events}}<tr><td>{{findingTime .Timestamp}}</td><td>{{.EventType}}<br>{{.Actor}}</td><td>{{.BeforeRef}}<br>{{.AfterRef}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="text-muted">履歴はありません。</p>{{end}}</section>
+<details class="card finding-preview"><summary>任意: 優先順位プレビューの JSON</summary><p>評価時点を明示して既存 API を開きます。現在のスナップショットをその時点で評価する参考情報で、過去の復元や対応期限ではありません。終了判断・リスク受容・通知抑制には使わないでください。</p><form method="get" action="/api/v1/findings/{{.Detail.Finding.ID}}/priority-preview"><div class="field"><label for="preview-as-of">as_of (タイムゾーン付き RFC3339)</label><input id="preview-as-of" name="as_of" type="text" required maxlength="35" placeholder="2026-11-09T12:00:00Z" aria-describedby="preview-as-of-hint"><p class="field-hint" id="preview-as-of-hint">例: YYYY-MM-DDTHH:MM:SSZ。自動入力・自動評価は行いません。</p></div><button class="btn btn-ghost" type="submit">プレビュー JSON を開く</button></form></details>
+{{end}}

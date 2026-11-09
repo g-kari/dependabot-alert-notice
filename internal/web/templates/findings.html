@@ -1,0 +1,33 @@
+{{define "content"}}
+<div class="finding-topline"><span>Security / Findings</span><a href="{{.APIURL}}" class="btn btn-ghost btn-sm interactive-scale">この検索の JSON</a></div>
+<header class="finding-page-heading"><div><h1>Findings</h1><p>検出元を横断して検索し、根拠と対応状況を確認する。</p></div><span class="badge badge-info">Read-only</span></header>
+<p class="finding-notice">検出元の状態とローカルトリアージは別の指標です。承認・マージは <a href="/">Alerts</a> で扱います。</p>
+<div class="finding-overview">
+  <section class="card finding-summary" aria-label="検索結果の概要">
+    <div><span class="finding-caption">検索に一致</span><strong>{{.Page.Total}}<small>件</small></strong></div>
+    <div><span class="finding-caption">このページの Active</span><strong>{{.Active}}<small>件</small></strong></div>
+    <div><span class="finding-caption">このページの Resolved</span><strong>{{.Resolved}}<small>件</small></strong></div>
+  </section>
+  <section class="card finding-source-mix" aria-labelledby="source-mix-heading"><h2 id="source-mix-heading">表示中の検出元</h2>{{if .Sources}}<ul>{{range .Sources}}<li><span>{{.Name}}</span><meter value="{{.Count}}" min="0" max="{{len $.Page.Items}}" aria-label="{{.Name}}: 表示中 {{.Count}} 件">{{.Count}}</meter><strong>{{.Count}}</strong></li>{{end}}</ul>{{else}}<p class="text-muted">表示中の Finding はありません。</p>{{end}}</section>
+</div>
+<section class="card finding-filters" aria-labelledby="filter-heading">
+  <div class="section-heading"><h2 id="filter-heading">Findings を絞り込む</h2><a href="/findings">条件をリセット</a></div>
+  <form method="get" action="/findings">
+    <div class="finding-filter-grid">
+      <div class="field finding-search-field"><label for="finding-q">検索</label><input id="finding-q" name="q" type="text" maxlength="256" value="{{.Query.Search}}" placeholder="タイトル、CVE、パッケージ、検出元の ID" aria-describedby="finding-search-hint"><p class="field-hint" id="finding-search-hint">部分一致。% と _ もそのままの文字として検索します。</p></div>
+      <div class="field"><label for="finding-source">検出元</label><input id="finding-source" type="text" name="source" maxlength="64" value="{{.Query.Source}}" list="finding-sources" placeholder="すべて"><datalist id="finding-sources"><option value="dependabot"><option value="trivy"><option value="github_code_scanning"><option value="github_secret_scanning"></datalist></div>
+      <div class="field"><label for="finding-severity">Severity</label><select id="finding-severity" name="severity"><option value="">すべて</option><option value="critical" {{if eq .Query.Severity "critical"}}selected{{end}}>critical</option><option value="high" {{if eq .Query.Severity "high"}}selected{{end}}>high</option><option value="medium" {{if eq .Query.Severity "medium"}}selected{{end}}>medium</option><option value="low" {{if eq .Query.Severity "low"}}selected{{end}}>low</option><option value="unknown" {{if eq .Query.Severity "unknown"}}selected{{end}}>unknown</option></select></div>
+      <div class="field"><label for="finding-source-status">検出元の状態</label><select id="finding-source-status" name="source_status"><option value="">すべて (解決済みを含む)</option><option value="active" {{if eq .Query.SourceStatus "active"}}selected{{end}}>active</option><option value="resolved" {{if eq .Query.SourceStatus "resolved"}}selected{{end}}>resolved</option><option value="suppressed" {{if eq .Query.SourceStatus "suppressed"}}selected{{end}}>suppressed</option><option value="unknown" {{if eq .Query.SourceStatus "unknown"}}selected{{end}}>unknown</option></select></div>
+      <div class="field"><label for="finding-asset">Asset ID</label><input id="finding-asset" name="asset_id" type="text" maxlength="128" value="{{.Query.AssetID}}" placeholder="完全一致"></div>
+      <div class="field"><label for="finding-cve">CVE</label><input id="finding-cve" name="cve" type="text" maxlength="28" value="{{.Query.CVEID}}" placeholder="CVE-2026-0001"></div>
+      <div class="field"><label for="finding-limit">1 ページの件数</label><input id="finding-limit" name="limit" type="number" min="1" max="200" value="{{.Query.Limit}}"></div>
+    </div>
+    <div class="finding-filter-actions"><button type="submit" class="btn btn-primary interactive-scale">検索する</button><span class="field-hint">最大 200 件 / ページ。検索すると先頭ページに戻ります。</span></div>
+  </form>
+</section>
+<section class="card finding-results" aria-labelledby="findings-heading">
+  <div class="section-heading"><h2 id="findings-heading">Finding 一覧</h2><p class="text-muted">{{.First}}–{{.Last}} / {{.Page.Total}} 件</p></div>
+  {{if .Rows}}{{template "nativeFindingRows" .Rows}}{{else}}<div class="finding-empty"><h3>一致する Finding がありません</h3><p>検索条件を減らすか、先頭ページから確認してください。未収集のデータは表示されません。</p><a class="btn btn-ghost" href="/findings">すべての Findings を見る</a></div>{{end}}
+  <nav class="pagination" aria-label="Findings のページ">{{if .PreviousURL}}<a class="btn btn-ghost interactive-scale" rel="prev" href="{{.PreviousURL}}">前へ</a>{{end}}<span class="pagination-info">Offset {{.Page.Offset}} / 最大 {{.Page.Limit}} 件</span>{{if .NextURL}}<a class="btn btn-ghost interactive-scale" rel="next" href="{{.NextURL}}">次へ</a>{{end}}</nav>
+</section>
+{{end}}
