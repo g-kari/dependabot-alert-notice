@@ -145,67 +145,67 @@
         }
       }
     },
-    "pre-commit@latest": {
-      "last_modified": "2026-03-21T07:29:51Z",
-      "resolved": "github:NixOS/nixpkgs/09061f748ee21f68a089cd5d91ec1859cd93d0be#pre-commit",
+    "pre-commit@2.20.0": {
+      "last_modified": "2023-03-07T16:41:48Z",
+      "resolved": "github:NixOS/nixpkgs/0ef02c4792fbde4b78957a46a8cb107b6c7aa3cc#pre-commit",
       "source": "devbox-search",
-      "version": "4.5.1",
+      "version": "2.20.0",
       "systems": {
         "aarch64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/4a9nr9sv90d2mj404fav33d55sc2pzn6-pre-commit-4.5.1",
+              "path": "/nix/store/bgh6lr049kh9wpaxaxb9rj7f8xjz43y4-python3.10-pre-commit-2.20.0",
               "default": true
             },
             {
               "name": "dist",
-              "path": "/nix/store/jwm57lnn7iq3wx9zhss7cvy9ilrjpb23-pre-commit-4.5.1-dist"
+              "path": "/nix/store/frw5iyvlh82g5l8sri8yw6r8rzsggrm5-python3.10-pre-commit-2.20.0-dist"
             }
           ],
-          "store_path": "/nix/store/4a9nr9sv90d2mj404fav33d55sc2pzn6-pre-commit-4.5.1"
+          "store_path": "/nix/store/bgh6lr049kh9wpaxaxb9rj7f8xjz43y4-python3.10-pre-commit-2.20.0"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/mjy1zl6wsk6y13xff8ffljv2nv22h0qy-pre-commit-4.5.1",
+              "path": "/nix/store/9jbcd2fiqgxsrm4kny21gh91rnz7n6p5-python3.10-pre-commit-2.20.0",
               "default": true
             },
             {
               "name": "dist",
-              "path": "/nix/store/p6gwkgkgp4qd6yn3468rq7zlbf9564kh-pre-commit-4.5.1-dist"
+              "path": "/nix/store/4ssbyccyri780hirnhx850j6n06kfk11-python3.10-pre-commit-2.20.0-dist"
             }
           ],
-          "store_path": "/nix/store/mjy1zl6wsk6y13xff8ffljv2nv22h0qy-pre-commit-4.5.1"
+          "store_path": "/nix/store/9jbcd2fiqgxsrm4kny21gh91rnz7n6p5-python3.10-pre-commit-2.20.0"
         },
         "x86_64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/6r8xqcpbxwas8qkhpwphqypmmydwpv0m-pre-commit-4.5.1",
+              "path": "/nix/store/c89i5lrfnpw9cx8a8xhw9lliqfhwbhk8-python3.10-pre-commit-2.20.0",
               "default": true
             },
             {
               "name": "dist",
-              "path": "/nix/store/iab0nwxfri1q4vgb2ra447li6302mlq2-pre-commit-4.5.1-dist"
+              "path": "/nix/store/vsg0xsrv09ciwxlvj6law731varpxz8b-python3.10-pre-commit-2.20.0-dist"
             }
           ],
-          "store_path": "/nix/store/6r8xqcpbxwas8qkhpwphqypmmydwpv0m-pre-commit-4.5.1"
+          "store_path": "/nix/store/c89i5lrfnpw9cx8a8xhw9lliqfhwbhk8-python3.10-pre-commit-2.20.0"
         },
         "x86_64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/0j1cw8kk39rin6qwbly7ikadaaizz44b-pre-commit-4.5.1",
+              "path": "/nix/store/5z3izkb2h4gz8kmkar31w6r6aimmm3il-python3.10-pre-commit-2.20.0",
               "default": true
             },
             {
               "name": "dist",
-              "path": "/nix/store/gv6xr8sd4rhlb97hb78c4518iv1lp0rw-pre-commit-4.5.1-dist"
+              "path": "/nix/store/d4vcw8fc3sqndjs2vff9jkg2xqvpgydv-python3.10-pre-commit-2.20.0-dist"
             }
           ],
-          "store_path": "/nix/store/0j1cw8kk39rin6qwbly7ikadaaizz44b-pre-commit-4.5.1"
+          "store_path": "/nix/store/5z3izkb2h4gz8kmkar31w6r6aimmm3il-python3.10-pre-commit-2.20.0"
         }
       }
     }
