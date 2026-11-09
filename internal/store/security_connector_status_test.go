@@ -88,7 +88,9 @@ func TestConnectorStatusExactSourceScopePagingAndCounts(t *testing.T) {
 	}{
 		{"all", "", "", 50, 0, 8, 8},
 		{"source", "dependabot", "", 50, 0, 3, 3},
-		{"exact scope across sources", "", "account/repo", 50, 0, 5, 5},
+		{"exact scope across sources", "", "account/repo", 50, 0, 4, 4},
+		{"offline CVE selection across sources", "", "cves-sha256:abc", 50, 0, 2, 2},
+		{"case-sensitive scope", "", "Account/repo", 50, 0, 1, 1},
 		{"combined", "dependabot", "account/repo", 50, 0, 1, 1},
 		{"literal", "", "%' OR 1=1 --", 50, 0, 0, 0},
 		{"page", "", "", 1, 1, 8, 1},
@@ -98,6 +100,27 @@ func TestConnectorStatusExactSourceScopePagingAndCounts(t *testing.T) {
 			page, err := s.QueryConnectorStatusPage(context.Background(), ConnectorStatusQuery{Source: tc.source, Scope: tc.scope, AsOf: at, Limit: tc.limit, Offset: tc.offset})
 			if err != nil || page.Total != tc.total || len(page.Items) != tc.items || page.Items == nil || page.Limit != tc.limit || page.Offset != tc.offset {
 				t.Fatalf("query=%+v page=%+v err=%v", tc, page, err)
+			}
+			// Scope is exact and source-specific: repository collection must not
+			// include the independent EPSS/KEV CVE-selection scope (or vice versa).
+			var sources []string
+			for _, item := range page.Items {
+				if tc.scope != "" && item.Scope != tc.scope {
+					t.Fatalf("scope=%q returned different scope=%q source=%q", tc.scope, item.Scope, item.Source)
+				}
+				sources = append(sources, item.Source)
+			}
+			var wantSources []string
+			switch tc.name {
+			case "exact scope across sources":
+				wantSources = []string{"dependabot", "github_code_scanning", "github_secret_scanning", "trivy"}
+			case "offline CVE selection across sources":
+				wantSources = []string{"epss_offline", "kev_offline"}
+			case "case-sensitive scope":
+				wantSources = []string{"dependabot"}
+			}
+			if wantSources != nil && !reflect.DeepEqual(sources, wantSources) {
+				t.Fatalf("scope=%q sources=%v, want exactly %v", tc.scope, sources, wantSources)
 			}
 			if tc.name == "page" && page.Items[0].Scope != "account/repo" {
 				t.Fatalf("binary source/scope order=%+v", page.Items)
