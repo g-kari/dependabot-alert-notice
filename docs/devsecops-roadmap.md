@@ -1,6 +1,6 @@
 # DevSecOps Console: 全体仕様と実装ロードマップ
 
-基準日: 2026-11-09。対象リポジトリ: [g-kari/devsecops-console](https://github.com/g-kari/devsecops-console)。コードの到達点は native Findings UI の PR #47 と GitHub credential context の PR #48 を含む main `3f1788959bc0ee6d29656f22573098f303854f15`。
+基準日: 2026-11-09。対象リポジトリ: [g-kari/devsecops-console](https://github.com/g-kari/devsecops-console)。コードの到達点は native Findings UI の PR #47、GitHub credential context の PR #48、記録済み収集状態 API の PR #49 を含む main `f88b89c63d8a613926eb4f9a8170bbc256f84f61` のスナップショット。
 
 本書は [アーキテクチャ設計 v1.0 のロードマップ](https://devsecops-architecture-ggg.mail590137.chatgpt.site/#roadmap) を、実装済みの範囲と残る製品要件に分けた仕様である。画面統合と GitHub 接続認証は全体の一部であり、それだけで DevSecOps 対応の完了とはしない。以降の「必要」「合格条件」は未実装部分の要求を含む。予定の API 名や状態は、既存契約と区別して記す。
 
@@ -34,8 +34,9 @@
 | 共通優先度 API | [PR #42](https://github.com/g-kari/devsecops-console/pull/42): 明示的 `as_of` の GET-only priority-preview と CLI 再現用 snapshot。 | 現在の DB snapshot を指定時刻で評価する。過去 DB の再構成ではない。API では profile/assessment/CVSS を推定・選択しない。 |
 | native UI の第 1 工程 | [PR #47](https://github.com/g-kari/devsecops-console/pull/47): `/findings` 一覧・詳細、既存 API と共通の検証、同一 CVE 関連、EPSS/KEV、参考試算への導線。詳細は [native Findings Console](native-findings-console.md)。 | 全画面の統一、Overview/Assets の完成、Web 認証、共通変更操作は含まない。ページ内件数は全体集計ではない。PR CI と当該 merge の事後 CI は成功しているが、実ブラウザーの desktop/mobile 表示確認は別である。 |
 | GitHub credential context | [PR #48](https://github.com/g-kari/devsecops-console/pull/48): 明示的な GitHub 認証 context と共有 command runner のコード統合。 | 最終 head の全体 CI とレビューを確認してマージ済み。[事後 CI](https://github.com/g-kari/devsecops-console/actions/runs/42664337692) も実 merge commit で format/vet/race/build/Mac helper が成功。実アカウントでの認証設定は有効化しておらず、ライブ接続や Web 利用者認証の確認ではない。legacy `inherited` mode は対話 CLI の認証依存を維持し、分離を保証しない。 |
+| 記録済み収集状態/coverage | [PR #49](https://github.com/g-kari/devsecops-console/pull/49): 明示的 `as_of`、厳密な source/scope と bounded query/page による GET-only 読み取り。最新の記録済み試行と最後の成功 receipt を分離する。詳細は [connector status 契約](security-connector-status.md)。 | 最終 head の全体 CI と実 merge の [事後 CI](https://github.com/g-kari/devsecops-console/actions/runs/42677991408) で format/vet/race/build/Mac helper が成功。設定 scope/inventory、全試行履歴、生存監視は未実装で、asset 母数も unknown/null。変更操作、認証、新規 feed は追加しない。 |
 
-残る主要要件は、収集状態/coverage、GitHub の継続収集、Trivy CI 経路、共通 enrichment と保存評価、全体 UI、Web 認証/RBAC、共通調査・対応・通知・SLA、AWS/WAF/SBOM、傾向分析、復旧・運用である。GitHub credential context のコード統合はこれらの完了を意味しない。未マージの候補実装をこの表の実装済みに含めない。
+残る主要要件は、設定 scope/inventory・全試行履歴の記録契約・生存監視を含む収集状態/coverage の拡張、GitHub の継続収集、Trivy CI 経路、共通 enrichment と保存評価、全体 UI、Web 認証/RBAC、共通調査・対応・通知・SLA、AWS/WAF/SBOM、傾向分析、復旧・運用である。GitHub credential context のコード統合はこれらの完了を意味しない。未マージの候補実装をこの表の実装済みに含めない。
 
 ## 2. 互換性と既存機能の再利用
 
@@ -98,7 +99,7 @@ IngestRun は試行と coverage の正本、Event は追記型の変更証跡と
 
 ### 5.1 収集状態・coverage の読み取り
 
-次の基礎工程は外部認証や実データなしで実装できる。予定の `GET /api/v1/connectors/status` の初期範囲は、**記録された source/scope の run/receipt** の読み取りであり、設定 scope の inventory、全試行履歴、生存監視は別工程とする。未マージの候補を main 実装済みとは扱わず、既存 [Findings/Assets API](security-phase1.md) を変更 API にしない。
+初期の `GET /api/v1/connectors/status` は実装済みである。その範囲は、**記録された source/scope の run/receipt** の読み取りに限り、設定 scope の inventory、全試行履歴、生存監視は引き続き別工程とする。以下の記録・時計・不明状態の境界を保ち、未マージの後続候補を main 実装済みとは扱わない。既存 [Findings/Assets API](security-phase1.md) を変更 API にしない。
 
 - 同じ source 内の正確な retained scope を単位とし、source の違い、owner-wide/repository、account、CVE 選択を混同しない。記録された pair の総数は設定済み対象や資産の母数ではない。
 - 最新の**記録済み** run と最後の成功 receipt を分け、記録された失敗・partial・running を過去の成功で隠さない。成功も partial になり得る。時刻、結果、coverage、retained run 件数を返しても、実際の全リクエスト数・全失敗数とは呼ばない。
@@ -288,7 +289,7 @@ GitHub credential context は collector/updater/action がどの GitHub principa
 
 実環境の許可待ちで、全コード作業を一律に止める必要はない。schema、pure adapter、読み取り API、mock collector、workflow、UI、業務モデルは合成データで先行できる。
 
-1. **基盤の可視化**: 収集状態/coverage read API → Overview/Assets の正しい母数・native theme 統合。既存 offline slice と ID/時計の規約を固定する。
+1. **基盤の可視化**: 実装済みの収集状態/coverage read API を土台に、Overview/Assets・native theme 統合と、設定 inventory/attempt/liveness の別契約へ進む。記録 pair の件数を資産の母数へ転用せず、既存 offline slice と ID/時計の規約を固定する。
 2. **継続収集と説明**: GitHub context/collector、Trivy CI 契約、common enrichment/永続評価を独立実装し、共通キュー・根拠 UI につなぐ。外部接続は adapter 後に個別確認する。
 3. **安全な共通変更**: Web 認証/RBAC、監査、revision/idempotency を整備してから triage、調査、Action、SLA/例外、通知を接続する。read-only 開発はこの完了を待たなくてよい。
 4. **対象拡張**: AWS の形式別 offline adapter → fake API/event reconciliation → 許可された account/region の導入。WAF/SBOM は方式選定 → 共通契約 → adapter → 必要なライブ接続の順に進める。

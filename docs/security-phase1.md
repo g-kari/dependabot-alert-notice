@@ -40,6 +40,7 @@ The normal Web handler adds GET-only routes:
 - `/api/v1/findings/{id}`: finding, affected asset, latest 200 observations and events. Explicit truncation flags indicate omitted older history; retained histories are returned chronologically.
 - `/api/v1/findings/{id}/related`: exact same-CVE association, existing candidate filters and pagination; anchor scope cannot be overridden.
 - `/api/v1/assets`: `limit`, `offset`.
+- [`/api/v1/connectors/status`](security-connector-status.md): required `as_of`; optional exact `source`, `scope`, `limit`, `offset`. Reports recorded attempts/receipts, not configured inventory coverage.
 
 Collections return `items`, `total`, `limit` and `offset`; limit defaults to 50 and is restricted to 1–200, offset to 0–1,000,000. Search is a literal substring across title, advisory, package/ecosystem/version, correlation key and asset identity; SQL wildcard characters are literal. Duplicate/unknown query parameters and invalid values are rejected. Unknown API paths return JSON 404; writes are not supported. Responses use `Cache-Control: no-store`, with bounded JSON errors rather than source or DB error text.
 
