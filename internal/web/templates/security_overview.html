@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="finding-topline"><span>Security / Overview</span><span class="badge badge-info">Read-only</span></div>
+<header class="finding-page-heading"><div><h1>記録された状況から、次の確認へ。</h1><p>保存されている Findings、Assets、収集記録を横断して確認します。</p></div><a class="btn btn-ghost interactive-scale" href="/findings">Findings を見る</a></header>
+<p class="finding-notice">集計範囲: すべての保存済み共通 Findings / Assets。読取時点 (UTC): {{findingTime .Overview.AsOf}}。未取得の対象を含む実環境全体の集計ではありません。</p>
+<div class="console-metrics">
+ <section class="card console-metric"><h2>Active Findings</h2><strong>{{.Overview.Active}}</strong><p class="finding-caption">検出元が active と記録</p></section>
+ <section class="card console-metric"><h2>Critical / Active</h2><strong>{{.Overview.Critical}}</strong><a href="/findings?severity=critical&amp;source_status=active">該当 Findings</a></section>
+ <section class="card console-metric"><h2>High / Active</h2><strong>{{.Overview.High}}</strong><a href="/findings?severity=high&amp;source_status=active">該当 Findings</a></section>
+ <section class="card console-metric"><h2>保存済み Assets</h2><strong>{{.Overview.Assets}}</strong><a href="/assets">Assets を見る</a></section>
+</div>
+<div class="finding-overview">
+ <section class="card" aria-labelledby="severe-heading"><div class="section-heading"><h2 id="severe-heading">重大な Active Findings</h2></div><p class="finding-section-note">Critical、High の順に、同じ severity では最終検出が新しい順。最大 8 件。優先度スコアや対応期限ではありません。</p>
+ {{range .Overview.Severe}}<article class="console-severe-item"><span class="badge {{findingSeverityClass .Severity}}">{{.Severity}}</span><div><h3><a href="/findings/{{.ID}}">{{if .Title}}{{.Title}}{{else if .VulnerabilityID}}{{.VulnerabilityID}}{{else if .RuleID}}{{.RuleID}}{{else}}{{.ID}}{{end}}</a></h3><p class="finding-caption">{{findingOrUnknown .Source}} / {{findingOrUnknown .SourceFindingID}}</p><p class="finding-caption">最終検出 (UTC): {{findingTime .LastSeen}}</p><a href="/assets/{{.AssetID}}">Asset 詳細</a></div></article>{{else}}<div class="finding-empty"><h3>保存済みの該当 Finding はありません</h3><p>取得失敗、未記録・未検査の対象や検査範囲外の安全性は判断できません。</p></div>{{end}}
+ </section>
+ <section class="card" aria-labelledby="global-sources-heading"><h2 id="global-sources-heading">保存済み Findings の内訳</h2><p class="finding-section-note">全 {{.Overview.Total}} 件。各 Finding の最新の観測に記録された検出元で分類します。解消済みや suppressed も含みます。</p><ul class="console-sources">{{range .Overview.Sources}}<li><span>{{.Source}}</span><strong>{{.Count}}</strong></li>{{else}}<li>保存済み Finding なし</li>{{end}}</ul>{{if .Overview.SourcesTruncated}}<p class="finding-notice">検出元の内訳は先頭 64 区分のみ表示しています。</p>{{end}}
+ <dl class="finding-facts"><div><dt>Source resolved</dt><dd>{{.Overview.Resolved}} 件</dd></div><div><dt>Source unknown</dt><dd>{{.Overview.Unknown}} 件</dd></div><div><dt>Finding のない保存済み Asset</dt><dd>{{.Overview.AssetsWithoutFindings}} 件。未検査か検出なしなのかは不明です。</dd></div><div><dt>KEV / 期限超過の全体集計</dt><dd>この工程では未集計。共通の保存済み期限は未実装です。Finding 詳細で個別の EPSS / KEV 証拠を確認してください。</dd></div></dl></section>
+</div>
+<section class="card" aria-labelledby="collection-heading"><div class="section-heading"><h2 id="collection-heading">収集の記録</h2><a href="{{.CollectionsURL}}">同じ評価時点で全記録を見る</a></div><p class="finding-section-note">評価時点 (UTC): {{findingTime .Overview.AsOf}}。Findings 集計とは独立した読取 snapshot です。記録 pair は設定対象や資産の母数ではなく、稼働状況は不明です。</p>
+{{if .CollectionError}}<p class="msg msg-error" role="status">収集記録を読み込めません。Findings / Assets の集計とは別の部分エラーです。</p>{{else}}<p class="console-result-meta">{{.Collections.Total}} 組の保存済み source/scope のうち、先頭 {{len .Collections.Items}} 組を表示。</p>{{template "consoleCollectionRows" .Collections.Items}}{{end}}
+</section>
+{{end}}

@@ -305,7 +305,8 @@ func nativeFindingSeverityClass(severity model.Severity) string {
 // with a successful status. All evidence remains html/template-escaped text.
 func (s *Server) renderNativeFindings(w http.ResponseWriter, r *http.Request, status int, page string, data any) {
 	nativeFindingsHeaders(w)
-	funcs := template.FuncMap{
+	funcs := consoleTemplateFuncs(page)
+	nativeFuncs := map[string]any{
 		"findingTime": nativeFindingTime, "findingSeverityClass": nativeFindingSeverityClass,
 		"findingOrUnknown": func(value string) string {
 			if value == "" {
@@ -313,6 +314,9 @@ func (s *Server) renderNativeFindings(w http.ResponseWriter, r *http.Request, st
 			}
 			return value
 		},
+	}
+	for key, value := range nativeFuncs {
+		funcs[key] = value
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/findings_shell.html", "templates/"+page)
 	var body bytes.Buffer

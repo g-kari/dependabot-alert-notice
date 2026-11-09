@@ -2,22 +2,6 @@
 {{define "bodyClass"}}findings-console{{end}}
 {{define "fontResources"}}<!-- Native console uses locally available fonts. -->{{end}}
 {{define "liveUpdates"}}<!-- Read-only native pages do not open a live stream. -->{{end}}
-{{define "navigation"}}
-<a href="#main-content" class="finding-skip">本文へ移動</a>
-<aside class="finding-sidebar" aria-label="DevSecOps Console">
-  <a href="/findings" class="finding-brand"><span class="finding-brand-mark" aria-hidden="true">▥</span><span>DevSecOps<span class="finding-brand-sub">Findings console</span></span></a>
-  <nav class="finding-nav" aria-label="メインナビゲーション">
-    <a class="nav-link interactive-scale" href="/findings" aria-current="page"><span aria-hidden="true">▤</span> Findings</a>
-    <a class="nav-link interactive-scale" href="/"><span aria-hidden="true">▦</span> Alerts / 承認</a>
-    <a class="nav-link interactive-scale" href="/reports/vulnerabilities"><span aria-hidden="true">◫</span> 脆弱性レポート</a>
-    <a class="nav-link interactive-scale" href="/logs"><span aria-hidden="true">≡</span> ログ</a>
-    <a class="nav-link interactive-scale" href="/settings"><span aria-hidden="true">⚙</span> 設定</a>
-  </nav>
-  <div class="card finding-sidebar-note"><h2>Source-native records</h2><p>検出元ごとの ID を保持。同じ CVE も別々の Finding として追跡します。</p><a href="/api/v1/assets" class="finding-api-link">Assets API (JSON)</a></div>
-  <p class="finding-sidebar-footer"><span class="finding-live-dot" aria-hidden="true"></span> 読み取り専用コンソール</p>
-</aside>
-{{end}}
-
 {{define "nativeFindingRows"}}
 <ul class="finding-list">
 {{range .}}
@@ -27,7 +11,7 @@
     <h3><a href="/findings/{{.ID}}">{{if .Title}}{{.Title}}{{else if .VulnerabilityID}}{{.VulnerabilityID}}{{else if .RuleID}}{{.RuleID}}{{else}}Finding {{.ID}}{{end}}</a></h3>
     <p class="finding-source"><span class="finding-source-label">{{findingOrUnknown .Source}}</span><span>{{findingOrUnknown .SourceFindingID}}</span></p>
     {{if .PackageName}}<p class="finding-caption">{{.PackageName}}{{if .InstalledVersion}} @ {{.InstalledVersion}}{{end}}{{if .FixedVersion}} → {{.FixedVersion}}{{end}}</p>{{end}}
-    <p class="finding-caption">Asset ID: <a href="/findings?asset_id={{.AssetID}}">{{.AssetID}}</a></p>
+    <p class="finding-caption">Asset ID: <a href="/assets/{{.AssetID}}">{{.AssetID}}</a></p>
     <p class="finding-caption">Finding ID: {{.ID}}{{if .VulnerabilityID}} / {{.VulnerabilityID}}{{end}}</p>
   </div>
   <dl class="finding-row-states">
@@ -57,4 +41,12 @@
   </dl>
   {{else}}<p class="text-muted">この Finding に対応する証拠はありません。不明は 0% や「掲載なし」を意味しません。</p>{{end}}
 </section>
+{{end}}
+
+{{define "consoleCollectionRows"}}
+{{if .}}<ul class="console-record-list">{{range .}}<li><article><div class="section-heading"><h3>{{.Source}} / {{.Scope}}</h3><span class="badge {{if eq .Status "failed"}}badge-error{{else if eq .Status "partial"}}badge-warn{{else}}badge-pending{{end}}">記録状態: {{.Status}}</span></div>
+<dl class="finding-facts"><div><dt>最新の記録済み試行</dt><dd>{{.LatestAttempt.ID}}<span class="finding-caption">開始 {{findingTime .LatestAttempt.StartedAt}}{{with .LatestAttempt.FinishedAt}} / 完了 {{findingTime .}}{{else}} / 完了時刻なし{{end}} (UTC)</span>結果 {{.LatestAttempt.Result}} / coverage {{.LatestAttempt.Coverage}}{{if .LatestAttempt.Future}}<p class="badge badge-warn">未来の記録。現在の状態・coverage は不明</p>{{end}}</dd></div>
+<div><dt>最後の成功 receipt</dt><dd>{{with .LastSuccess}}{{.ID}}<span class="finding-caption">{{with .FinishedAt}}{{findingTime .}}{{end}} (UTC) / coverage {{.Coverage}}</span>{{if .Future}}<span class="badge badge-warn">未来の成功記録。現在の成功を示しません</span>{{end}}{{else}}保存済み成功 receipt なし{{end}}</dd></div><div><dt>最新試行の coverage</dt><dd>{{.Coverage}}。資産母数に対する割合ではありません。</dd></div><div><dt>稼働 / liveness</dt><dd>{{.Liveness}}。running の記録は現在の生存も停止も証明しません。</dd></div><div><dt>保存済み run 件数</dt><dd>全 {{.RecordedRuns.Total}} / success {{.RecordedRuns.Success}} / partial {{.RecordedRuns.Partial}} / failed {{.RecordedRuns.Failed}} / running {{.RecordedRuns.Running}}。全リクエスト数・全失敗数ではありません。</dd></div></dl>
+<p class="console-record-kind">{{if eq .Source "dependabot"}}Dependabot の試行記録も、全試行の完全性を保証しません。{{else}}オフライン receipt 経路。失敗・入力検証エラーが記録されないため、成功後に失敗がなかったとは判断できません。{{end}}経過時間は収集元や feed の鮮度、SLA を示しません。</p>
+</article></li>{{end}}</ul>{{else}}<div class="finding-empty"><h3>このページに収集記録はありません</h3><p>未設定、未スキャン、対象外、未記録の失敗を区別する根拠はありません。正常なゼロ対象とは判定できません。</p></div>{{end}}
 {{end}}

@@ -280,7 +280,7 @@ func TestNativeConsoleStorageErrorsAreBoundedAndLegacyPolicyIsPreserved(t *testi
 	srv, db := newFindingsAPITestServer(t)
 	anchor := seedConsoleDependabot(t, db, "service", 1, "CVE-2099-0001")
 	body := findingsAPIRequest(t, srv, http.MethodGet, "/", http.StatusOK).Body.String()
-	if !strings.Contains(body, `href="/findings"`) || !strings.Contains(body, "EventSource") || strings.Contains(body, `class="findings-console"`) {
+	if !strings.Contains(body, `href="/findings"`) || !strings.Contains(body, "EventSource") || !strings.Contains(body, `class="findings-console legacy-console"`) {
 		t.Fatal("legacy navigation or live update shell changed unexpectedly")
 	}
 	for _, path := range []string{"/settings/repositories/exclude", "/reports/vulnerabilities/refresh"} {

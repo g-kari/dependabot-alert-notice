@@ -9,12 +9,14 @@ local triage, and the legacy Dependabot approval flow are separate concepts.
 Reproduce the approved visual reference with a dark navy navigation rail, a mint
 selected state, and a quiet list/detail workspace. Keep shared `.card`, `.btn`,
 `.badge`, `.field`, `.nav-link`, and `.interactive-scale` components. Scope token
-overrides to native pages so existing approval/settings screens remain intact.
+overrides to the shared app shell. Existing approval/settings behavior remains intact.
+The Overview/Assets integration extends this shell to legacy pages; see
+[native Overview and Assets](native-overview-assets.md).
 
 - Base: `#0b111a`; sidebar: `#0e1520`; surface: `#141e29`.
 - Text: `#e6edf5`; muted: `#a4b2c4`; accent: `#78ddc2`.
 - Typography: the existing `var(--font)` system/Japanese-capable fallback stack,
-  with no additional font download on native pages.
+  with no font downloads on native or legacy pages.
 - Layout: left-aligned rail + content; a bounded page summary, filters, list and
   detail sections. On small screens the rail becomes a compact navigation strip
   and field/detail grids collapse. Dense evidence tables scroll within cards.

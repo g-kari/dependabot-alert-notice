@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
 	"github.com/g-kari/dependabot-alert-notice/internal/feed"
@@ -28,6 +29,7 @@ import (
 var templateFS embed.FS
 
 type Server struct {
+	consoleNow               func() time.Time // Fixed-clock injection for read-only snapshot rendering.
 	port                     int
 	address                  string
 	store                    *store.Store
@@ -128,7 +130,7 @@ var templateFuncs = template.FuncMap{
 // render はlayout.html + 指定ページテンプレートをペアでパースして実行する。
 // 全ページを一度にParseすると{{define "content"}}が上書きされるため、ページごとに個別にパースする。
 func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	tmpl, err := template.New("").Funcs(templateFuncs).ParseFS(templateFS, "templates/layout.html", "templates/"+page)
+	tmpl, err := template.New("").Funcs(consoleTemplateFuncs(page)).ParseFS(templateFS, "templates/layout.html", "templates/"+page)
 	if err != nil {
 		slog.Error("テンプレートパース失敗", "page", page, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -147,6 +149,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerTUI(mux)
 	s.registerFindingsAPI(mux)
 	s.registerFindingsConsole(mux)
+	s.registerSecurityConsole(mux)
 	mux.HandleFunc("GET /", s.handleDashboard)
 	mux.HandleFunc("GET /alerts/{id}", s.handleDetail)
 	mux.HandleFunc("POST /alerts/{id}/approve", s.handleApprove)
@@ -189,7 +192,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("HTTP", "method", r.Method, "path", r.URL.Path)
-		if r.URL.Path == "/findings" || strings.HasPrefix(r.URL.Path, "/findings/") {
+		if nativeConsolePath(r.URL.Path) {
 			if !s.nativeFindingsGET(w, r) {
 				return
 			}
