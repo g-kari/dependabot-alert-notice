@@ -37,7 +37,7 @@ jobs:
           DEVSECOPS_BROWSER_QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           DEVSECOPS_BROWSER_QA_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           DEVSECOPS_BROWSER_QA_DIR: ${{ runner.temp }}/devsecops-browser-qa
-        run: go test ./internal/web -run '^TestNativeConsoleBrowserQA$' -count=1 -timeout=4m
+        run: go test ./internal/web -run '^(TestNativeConsoleBrowserQA|TestBrowserQAOwnedSignalRejectsChangedIdentity|TestBrowserQAOwnedProcessRecoversOrphanAndNodeTimeout)$' -count=1 -timeout=4m
       - name: Retain synthetic browser evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

@@ -190,7 +190,7 @@ func TestNativeConsoleBrowserQA(t *testing.T) {
 	cmd.Stderr = os.Stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = 5 * time.Second
-	commandErr := cmd.Run()
+	ownedProcesses, commandErr := browserQARunOwnedProcess(ctx, cmd)
 	stability := map[string]any{"synthetic": true, "persistent_unchanged": true, "stores": []map[string]string{}}
 	rows := []map[string]string{}
 	for i, db := range stores {
@@ -245,6 +245,14 @@ func TestNativeConsoleBrowserQA(t *testing.T) {
 		}
 	}
 	stability["external_action_calls"] = boundaryCalls
+	stability["owned_processes"] = ownedProcesses
+	stability["automated_status"] = "passed"
+	if commandErr != nil || t.Failed() {
+		stability["automated_status"] = "failed"
+	}
+	if commandErr != nil {
+		stability["command_error"] = commandErr.Error()
+	}
 	stability["request_audit"] = auditSummary
 	stability["configured_deadlines_ms"] = map[string]int{"command": 210000, "command_cancel_grace": 5000, "request_sse_cleanup": 2000}
 	browserQAWriteJSON(t, filepath.Join(out, "stability.json"), stability)

@@ -120,18 +120,123 @@ function contrast(fg, bg) {
   const a=lum(fg), b=lum(bg);
   return (Math.max(a, b)+.05)/(Math.min(a, b)+.05);
 }
-function netlogViolations(log, origins) {
-  const bad=[];
+// No query, fragment, credentials or raw CONNECT authority is persisted.
+function networkLabel(raw) {
+  try {
+    const u=new URL(raw);
+    return `${u.protocol}//${u.hostname}${u.port?':'+u.port:''}${u.pathname}`.slice(0, 256);
+  } catch {
+    return '[unparseable network target]';
+  }
+}
+function scrubNetworkText(text) {
+  return String(text).replace(/(?:https?|wss?):\/\/[^\s\"'<>]+/g, networkLabel);
+}
+function networkPolicy(origins, proxyOrigin) {
+  assert(origins.size===3);
+  for(const u of origins)assert(allowedOrigin(u, origins)&&new URL(u).pathname==='/');
+  assert(allowedOrigin(proxyOrigin, new Set([proxyOrigin]))&&!origins.has(proxyOrigin));
+  return {
+    // Chrome's mapped resolver applies MAP to numeric literals too. EXCLUDE
+    // prevents our own fixture/proxy IP from being rewritten to NOTFOUND.
+    resolver:'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+    // Remove Chromium's implicit broad loopback bypass, then allow ONLY the
+    // exact fixture scheme/host/port. Everything else reaches a deny-only proxy.
+    bypass:['<-loopback>', ...origins].join(';'),
+    endpoints:new Set([...origins, proxyOrigin].map(u=>new URL(u).host))
+  };
+}
+function internalTarget(info) {
+  return ['browser_ui', 'background_page', 'service_worker'].includes(info.type)&& (info.url===''||info.url==='about:blank'||/^(chrome|chrome-untrusted|chrome-extension|devtools):\/\//.test(info.url));
+}
+const CODEX_READY="(()=>{const n=document.querySelector('#codex-auth-status');return !!n&&n.textContent.includes('Synthetic offline browser QA; no CLI invoked')})()";
+function netlogAudit(log, origins, endpoints) {
+  assert(log&&Array.isArray(log.events)&&log.events.length<=100000, 'invalid/bounded NetLog events');
+  const types=log.constants?.logEventTypes, phases=log.constants?.logEventPhase;
+  for(const name of ['TCP_CONNECT', 'TCP_CONNECT_ATTEMPT', 'SOCKET_BYTES_SENT', 'UDP_CONNECT', 'UDP_BYTES_SENT'])assert(Number.isInteger(types?.[name]), `missing NetLog constant ${name}`);
+  assert(Number.isInteger(phases?.PHASE_BEGIN)&&Number.isInteger(phases?.PHASE_END), 'missing NetLog phases');
+  const names=new Map(Object.entries(types).map(([k, v])=>[v, k])), sockets=new Set(), attempts=new Map();
+  const report= {
+    url_attempt_count:0, non_fixture_url_attempt_count:0, non_fixture_url_attempts:[], tcp_endpoint_events:0, tcp_bytes_sent_events:0, udp_events:0, violations:[], scope:'Chromium NetLog socket events; not OS packet capture', url_attempts_are_not_transport_success:true
+  };
+  const bad=x=> {
+    if(report.violations.length<16)report.violations.push(x);
+  };
   function visit(v) {
     if(!v||typeof v!=='object')return;
-    for(const [key, value]of Object.entries(v)) {
-      if(typeof value==='string'&&/url/i.test(key)&&/^(https?|wss?):/i.test(value)&&!allowedOrigin(value, origins)) {
-        if(bad.length<16)bad.push(value.slice(0, 256));
+    for(const [key, value] of Object.entries(v)) {
+      if(typeof value==='string'&&/url/i.test(key)&&/^(https?|wss?):/i.test(value)) {
+        report.url_attempt_count++;
+        if(!allowedOrigin(value, origins)) {
+          report.non_fixture_url_attempt_count++;
+          const label=networkLabel(value);
+          if(report.non_fixture_url_attempts.length<16&&!report.non_fixture_url_attempts.includes(label))report.non_fixture_url_attempts.push(label);
+        }
       }else if(value&&typeof value==='object')visit(value);
     }
   }
-  visit(log);
-  return bad;
+  for(const event of log.events) {
+    visit(event.params);
+    const name=names.get(event.type), params=event.params?? {}, id=event.source?.id;
+    if(['TCP_CONNECT', 'TCP_CONNECT_ATTEMPT', 'SOCKET_BYTES_SENT', 'UDP_CONNECT', 'UDP_BYTES_SENT'].includes(name)&&!Number.isInteger(id))bad('transport event source identity missing');
+    if(name==='UDP_CONNECT'||name==='UDP_BYTES_SENT'||name?.startsWith('DNS_TRANSACTION')) {
+      report.udp_events++;
+      bad(`unexpected ${name}; no UDP/DNS transport permitted`);
+    }
+    if(name==='TCP_CONNECT'||name==='TCP_CONNECT_ATTEMPT') {
+      const addresses=[];
+      if(Array.isArray(params.address_list))addresses.push(...params.address_list);
+      for(const key of ['address', 'remote_address', 'peer_address'])if(params[key]!==undefined)addresses.push(params[key]);
+      for(const address of addresses) {
+        report.tcp_endpoint_events++;
+        if(typeof address!=='string'||!endpoints.has(address))bad('non-allowlisted TCP endpoint observed');
+        else sockets.add(id);
+      }
+      if(event.phase===phases.PHASE_BEGIN) {
+        if(addresses.length===0)bad(`missing ${name} endpoint; transport outcome unknown`);
+        attempts.set(`${id}:${name}`, true);
+      }
+      if(event.phase===phases.PHASE_END) {
+        if(!attempts.delete(`${id}:${name}`))bad(`unpaired ${name}; transport audit incomplete`);
+      }
+    }
+    if(name==='SOCKET_BYTES_SENT') {
+      report.tcp_bytes_sent_events++;
+      if(!sockets.has(id))bad('socket bytes sent without allowlisted TCP endpoint evidence');
+    }
+  }
+  if(attempts.size)bad('unfinished TCP attempt; transport outcome unknown');
+  if(report.tcp_endpoint_events===0||report.tcp_bytes_sent_events===0)bad('no actual loopback socket traffic evidence');
+  return report;
+}
+// This only observes/signals the Chrome parent. Linux Go supervision separately
+// reaps/verifies the owned group and adopted descendants, even if Node is killed.
+async function stopChromeParent(child, close, wait=delay) {
+  const running=()=>child&&child.exitCode===null&&child.signalCode===null;
+  const result= {
+    parent_exit_observed:false, term_sent:false, kill_sent:false, descendants:'unknown here; authoritative owned-process result is in stability.json'
+  };
+  if(running()) {
+    await close();
+    for(let i=0; i<30&&running(); i++)await wait(100);
+    if(running()) {
+      result.term_sent=true;
+      child.kill('SIGTERM');
+    }
+    for(let i=0; i<20&&running(); i++)await wait(100);
+    if(running()) {
+      result.kill_sent=true;
+      child.kill('SIGKILL');
+    }
+    for(let i=0; i<20&&running(); i++)await wait(100);
+  }
+  result.parent_exit_observed=!!child&&!running();
+  return result;
+}
+function chromeParentCleanupFailure(result) {
+  if(!result.parent_exit_observed)return 'Chrome parent exit unknown after bounded cleanup';
+  if(result.term_sent||result.kill_sent)return 'Chrome parent required signal-based cleanup';
+  return null;
 }
 async function selfTest() {
   const input=new PassThrough(), output=new PassThrough(), client=new CDP(input, output);
@@ -146,27 +251,148 @@ async function selfTest() {
   assert(allowedOrigin('http://127.0.0.1:123/assets', new Set(['http://127.0.0.1:123'])));
   for(const u of ['https://example.invalid', 'http://localhost:123', 'http://127.0.0.1:124', 'file:///tmp/x', 'data:text/html,x', 'http://user:secret@127.0.0.1:123'])assert(!allowedOrigin(u, new Set(['http://127.0.0.1:123'])));
   assert(contrast('rgb(6, 43, 36)', 'rgb(120, 221, 194)')>=4.5);
-  assert.deepEqual(netlogViolations( {
-    events:[ {
-      params: {
-        url:'https://example.invalid'
+  const origins=new Set(['http://127.0.0.1:123', 'http://127.0.0.1:124', 'http://127.0.0.1:125']), policy=networkPolicy(origins, 'http://127.0.0.1:126');
+  assert.equal(policy.resolver, 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1');
+  assert.equal(policy.bypass, '<-loopback>;http://127.0.0.1:123;http://127.0.0.1:124;http://127.0.0.1:125');
+  assert(!policy.endpoints.has('127.0.0.1:127'));
+  assert.equal(networkLabel('https://user:secret@example.invalid/path?token=secret#fragment'), 'https://example.invalid/path');
+  assert.equal(networkLabel('invalid target?secret'), '[unparseable network target]');
+  assert(internalTarget( {
+    type:'browser_ui', url:'chrome://test'
+  }));
+  assert(!internalTarget( {
+    type:'service_worker', url:'https://example.invalid/'
+  }));
+  assert(!internalTarget( {
+    type:'page', url:'chrome://test'
+  }));
+  const constants= {
+    logEventTypes: {
+      TCP_CONNECT:1, TCP_CONNECT_ATTEMPT:2, SOCKET_BYTES_SENT:3, UDP_CONNECT:4, UDP_BYTES_SENT:5
+    }, logEventPhase: {
+      PHASE_BEGIN:1, PHASE_END:2
+    }
+  };
+  const log= {
+    constants, events:[ {
+      type:1, phase:1, source: {
+        id:1
+      }, params: {
+        address_list:['127.0.0.1:123'], url:'https://example.invalid/path?secret=bad'
+      }
+    }, {
+      type:2, phase:1, source: {
+        id:1
+      }, params: {
+        address:'127.0.0.1:123'
+      }
+    }, {
+      type:2, phase:2, source: {
+        id:1
+      }
+    }, {
+      type:1, phase:2, source: {
+        id:1
+      }
+    }, {
+      type:3, source: {
+        id:1
       }
     }]
-  }, new Set()), ['https://example.invalid']);
+  };
+  const audit=netlogAudit(log, origins, policy.endpoints);
+  assert.deepEqual(audit.violations, []);
+  assert.deepEqual(audit.non_fixture_url_attempts, ['https://example.invalid/path']);
+  assert(!JSON.stringify(audit).includes('secret'));
+  assert(!scrubNetworkText('failed https://example.invalid/path?key=secret#fragment').includes('secret'));
+  const escaped=structuredClone(log);
+  escaped.events[1].params.address='203.0.113.1:443';
+  assert(netlogAudit(escaped, origins, policy.endpoints).violations.length);
+  const unknown=structuredClone(log);
+  unknown.events[0].params.address_list=[];
+  unknown.events[1].params= {};
+  assert(netlogAudit(unknown, origins, policy.endpoints).violations.length);
+  assert.throws(()=>netlogAudit( {
+    events:[]
+  }, origins, policy.endpoints));
+  const udp=structuredClone(log);
+  udp.events.push( {
+    type:5
+  });
+  assert(netlogAudit(udp, origins, policy.endpoints).violations.length);
+  const missingIdentity=structuredClone(log);
+  missingIdentity.events[0].source= {};
+  assert(netlogAudit(missingIdentity, origins, policy.endpoints).violations.length);
+  const unpaired=structuredClone(log);
+  unpaired.events.pop();
+  unpaired.events.pop();
+  assert(netlogAudit(unpaired, origins, policy.endpoints).violations.length);
+  const statusEval=node=>new Function('document', `return ${CODEX_READY}`)( {
+    querySelector:()=>node
+  });
+  assert.equal(statusEval(null), false);
+  assert.equal(statusEval( {
+    textContent:'確認中'
+  }), false);
+  assert.equal(statusEval( {
+    textContent:'unrelated completion'
+  }), false);
+  assert.equal(statusEval( {
+    textContent:'Synthetic offline browser QA; no CLI invoked'
+  }), true);
+  const ended= {
+    exitCode:0, signalCode:null
+  };
+  const clean=await stopChromeParent(ended, async()=> {});
+  assert(clean.parent_exit_observed);
+  assert.equal(chromeParentCleanupFailure(clean), null);
+  const termZero={exitCode:null,signalCode:null,signals:[],kill(s){this.signals.push(s);this.exitCode=0;}};
+  const termRecovered=await stopChromeParent(termZero, async()=> {}, async()=> {});
+  assert(termRecovered.parent_exit_observed&&termRecovered.term_sent&&!termRecovered.kill_sent);
+  assert.equal(termZero.exitCode,0);
+  assert.deepEqual(termZero.signals,['SIGTERM']);
+  assert.equal(chromeParentCleanupFailure(termRecovered),'Chrome parent required signal-based cleanup');
+  const stubborn= {
+    exitCode:null, signalCode:null, signals:[], kill(s) {
+      this.signals.push(s);
+      if(s==='SIGKILL')this.signalCode=s;
+    }
+  };
+  const stopped=await stopChromeParent(stubborn, async()=> {}, async()=> {});
+  assert(stopped.parent_exit_observed&&stopped.kill_sent);
+  assert(chromeParentCleanupFailure(stopped));
+  assert.deepEqual(stubborn.signals, ['SIGTERM', 'SIGKILL']);
+  const unknownExit= {
+    exitCode:null, signalCode:null, kill() {}
+  };
+  const unknownCleanup=await stopChromeParent(unknownExit, async()=> {}, async()=> {});
+  assert.equal(unknownCleanup.parent_exit_observed, false);
+  assert(chromeParentCleanupFailure(unknownCleanup));
   assert.throws(()=>argumentsMap(['--out', 'a', '--out', 'b']));
-  const errorIn=new PassThrough(),errorOut=new PassThrough(),errorClient=new CDP(errorIn,errorOut);
-  const rejected=errorClient.call('Runtime.evaluate');errorOut.write('{"id":1,"error":{"message":"synthetic protocol error"}}\0');await assert.rejects(rejected,/synthetic protocol error/);errorClient.close(new Error('done'));
-  const header=Buffer.alloc(24);Buffer.from([137,80,78,71,13,10,26,10]).copy(header);header.write('IHDR',12);header.writeUInt32BE(1440,16);header.writeUInt32BE(1000,20);assert.deepEqual(pngSize(header),{width:1440,height:1000});assert.throws(()=>pngSize(Buffer.alloc(24)));
-  console.log('PASS stdlib-only framing/error/origin/contrast/PNG-header/argument self-tests; no Chrome, application, screenshot or network used');
+  const errorIn=new PassThrough(), errorOut=new PassThrough(), errorClient=new CDP(errorIn, errorOut);
+  const rejected=errorClient.call('Runtime.evaluate');
+  errorOut.write('{"id":1,"error":{"message":"synthetic protocol error"}}\0');
+  await assert.rejects(rejected, /synthetic protocol error/);
+  errorClient.close(new Error('done'));
+  const header=Buffer.alloc(24);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(header);
+  header.write('IHDR', 12);
+  header.writeUInt32BE(1440, 16);
+  header.writeUInt32BE(1000, 20);
+  assert.deepEqual(pngSize(header), {
+    width:1440, height:1000
+  });
+  assert.throws(()=>pngSize(Buffer.alloc(24)));
+  console.log('PASS stdlib-only framing/error/origin/DNS-policy/transport-audit/readiness-negative/bounded-parent-cleanup/TERM-zero-exit-rejection/contrast/PNG-header/argument self-tests; no Chrome, application, screenshot or network used');
 }
 async function main() {
-  assert([22,24].includes(Number(process.versions.node.split('.')[0])),'requested QA requires reviewed Node 22 or 24');
+  assert([22, 24].includes(Number(process.versions.node.split('.')[0])), 'requested QA requires reviewed Node 22 or 24');
   const args=argumentsMap(process.argv.slice(2)), out=path.resolve(args['--out']), profile=path.resolve(args['--profile']);
   assert.notEqual(out, profile, 'profile must not enter artifacts');
   const fixture=JSON.parse(await readFile(args['--fixture'], 'utf8'));
   assert.equal(fixture.synthetic, true);
   assert(Array.isArray(fixture.cases)&&fixture.cases.length<=20);
-  assert.deepEqual([...fixture.cases.map(c=>c.name)].sort(),['overview','assets','asset-detail','findings','finding-detail','integrations','legacy-dashboard','legacy-detail','legacy-logs','legacy-settings','legacy-reports','empty-assets','empty-findings','empty-integrations','partial-overview','invalid-asset'].sort(),'required QA case matrix changed');
+  assert.deepEqual([...fixture.cases.map(c=>c.name)].sort(), ['overview', 'assets', 'asset-detail', 'findings', 'finding-detail', 'integrations', 'legacy-dashboard', 'legacy-detail', 'legacy-logs', 'legacy-settings', 'legacy-reports', 'empty-assets', 'empty-findings', 'empty-integrations', 'partial-overview', 'invalid-asset'].sort(), 'required QA case matrix changed');
   const origins=new Set(Object.values(fixture.origins));
   assert.equal(origins.size, 3);
   for(const raw of origins) {
@@ -177,11 +403,16 @@ async function main() {
     assert.equal(u.pathname, '/');
   }
   const checks= {
-    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], metadata:fixture.metadata
+    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], blocked_browser_activity: {
+      proxy_requests:0, proxy_connects:0, targets:[], attempts:[]
+    }, reduced_motion_scope:'media preference override verified only; CSS response not exhaustively measured', screenshot_scope:'28 viewport-only PNGs; below-fold content is not fully captured', metadata:fixture.metadata
   }, manifest= {
     synthetic:true, visual_review:'pending', metadata:fixture.metadata, as_of:fixture.as_of, images:[]
   };
-  let imageBytes=0, chrome, client, proxy, watchdog, chromeStderr='', fatal, exitCode, exitSignal, spawnError, proxyOrigin;
+  let imageBytes=0, chrome, client, proxy, watchdog, chromeStderrBytes=0, fatal, exitCode, exitSignal, spawnError, proxyOrigin;
+  let chromeParentCleanup= {
+    parent_exit_observed:false, descendants:'unknown; see stability.json'
+  };
   const netlog=path.join(profile, 'network.json'), sessions=new Map(), requests=new Map(), documents=new Map(), allRequests=[];
   const chromeRunning=()=>!!chrome&&!spawnError&&chrome.exitCode===null&&chrome.signalCode===null;
   const violation=text=> {
@@ -232,7 +463,10 @@ async function main() {
   }
   async function key(session, key, code, number, modifiers=0) {
     for(const type of ['keyDown', 'keyUp'])await client.call('Input.dispatchKeyEvent', {
-      type, key, code, windowsVirtualKeyCode:number, nativeVirtualKeyCode:number, modifiers
+      type, key, code, windowsVirtualKeyCode:number, nativeVirtualKeyCode:number, modifiers, ...(key==='Enter'&&type==='keyDown'? {
+        text:'\r', unmodifiedText:'\r'
+      }
+      : {})
     }, session);
   }
   async function follow(session, selector) {
@@ -283,7 +517,7 @@ async function main() {
     return fonts;
   }
   async function inspect(session, info, viewport, start) {
-    if(info.name==='legacy-settings')await until(session, "document.querySelector('#codex-auth-status')?.textContent!=='確認中'", 'synthetic Codex status');
+    if(info.name==='legacy-settings')await until(session, CODEX_READY, 'synthetic Codex status');
     if(info.name==='legacy-logs')await until(session, "document.querySelector('#stream-status')?.textContent.includes('ライブ')", 'actual log SSE');
     const data=await ev(session, `(()=>{const main=document.querySelector('main'),ids=[...document.querySelectorAll('[id]')].map(n=>n.id),labels=[...document.querySelectorAll('label')],refs=[...document.querySelectorAll('[aria-labelledby],[aria-describedby]')].flatMap(n=>((n.getAttribute('aria-labelledby')||'')+' '+(n.getAttribute('aria-describedby')||'')).trim().split(/\\s+/).filter(Boolean));return {text:document.body.innerText.slice(0,40000),duplicateIds:ids.filter((id,i)=>ids.indexOf(id)!==i),unboundLabels:labels.filter(n=>!n.control).map(n=>n.textContent.slice(0,80)),missingRefs:refs.filter(id=>!document.getElementById(id)),current:[...document.querySelectorAll('.finding-nav [aria-current="page"]')].map(n=>n.getAttribute('href')),overflow:main?main.scrollWidth>main.clientWidth+1:true,unsafeLinks:[...document.querySelectorAll('a[href]')].filter(n=>!n.href.startsWith(location.origin+'/')&&!n.href.startsWith(location.origin+'#')).map(n=>n.getAttribute('href')).slice(0,8),injected:window.__qa_injected===true,rich:!![...document.querySelectorAll('.markdown-body strong')].find(n=>n.textContent.includes('Synthetic browser Markdown')),reduced:matchMedia('(prefers-reduced-motion: reduce)').matches}})()`);
     const observed=(requests.get(session)??[]).slice(start), sse=observed.some(r=>new URL(r.url).pathname==='/api/logs-stream');
@@ -320,10 +554,11 @@ async function main() {
     await client.call('Input.dispatchMouseEvent', {
       type:'mouseMoved', x:p.x, y:p.y
     }, session);
+    assert(await ev(session, `document.querySelector(${JSON.stringify(selector)}).matches(':hover')`), `${label} did not enter actual :hover`);
     const colors=await ev(session, `(()=>{const s=getComputedStyle(document.querySelector(${JSON.stringify(selector)}));return{fg:s.color,bg:s.backgroundColor}})()`);
     const ratio=contrast(colors.fg, colors.bg);
     checks.flows.push( {
-      check:label, ratio, colors
+      check:label, hover_matched:true, ratio, colors
     });
     assert(ratio>=4.5, `${label} hover contrast below 4.5:1`);
   }
@@ -386,31 +621,39 @@ async function main() {
       recursive:false, mode:0o700
     });
     // A rejecting loopback proxy gives browser background traffic no external
-    // destination, including literal IPs. It never forwards, and any use fails QA.
+    // destination, including literal IPs. It never forwards. Blocked internal
+    // startup attempts are separate from any permitted/page/external transport.
     proxy=createServer((req, res)=> {
-      violation(`blocked browser proxy request ${req.url}`);
+      checks.blocked_browser_activity.proxy_requests++;
+      if(checks.blocked_browser_activity.attempts.length<16)checks.blocked_browser_activity.attempts.push(networkLabel(req.url));
+      if(allowedOrigin(req.url, origins))violation('fixture request unexpectedly reached deny proxy');
       res.writeHead(403);
       res.end('offline synthetic QA');
     });
     proxy.on('connect', (req, socket)=> {
-      violation(`blocked browser proxy CONNECT ${req.url}`);
+      checks.blocked_browser_activity.proxy_connects++;
+      if(checks.blocked_browser_activity.attempts.length<16)checks.blocked_browser_activity.attempts.push(networkLabel('https://'+req.url));
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
     });
     proxy.listen(0, '127.0.0.1');
     await once(proxy, 'listening');
     proxyOrigin=`http://127.0.0.1:${proxy.address().port}`;
-    const flags=['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions', '--disable-breakpad', '--disable-quic', '--no-first-run', '--no-default-browser-check', `--proxy-server=http://127.0.0.1:${proxy.address().port}`, '--proxy-bypass-list=127.0.0.1;localhost;[::1]', '--host-resolver-rules=MAP * ~NOTFOUND', `--log-net-log=${netlog}`, '--net-log-capture-mode=Default', 'about:blank'];
+    const policy=networkPolicy(origins, proxyOrigin);
+    const flags=['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions', '--disable-breakpad', '--disable-quic', '--no-first-run', '--no-default-browser-check', `--proxy-server=http://127.0.0.1:${proxy.address().port}`, `--proxy-bypass-list=${policy.bypass}`, `--host-resolver-rules=${policy.resolver}`, `--log-net-log=${netlog}`, '--net-log-capture-mode=Default', 'about:blank'];
     assert(!flags.some(s=>/^--(no-sandbox|disable-setuid-sandbox|disable-web-security|ignore-certificate-errors)/.test(s)), 'unsafe browser flag');
-    const chromeEnv=Object.fromEntries(['PATH','HOME','TMPDIR','LANG','LC_ALL'].filter(k=>process.env[k]!==undefined).map(k=>[k,process.env[k]]));
+    const chromeEnv=Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'].filter(k=>process.env[k]!==undefined).map(k=>[k, process.env[k]]));
     chrome=spawn(args['--chrome'], flags, {
       stdio:['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], env:chromeEnv
     });
     chrome.stderr.on('data', b=> {
-      chromeStderr=(chromeStderr+b.toString()).slice(-16384);
+      chromeStderrBytes+=b.length;
     });
     client=new CDP(chrome.stdio[3], chrome.stdio[4]);
-    chrome.on('error', e=>{spawnError=e;client.close(e);});
-    chrome.on('exit', (code,signal)=> {
+    chrome.on('error', e=> {
+      spawnError=e;
+      client.close(e);
+    });
+    chrome.on('exit', (code, signal)=> {
       exitCode=code;
       exitSignal=signal;
       client.close(new Error(`Chrome exited ${code}`));
@@ -435,14 +678,20 @@ async function main() {
         }
         =message.params;
         const configure=(async()=> {
-          assert(sessions.size<=8,'unexpected browser target count');
+          assert(sessions.size<=8, 'unexpected browser target count');
           if(!['page', 'iframe'].includes(targetInfo.type)) {
-            violation(`unexpected target type ${targetInfo.type}`);
-            await client.call('Target.closeTarget', {
+            const internal=internalTarget(targetInfo);
+            if(!internal)violation(`unexpected non-application target type ${targetInfo.type}`);
+            if(checks.blocked_browser_activity.targets.length<16)checks.blocked_browser_activity.targets.push( {
+              type:targetInfo.type, url:networkLabel(targetInfo.url), waiting_for_debugger:message.params.waitingForDebugger===true, disposition:'closed without resuming; transport audited separately'
+            });
+            const closed=await client.call('Target.closeTarget', {
               targetId:targetInfo.targetId
             });
+            assert.equal(closed.success, true, 'quarantined target failed to close');
             return sessionId;
           }
+          assert(targetInfo.url===''||targetInfo.url==='about:blank'||allowedOrigin(targetInfo.url, origins), 'unexpected page/iframe origin');
           await client.call('Network.enable', {}, sessionId);
           await client.call('Network.setBypassServiceWorker', {
             bypass:true
@@ -473,7 +722,7 @@ async function main() {
         }
         =message.params;
         const safe=(request.url==='about:blank'||allowedOrigin(request.url, origins))&&['GET', 'HEAD'].includes(request.method);
-        if(!safe)violation(`off-origin/action request ${request.method} ${request.url}`);
+        if(!safe)violation(`blocked off-origin/action page request ${request.method} ${networkLabel(request.url)}`);
         client.call(safe?'Fetch.continueRequest':'Fetch.failRequest', safe? {
           requestId
         }
@@ -483,7 +732,7 @@ async function main() {
       }else if(message.method==='Network.requestWillBeSent') {
         const request=message.params.request;
         if(request.url==='about:blank')return;
-        if(!allowedOrigin(request.url, origins))violation(`non-loopback page request ${request.url}`);
+        if(!allowedOrigin(request.url, origins))violation(`non-loopback page request ${networkLabel(request.url)}`);
         const list=requests.get(message.sessionId)??[];
         if(list.length<512)list.push( {
           url:request.url, method:request.method
@@ -503,9 +752,14 @@ async function main() {
     checks.cdp_pipe_handshake=true;
     manifest.browser=checks.browser;
     checks.node=process.version;
-    checks.network_guard='exact fixture origins; rejecting loopback proxy; no DIRECT fallback';
+    checks.network_guard='exact fixture origins/ports; implicit loopback bypass removed; rejecting loopback proxy; no DIRECT fallback; all other DNS denied';
+    checks.network_policy= {
+      resolver:policy.resolver, bypass:policy.bypass
+    };
     checks.sandbox_disable_flags=false;
-    checks.configured_deadlines_ms={cdp_command:10000,navigation:10000,browser_watchdog:180000,graceful_exit:3000,signal_exit:2000};
+    checks.configured_deadlines_ms= {
+      cdp_command:10000, navigation:10000, browser_watchdog:180000, graceful_exit:3000, signal_exit:2000
+    };
     manifest.node=process.version;
     await client.call('Target.setAutoAttach', {
       autoAttach:true, waitForDebuggerOnStart:true, flatten:true
@@ -552,41 +806,39 @@ async function main() {
     }
   }catch(e) {
     fatal=e;
-    checks.error=String(e.stack??e).slice(0, 16384);
+    checks.error=scrubNetworkText(e.stack??e).slice(0, 16384);
   } finally {
     clearTimeout(watchdog);
     if(chrome&&!spawnError) {
-      if(chromeRunning()) {
+      chromeParentCleanup=await stopChromeParent(chrome, async()=> {
         try {
           await client?.call('Browser.close');
-        }catch {}
-        if(chromeRunning())await Promise.race([once(chrome, 'exit'), delay(3000)]);
-        if(chromeRunning()) {
-          chrome.kill('SIGTERM');
-          await Promise.race([once(chrome, 'exit'), delay(2000)]);
+        }catch {
+          /* Parent exit and Go supervisor determine cleanup, never this exception. */
         }
-        if(chromeRunning()) {
-          chrome.kill('SIGKILL');
-          await once(chrome, 'exit');
-          violation('Chrome required forced cleanup');
-        }
-      }
+      });
+      const cleanupProblem=chromeParentCleanupFailure(chromeParentCleanup);
+      if(cleanupProblem)violation(cleanupProblem);
       try {
+        assert((await stat(netlog)).size<=16*1024*1024, 'NetLog file exceeds audit bound');
         const log=JSON.parse(await readFile(netlog, 'utf8'));
-        for(const u of netlogViolations(log, new Set([...origins,proxyOrigin])))violation(`non-loopback NetLog URL ${u}`);
-        checks.network_audit='completed';
+        const report=netlogAudit(log, origins, networkPolicy(origins, proxyOrigin).endpoints);
+        checks.network_audit=report;
+        for(const problem of report.violations)violation(problem);
       }catch(e) {
-        violation(`network audit unavailable: ${e.message}`);
+        checks.network_audit={status:'unknown',error_code:e.code??e.name};
+        violation('network audit unavailable/invalid; transport outcome unknown');
       }
     }
     if(proxy) {
       proxy.closeAllConnections();
       await new Promise(resolve=>proxy.close(resolve));
     }
-    checks.chrome_stderr=chromeStderr;
+    checks.chrome_stderr_summary={observed_bytes:chromeStderrBytes,raw_retained:false};
     checks.chrome_exit_code=exitCode??null;
     checks.chrome_exit_signal=exitSignal??null;
-    checks.chrome_cleanup_complete=!!chrome&&!spawnError&&!chromeRunning();
+    checks.chrome_parent_cleanup=chromeParentCleanup;
+    checks.chrome_descendant_cleanup='unknown in Node; authoritative Linux group/adopted-PID verification is in stability.json';
     checks.loopback_proxy_closed=!!proxy;
     if(chrome&&!spawnError&&exitCode!==0)violation(`Chrome exited abnormally: ${exitCode}/${exitSignal}`);
     checks.request_count=allRequests.length;
@@ -594,8 +846,12 @@ async function main() {
     checks.visual_review='pending';
     await writeJSON('checks.json', checks);
     manifest.automated_status=checks.automated_status;
-    manifest.configured_deadlines_ms=checks.configured_deadlines_ms??{};
-    manifest.child_cleanup={chrome_exit_code:checks.chrome_exit_code,chrome_exit_signal:checks.chrome_exit_signal,chrome_cleanup_complete:checks.chrome_cleanup_complete,loopback_proxy_closed:checks.loopback_proxy_closed};
+    manifest.configured_deadlines_ms=checks.configured_deadlines_ms?? {};
+    manifest.child_cleanup= {
+      chrome_exit_code:checks.chrome_exit_code, chrome_exit_signal:checks.chrome_exit_signal, parent:chromeParentCleanup, descendants:checks.chrome_descendant_cleanup, loopback_proxy_closed:checks.loopback_proxy_closed
+    };
+    manifest.screenshot_scope=checks.screenshot_scope;
+    manifest.reduced_motion_scope=checks.reduced_motion_scope;
     await writeJSON('manifest.json', manifest);
     const files=await readdir(out);
     assert(files.length<=31, 'artifact file count exceeds Node budget');
@@ -609,8 +865,8 @@ async function main() {
     assert(bytes<=8*1024*1024, 'artifact size exceeds bound');
   }
   if(fatal)throw fatal;
-  assert.equal(checks.cases.length,fixture.cases.length*2,'incomplete desktop/mobile matrix');
-  assert.equal(manifest.images.length,28,'incomplete runtime screenshot matrix');
+  assert.equal(checks.cases.length, fixture.cases.length*2, 'incomplete desktop/mobile matrix');
+  assert.equal(manifest.images.length, 28, 'incomplete runtime screenshot matrix');
   assert.equal(checks.violations.length, 0, `offline guard failed: ${checks.violations.join('; ')}`);
   assert.equal(checks.automated_status, 'passed');
   console.log(`PASS automated real Chrome checks; ${manifest.images.length} runtime PNGs saved. Download/materialization/visual review remain pending.`);
