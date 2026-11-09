@@ -35,6 +35,10 @@ func (s *Server) registerFindingsAPI(mux *http.ServeMux) {
 		mux.HandleFunc(method+" /api/v1/findings/{id}/priority-preview", s.handleFindingPriorityPreview)
 	}
 	mux.HandleFunc("GET /api/v1/assets", s.handleAssetsAPI)
+	mux.HandleFunc("GET /api/v1/connectors/status", s.handleConnectorStatusAPI)
+	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"} {
+		mux.HandleFunc(method+" /api/v1/connectors/status", s.handleConnectorStatusAPI)
+	}
 	// The legacy GET / dashboard is a subtree route. Keep unknown API paths
 	// from silently rendering that HTML page with a successful status.
 	mux.HandleFunc("GET /api/v1/", func(w http.ResponseWriter, r *http.Request) {
