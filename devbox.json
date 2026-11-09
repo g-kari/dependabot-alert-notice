@@ -4,7 +4,7 @@
     "go@latest",
     "golangci-lint@1.64.8",
     "pre-commit@2.20.0",
-    "cloudflared@2020.11.11",
+    "cloudflared@2026.10.7",
     "air@1.67.4"
   ],
   "shell": {
