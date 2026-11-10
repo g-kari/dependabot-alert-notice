@@ -90,24 +90,12 @@ func (s *Store) BeginSecurityEnrichmentRefresh(ctx context.Context, attempt Secu
 		return false, fmt.Errorf("begin refresh attempt: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	stored, exists, err := readRefreshRun(ctx, tx, run.ID)
+	replay, err := beginSecurityEnrichmentRefreshTx(ctx, tx, a, run)
 	if err != nil {
 		return false, err
 	}
-	if exists {
-		if !equalRefreshRun(stored, run) {
-			return false, ErrIngestConflict
-		}
-		if err := checkRefreshNoEvidence(ctx, tx, run.ID); err != nil {
-			return false, err
-		}
+	if replay {
 		return true, nil
-	}
-	if err := validateCurrentRefreshTargets(ctx, tx, a.Targets); err != nil {
-		return false, err
-	}
-	if err := insertIngestRun(ctx, tx, run); err != nil {
-		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit refresh attempt: %w", err)
@@ -130,35 +118,12 @@ func (s *Store) CompleteSecurityEnrichmentRefresh(ctx context.Context, completio
 		return SecurityEnrichmentImportResult{}, fmt.Errorf("begin refresh completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	stored, exists, err := readRefreshRun(ctx, tx, running.ID)
+	result, err := completeSecurityEnrichmentRefreshTx(ctx, tx, c, running, success)
 	if err != nil {
 		return SecurityEnrichmentImportResult{}, err
 	}
-	if !exists {
-		return SecurityEnrichmentImportResult{}, ErrIngestConflict
-	}
-	result := SecurityEnrichmentImportResult{Entries: len(c.Feed.Entries)}
-	if stored.Result == model.IngestResultSuccess {
-		if err := checkRefreshSuccess(ctx, tx, stored, success, c); err != nil {
-			return SecurityEnrichmentImportResult{}, err
-		}
-		result.Replay = true
+	if result.Replay {
 		return result, nil
-	}
-	if !equalRefreshRun(stored, running) {
-		return SecurityEnrichmentImportResult{}, ErrIngestConflict
-	}
-	if err := checkRefreshNoEvidence(ctx, tx, running.ID); err != nil {
-		return SecurityEnrichmentImportResult{}, err
-	}
-	if err := validateCurrentRefreshTargets(ctx, tx, c.Attempt.Targets); err != nil {
-		return SecurityEnrichmentImportResult{}, err
-	}
-	if err := appendSecurityEnrichment(ctx, tx, success, c.Feed, c.OriginalDigest); err != nil {
-		return SecurityEnrichmentImportResult{}, err
-	}
-	if err := updateRefreshRun(ctx, tx, running, success); err != nil {
-		return SecurityEnrichmentImportResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return SecurityEnrichmentImportResult{}, fmt.Errorf("commit refresh completion: %w", err)
@@ -196,24 +161,12 @@ func (s *Store) FailSecurityEnrichmentRefresh(ctx context.Context, attempt Secur
 		return false, fmt.Errorf("begin refresh failure: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	stored, exists, err := readRefreshRun(ctx, tx, running.ID)
+	replay, err := failSecurityEnrichmentRefreshTx(ctx, tx, running, failed)
 	if err != nil {
 		return false, err
 	}
-	if !exists {
-		return false, ErrIngestConflict
-	}
-	if err := checkRefreshNoEvidence(ctx, tx, running.ID); err != nil {
-		return false, err
-	}
-	if equalRefreshRun(stored, failed) {
+	if replay {
 		return true, nil
-	}
-	if !equalRefreshRun(stored, running) {
-		return false, ErrIngestConflict
-	}
-	if err := updateRefreshRun(ctx, tx, running, failed); err != nil {
-		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit refresh failure: %w", err)
@@ -274,6 +227,86 @@ func (s *Store) ReconcileSecurityEnrichmentRefresh(ctx context.Context, completi
 		return unknown, fmt.Errorf("finish refresh reconciliation: %w", err)
 	}
 	return state, nil
+}
+
+func beginSecurityEnrichmentRefreshTx(ctx context.Context, tx *sql.Tx, a SecurityEnrichmentRefreshAttempt, run model.IngestRun) (bool, error) {
+	stored, exists, err := readRefreshRun(ctx, tx, run.ID)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		if !equalRefreshRun(stored, run) {
+			return false, ErrIngestConflict
+		}
+		if err := checkRefreshNoEvidence(ctx, tx, run.ID); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err := validateCurrentRefreshTargets(ctx, tx, a.Targets); err != nil {
+		return false, err
+	}
+	if err := insertIngestRun(ctx, tx, run); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func completeSecurityEnrichmentRefreshTx(ctx context.Context, tx *sql.Tx, c SecurityEnrichmentRefreshCompletion, running, success model.IngestRun) (SecurityEnrichmentImportResult, error) {
+	stored, exists, err := readRefreshRun(ctx, tx, running.ID)
+	if err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
+	if !exists {
+		return SecurityEnrichmentImportResult{}, ErrIngestConflict
+	}
+	result := SecurityEnrichmentImportResult{Entries: len(c.Feed.Entries)}
+	if stored.Result == model.IngestResultSuccess {
+		if err := checkRefreshSuccess(ctx, tx, stored, success, c); err != nil {
+			return SecurityEnrichmentImportResult{}, err
+		}
+		result.Replay = true
+		return result, nil
+	}
+	if !equalRefreshRun(stored, running) {
+		return SecurityEnrichmentImportResult{}, ErrIngestConflict
+	}
+	if err := checkRefreshNoEvidence(ctx, tx, running.ID); err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
+	if err := validateCurrentRefreshTargets(ctx, tx, c.Attempt.Targets); err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
+	if err := appendSecurityEnrichment(ctx, tx, success, c.Feed, c.OriginalDigest); err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
+	if err := updateRefreshRun(ctx, tx, running, success); err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
+	return result, nil
+}
+
+func failSecurityEnrichmentRefreshTx(ctx context.Context, tx *sql.Tx, running, failed model.IngestRun) (bool, error) {
+	stored, exists, err := readRefreshRun(ctx, tx, running.ID)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, ErrIngestConflict
+	}
+	if err := checkRefreshNoEvidence(ctx, tx, running.ID); err != nil {
+		return false, err
+	}
+	if equalRefreshRun(stored, failed) {
+		return true, nil
+	}
+	if !equalRefreshRun(stored, running) {
+		return false, ErrIngestConflict
+	}
+	if err := updateRefreshRun(ctx, tx, running, failed); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func equalRefreshRun(a, b model.IngestRun) bool {

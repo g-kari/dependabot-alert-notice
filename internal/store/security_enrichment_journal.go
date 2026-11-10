@@ -73,7 +73,6 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		return empty, journalError(ctx, errJournalConflict)
 	}
 	digest := journalDigest(payload)
-	c := request.Checkpoint
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -81,6 +80,25 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		return empty, journalError(ctx, errJournalStorage)
 	}
 	defer func() { _ = tx.Rollback() }()
+	ack, err := appendJournalCheckpointTx(ctx, tx, request, payload, digest)
+	if err != nil {
+		return empty, err
+	}
+	if ack.Replay {
+		if err := tx.Commit(); err != nil {
+			return empty, journalError(ctx, errJournalStorage)
+		}
+		return ack, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return empty, journalError(ctx, errJournalStorage)
+	}
+	return ack, nil
+}
+
+func appendJournalCheckpointTx(ctx context.Context, tx *sql.Tx, request enrichmentjournal.AppendRequest, payload []byte, digest string) (enrichmentjournal.Acknowledgement, error) {
+	empty := enrichmentjournal.Acknowledgement{}
+	c := request.Checkpoint
 	header, exists, err := readJournalHeader(ctx, tx, c.OperationID)
 	if err != nil {
 		return empty, err
@@ -96,9 +114,6 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		row := rows[request.Sequence-1]
 		if row.previous != request.PreviousDigest || row.digest != digest || !bytes.Equal(row.payload, payload) {
 			return empty, journalError(ctx, errJournalConflict)
-		}
-		if err := tx.Commit(); err != nil {
-			return empty, journalError(ctx, errJournalStorage)
 		}
 		return enrichmentjournal.Acknowledgement{OperationID: c.OperationID, Sequence: request.Sequence, Digest: digest, Replay: true}, nil
 	}
@@ -148,9 +163,6 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		if err != nil || n != 1 {
 			return empty, journalError(ctx, errJournalConflict)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return empty, journalError(ctx, errJournalStorage)
 	}
 	return enrichmentjournal.Acknowledgement{OperationID: c.OperationID, Sequence: request.Sequence, Digest: digest}, nil
 }
