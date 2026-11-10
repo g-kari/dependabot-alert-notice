@@ -54,6 +54,25 @@ func TestManualAPITransportCommonReadPreviewAndCLICompleteSyntheticChain(t *test
 	srv, db := newFindingsAPITestServer(t)
 	seedAPIFinding(t, db, "manual-e2e", 1, model.SeverityHigh, "open")
 	ctx := context.Background()
+	// Seed unrelated, non-empty legacy records through the normal Store APIs.
+	// Their identities and contents must survive both common-feed updates.
+	legacyAt := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	legacyRun, err := db.StartIngestRun(ctx, "dependabot", "synthetic/manual-e2e-preserved", legacyAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.FinishIngestRun(ctx, legacyRun.ID, "success", "partial", "", legacyAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	legacyEPSS, legacyPercentile := 0.25, 0.75
+	legacyPublished := legacyAt.Add(-24 * time.Hour)
+	const legacyAdvisory = "cve:CVE-2026-9999"
+	if err := db.UpsertThreat(ctx, "epss", []model.ThreatSnapshot{{
+		AdvisoryKey: legacyAdvisory, EPSS: &legacyEPSS, EPSSPercentile: &legacyPercentile,
+		EPSSDate: &legacyPublished, FetchedAt: legacyAt,
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	findingID := previewFindingID(t, db)
 	beforePage, err := db.QueryFindingsPage(ctx, store.FindingQuery{Limit: 200})
 	if err != nil || beforePage.Enrichments[findingID].EPSS != nil || beforePage.Enrichments[findingID].KEV != nil {
@@ -68,12 +87,25 @@ func TestManualAPITransportCommonReadPreviewAndCLICompleteSyntheticChain(t *test
 		t.Fatal(err)
 	}
 	beforeRisk, err := db.ListThreatSnapshots(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(beforeRisk) == 0 {
+		t.Fatalf("legacy snapshot preservation requires non-empty input: %+v %v", beforeRisk, err)
+	}
+	legacyFact, ok := beforeRisk[legacyAdvisory]
+	if !ok || legacyFact.EPSS == nil || *legacyFact.EPSS != legacyEPSS || legacyFact.EPSSPercentile == nil || *legacyFact.EPSSPercentile != legacyPercentile || legacyFact.EPSSDate == nil || !legacyFact.EPSSDate.Equal(legacyPublished) || !legacyFact.FetchedAt.Equal(legacyAt) {
+		t.Fatalf("legacy snapshot fixture was not persisted: %+v", legacyFact)
 	}
 	beforeRuns, err := db.QueryIngestRuns(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(beforeRuns) == 0 {
+		t.Fatalf("legacy receipt preservation requires non-empty input: %+v %v", beforeRuns, err)
+	}
+	legacyReceiptPresent := false
+	for _, run := range beforeRuns {
+		if run.ID == legacyRun.ID {
+			legacyReceiptPresent = run.Connector == "dependabot" && run.Scope == "synthetic/manual-e2e-preserved" && run.Result == "success" && run.Coverage == "partial" && run.StartedAt.Equal(legacyAt) && run.FinishedAt != nil && run.FinishedAt.Equal(legacyAt.Add(time.Minute))
+		}
+	}
+	if !legacyReceiptPresent {
+		t.Fatal("finished legacy receipt fixture was not persisted")
 	}
 
 	decoded := map[string][]byte{
@@ -142,6 +174,9 @@ func TestManualAPITransportCommonReadPreviewAndCLICompleteSyntheticChain(t *test
 	versions := map[string]string{"epss": "synthetic-manual-e2e", "kev": "synthetic-manual-e2e.1"}
 	times := []time.Time{started["epss"], observed["epss"], finished["epss"], started["kev"], observed["kev"], finished["kev"]}
 	runIDs := map[string]string{"epss": "60000000-0000-4000-8000-000000000001", "kev": "60000000-0000-4000-8000-000000000002"}
+	if legacyRun.ID == runIDs["epss"] || legacyRun.ID == runIDs["kev"] {
+		t.Fatal("legacy receipt fixture collides with a manual run UUID")
+	}
 	operationIDs := map[string]string{"epss": "70000000-0000-4000-8000-000000000001", "kev": "70000000-0000-4000-8000-000000000002"}
 	clockCalls, uuidCalls := 0, 0
 	repo := &orchestratorReceiptRepository{Store: db, t: t}
@@ -358,6 +393,10 @@ func TestManualAPITransportCommonReadPreviewAndCLICompleteSyntheticChain(t *test
 		replayed := manualAPIRecorded(t, srv, manualAPIContractRequest(http.MethodPost, manualAPIRoot+"/operations", body))
 		if replayed.Code != http.StatusOK || !manualAPIDecode(t, replayed).Replay || calls[source] != 1 {
 			t.Fatal("outer replay redispatched transport instead of owned cached result")
+		}
+		state, err = db.ReconcileSecurityEnrichmentRefresh(ctx, c)
+		if err != nil || state.State != "success" || state.Receipt != receipts[source] {
+			t.Fatal("cached replay changed exact successful receipt/manifest/observation identity")
 		}
 	}
 	finalRuns, err := db.QueryIngestRuns(ctx)
