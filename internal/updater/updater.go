@@ -158,7 +158,11 @@ func (u Updater) Apply(ctx context.Context) (Result, error) {
 	if err := verifyChecksum(dir, asset); err != nil {
 		return result, err
 	}
-	candidate := filepath.Join(dir, "candidate")
+	candidateName := "candidate"
+	if u.OS == "windows" {
+		candidateName += ".exe"
+	}
+	candidate := filepath.Join(dir, candidateName)
 	if err := extractBinary(filepath.Join(dir, asset), candidate, releaseBinaryName(u.OS)); err != nil {
 		return result, err
 	}
