@@ -15,8 +15,10 @@ so the dependency graph remains acyclic.
 A request selects exactly one epss_feed or kev_feed connector and one scan page
 with limit 1–200. The injected Fetcher receives only the epss/kev domain label,
 not finding IDs or the target selection. Its data in this slice is explicitly
-synthetic, complete, uncompressed input in the existing strict offline envelope
-format. It is not proof of interoperability with actual EPSS/CISA wire formats.
+synthetic, complete, uncompressed metadata-bearing EPSS CSV or projection-minimal
+KEV catalog JSON accepted by the existing offline projection parser. There is no
+outer envelope format or conversion step. This is not proof of interoperability
+with all actual EPSS/CISA wire formats or full provider-schema validation.
 
 The returned byte slice length is checked against 32 MiB before hashing or
 parsing. This matches the existing offline parser's input-byte limit; the parser
@@ -28,9 +30,45 @@ A future transport must establish those separate contracts before live use.
 
 Source publication/version and positive values are read only by the existing
 threat.ParseOfflineThreat with OfflineOptions CVEs/ObservedAt. Missing metadata
-is rejected; no wrapper creates an envelope or fills source fields from clocks,
-legacy ThreatSnapshots or guessed dates. The existing strict parser is reused,
-not replaced.
+is rejected; no wrapper constructs source metadata or fills source fields from
+clocks, legacy ThreatSnapshots or guessed dates. The existing bounded offline
+projection parser is reused, not replaced.
+
+## Supported synthetic source subset
+
+The existing EPSS local subset requires a first-line comment containing exactly
+model_version and score_date keys, followed by cve/epss/percentile CSV columns
+(and an optional date column). The fixtures are authored examples of that
+existing grammar. [FIRST's public format description](https://www.first.org/epss/data)
+documents three columns and a model-version/publication-date comment for v2 and
+later, but does not settle the literal metadata-key grammar or timestamp
+precision relied on here. No complete provider-wire compatibility is inferred;
+older metadata-free input is not supplemented from a filename or current clock.
+
+The authored positive KEV fixture includes every required field from the
+[official schema at blob ec422845b354f58250d2e99cdfcce17a18659423](https://github.com/cisagov/kev-data/blob/d98075f22b11ca60ede428f4397966d3523dc692/known_exploited_vulnerabilities_schema.json).
+The parser projects catalogVersion/dateReleased/count and cveID/dateAdded. It
+does not enforce the schema-required vendorProject, product, vulnerabilityName,
+shortDescription, requiredAction or dueDate fields. Existing projection-minimal
+fixtures deliberately omit those fields; their acceptance is not full-schema
+validation. dateReleased uses the shared offline date parser, accepting RFC3339
+with optional fractional seconds, offsets without a colon, date-only input,
+space-separated date/time and timezone-free T-separated date/time. This is wider
+than the schema's date-time format and is characterized without changing the
+offline importer.
+
+Source version/publication, selected canonical records, count/duplicate rules
+and whole-input bounds remain the existing offline parser's contract. Publication
+and observation clocks stay independent. A selected CVE absent from input adds
+no observation; zero EPSS remains known zero and KEV remains positive-only.
+No source-profile decoder, metadata generator or new public API is added.
+
+Equivalent parsed feeds do not imply identical input bytes. CSV LF versus CRLF
+and JSON whitespace variants retain different exact input SHA256 values in the
+prepared Completion. Reconciliation binds that digest to the stored manifest
+and success receipt; swapping only the digest for the other variant is rejected.
+The digest identifies the supplied uncompressed document, not a normalized
+serialization, compressed wire stream or proof of transport EOF/CRC.
 
 ## One page and cursor rules
 
@@ -96,8 +134,8 @@ delegate real Begin/Fail/Complete and then return a synthetic post-commit error.
 They check exact retained arguments, UUID/fetch/write counts, replay and cancel
 barriers, common cleanup deadline, clocks, metadata rejection, byte/page bounds
 and no SQL transaction held over Fetch. Known zero EPSS and positive KEV from
-explicit synthetic envelopes are asserted through v2 receipts, common reads,
-priority-preview, strict input_snapshot decode and the existing base CLI with
+explicit synthetic CSV/catalog JSON inputs are asserted through v2 receipts,
+common reads, priority-preview, strict input_snapshot decode and the existing base CLI with
 full Result comparison. Authoritative finding/triage/history, legacy alerts and
 legacy threat snapshots must remain unchanged.
 
