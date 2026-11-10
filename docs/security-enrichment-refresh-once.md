@@ -343,3 +343,27 @@ legacy threat snapshots must remain unchanged.
 The four original Red contract test bytes remain unchanged. Formal Go
 compile/test/race/vet/build and CLI execution must pass CI. Local gofmt/source
 checks are not runtime/Go-test passes or real transport integration proof.
+
+### Complete synthetic manual-to-CLI acceptance chain
+
+security_enrichment_manual_e2e_test.go exercises the existing manual API through
+one owned ManualController/Service, the real BoundedHTTPFetcher with only an
+injected .invalid fake RoundTripper, owned SQLite, v2/common reads, explicit-clock
+priority-preview, strict input_snapshot decode and the existing CLI --schema base.
+The fixture starts without common threat evidence and each successful manual
+HTTP call is checked immediately against that source in real SQLite. The private
+Completion capture is not an HTTP field or a claim to export owned Pending.
+It compares the full Result after asserting known-zero EPSS, positive KEV and
+exact source/run/version/publication/observation identity, rather than accepting
+an empty or unknown match. This checks full Result consistency across paths that
+share the common bridge/decoder; it is not an independent scoring oracle.
+Start, observation, finish and source publication are independently supplied;
+EPSS and KEV use different clocks. The gzip EPSS input
+retains decoded-input SHA256, not compressed-body SHA256. Receipt readback before
+and after read/CLI/replay verifies unchanged evidence identity; existing finding,
+triage/history, non-empty pre-existing ingest receipts and legacy threat snapshots,
+and legacy alert inputs remain unchanged.
+No production behavior, public export, DTO or main/config wiring is changed.
+This is one composed synthetic acceptance test, not real-provider interoperability,
+live/production activation, account authentication or crash/restart durability.
+The CLI build/replay runs only in formal tests; local static checks do not execute it.
