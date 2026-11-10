@@ -42,11 +42,11 @@ func validateTransition(previous *Checkpoint, next Checkpoint) error {
 		if b.Stage != Fail && b.Stage != Complete && b.Stage != Returned {
 			return invalid("begin transition")
 		}
-		if b.Stage == Returned && (b.Prepared.Failure != nil || b.Prepared.Completion != nil) {
+		if b.Stage == Returned && (b.Prepared.Failure != nil || b.Prepared.Completion != nil || b.Progress.Outcome != "pending" || (b.Progress.Code != "begin_unknown" && b.Progress.Code != "begin_replay" && b.Progress.Code != "begin_readback_unknown" && b.Progress.Code != "invalid_clock")) {
 			return invalid("unprepared returned write")
 		}
 	case Fail, Complete:
-		if b.Stage != Returned || !reflect.DeepEqual(a.Prepared, b.Prepared) {
+		if b.Stage != Returned || !reflect.DeepEqual(a.Prepared, b.Prepared) || (b.Progress.Outcome == "pending" && ((a.Stage == Fail && b.Progress.Code != "failure_unknown") || (a.Stage == Complete && b.Progress.Code != "completion_unknown"))) {
 			return invalid("changed prepared write")
 		}
 	case Returned:
