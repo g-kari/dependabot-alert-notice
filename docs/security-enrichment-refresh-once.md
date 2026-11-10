@@ -1,7 +1,8 @@
 # Unconnected one-page synthetic enrichment orchestrator
 
 This B2b package is a library with no application wiring, default live fetcher,
-HTTP implementation, scheduler, main/config change, dependency or migration.
+real HTTP execution, scheduler, main/config change, dependency or migration.
+The optional transport capability below remains explicitly injected and unwired.
 The existing legacy threat fetchers and offline importer remain unchanged.
 
 ## Input and dependency boundary
@@ -24,15 +25,76 @@ The returned byte slice length is checked against 32 MiB before hashing or
 parsing. This matches the existing offline parser's input-byte limit; the parser
 also retains its existing CSV-row/KEV-entry limits and source validation. The
 digest is SHA256 of exactly the returned uncompressed parser-input bytes.
-No compressed-wire byte count, transport allocation bound, HTTP behavior, CRC,
-automatic decompression or real-source digest adapter is implemented or claimed.
-A future transport must establish those separate contracts before live use.
+The optional fake-tested transport below bounds encoded entity-body/decoded
+payload bytes and gzip completeness separately. No transport allocation/total
+wire bound, real-provider interoperability or real-source digest is claimed.
 
 Source publication/version and positive values are read only by the existing
 threat.ParseOfflineThreat with OfflineOptions CVEs/ObservedAt. Missing metadata
 is rejected; no wrapper constructs source metadata or fills source fields from
 clocks, legacy ThreatSnapshots or guessed dates. The existing bounded offline
 projection parser is reused, not replaced.
+
+
+## Bounded transport capability: fake-only verification
+
+An optional BoundedHTTPFetcher now implements the existing Fetcher interface.
+It requires an explicit RoundTripper and copied epss/kev source profiles, each
+with a fixed HTTPS URL and explicit identity or gzip payload representation.
+There is no default transport or endpoint and no application/main/config or
+scheduler wiring. Tests use only .invalid URLs and fake RoundTrippers: no HTTP
+server, socket, real endpoint or feed retrieval is exercised.
+
+The adapter makes exactly one RoundTrip call with GET and Accept-Encoding:
+identity. Profiles reject URL userinfo, query and fragment; callers supply no
+CVE selection, credential headers or cookies. It does not use http.Client,
+follow redirects or implement retry; only status 200 is accepted. The injected
+transport is a trusted capability boundary: it must return raw entity bytes and
+must not add credentials, transparently decode, retry or change destinations.
+A future live transport must explicitly disable automatic decompression
+(DisableCompression=true) and separately establish its retry, timeout and other
+network policies. Arbitrary transport internals are not verified by these fakes.
+
+HTTP Content-Encoding must be absent/empty/identity. Response.Uncompressed,
+other or stacked HTTP codings are rejected, even for the gzip source profile.
+The configured gzip representation is a compressed object within that identity
+HTTP body, not negotiated HTTP gzip. Real provider header/profile compatibility
+has not been established. No automatic encoding fallback or recursive decoding
+is performed; a nested gzip payload is rejected.
+
+Encoded entity-body input is limited to 16 MiB using a 16 MiB+1 sentinel read.
+Decoded payload is limited to 32 MiB with a 32 MiB+1 sentinel. Known ContentLength
+must be nonnegative, within the encoded limit and equal the actual body length;
+-1 alone denotes unknown length. Any supplied Content-Length header must agree
+unambiguously. Successful reads consume the supplied Body through EOF. Rejected
+oversize/error responses are closed without adapter-level unbounded draining.
+These are body/payload limits, not total TLS/network bytes, HTTP framing,
+headers, transport allocation or work performed internally by Body.Close.
+
+A gzip payload is read through a single member with Multistream(false), using
+a byte reader to preserve the exact trailing boundary. Full decoded EOF checks
+CRC and ISIZE before success; gzip.Close alone is not validation. Truncation,
+trailing bytes (including whitespace), concatenated/empty second members and
+nested gzip fail without returning partial bytes. The adapter does not create
+metadata, parse records or reserialize: the existing orchestrator hashes the
+exact returned decoded CSV/catalog JSON bytes and reuses ParseOfflineThreat.
+OriginalDigest remains decoded parser-input SHA256, not compressed-body SHA256.
+
+Fetch uses the original context for request/read/decode and checks it again
+before returning. A synchronized close-once helper and context.AfterFunc close
+a cooperative response Body on cancellation; cleanup stops/joins that callback.
+Every obtained nonnil Body is closed, including response-plus-error cases.
+Close failure or cancellation returns no bytes. Cancellation after EOF or
+during Close cannot be reported as successful data. Noncooperative RoundTrip,
+Read or Close implementations cannot be forcibly stopped or given a universal
+wall-time bound here.
+
+Errors expose only fixed adapter messages or standard context cancellation.
+Synthetic SQLite tests verify known facts and decoded digest/receipt retention;
+read errors and invalid source metadata record only existing closed failure
+codes, never raw response bytes or underlying error text. Existing full
+read/preview/input_snapshot/CLI parity tests still cover the unchanged upper
+layers; this fake transport test is not additional live/full-wire proof.
 
 ## Supported synthetic source subset
 
