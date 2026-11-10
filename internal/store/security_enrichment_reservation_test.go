@@ -361,7 +361,7 @@ func TestReservationAdditiveUpgradePreservesNonemptyOldRowsAndIndexesDetection(t
 	}
 }
 
-func TestReservationAdvancedGenericHeadAndBusinessAPIsRemainUnfenced(t *testing.T) {
+func TestReservationAdvancedHeadRejectsAdoptedGenericAPIsAndKeepsUnadoptedBegin(t *testing.T) {
 	db, c := refreshContractFixture(t, "epss", 2260)
 	frames := inspectionContractFrames(t, c, 2260)
 	request := reservationContractRequest(t, 2260, "epss_feed")
@@ -371,13 +371,26 @@ func TestReservationAdvancedGenericHeadAndBusinessAPIsRemainUnfenced(t *testing.
 	request.Reserved.Checkpoint = frames[0]
 	reservationContractDigest(t, &request)
 	reservationContractRequire(t, db, request)
-	appendJournalFrame(t, db, frames[1], 2, request.ReservedDigest)
-	// This slice intentionally does NOT enforce business-write fencing or add
-	// guards to old APIs. The capability remains unconnected/experimental.
-	if _, err := db.BeginSecurityEnrichmentRefresh(context.Background(), c.Attempt); err != nil {
-		t.Fatal("old Begin API behavior changed")
+	begin := fencedContractRequest(t, request, frames[1], 2, request.ReservedDigest)
+	before := journalSnapshot(t, db, false)
+	if ack, err := db.AppendSecurityEnrichmentCheckpoint(context.Background(), begin.Checkpoint); !errors.Is(err, ErrIngestConflict) || !reflect.DeepEqual(ack, enrichmentjournal.Acknowledgement{}) {
+		t.Fatal("adopted source escaped through generic journal append")
 	}
+	if replay, err := db.BeginSecurityEnrichmentRefresh(context.Background(), c.Attempt); !errors.Is(err, ErrIngestConflict) || replay || journalSnapshot(t, db, false) != before {
+		t.Fatal("adopted generic Begin changed a table or exposed replay")
+	}
+	fencedContractAppend(t, db, begin)
+	fencedContractApply(t, db, begin, "running")
 	reservationReadOnlyReject(t, db, request, "conflict")
+	// The old unadopted default still has its identical running replay.
+	unadopted, other := refreshContractFixture(t, "epss", 2261)
+	if replay, err := unadopted.BeginSecurityEnrichmentRefresh(context.Background(), other.Attempt); err != nil || replay {
+		t.Fatal("unadopted Begin default changed")
+	}
+	before = journalSnapshot(t, unadopted, false)
+	if replay, err := unadopted.BeginSecurityEnrichmentRefresh(context.Background(), other.Attempt); err != nil || !replay || journalSnapshot(t, unadopted, false) != before {
+		t.Fatal("unadopted Begin replay changed")
+	}
 }
 
 func TestReservationReadErrorsAndClosedDBNeverReturnProof(t *testing.T) {

@@ -90,6 +90,9 @@ func (s *Store) BeginSecurityEnrichmentRefresh(ctx context.Context, attempt Secu
 		return false, fmt.Errorf("begin refresh attempt: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := guardLegacyEnrichmentWriteTx(ctx, tx, a.Connector); err != nil {
+		return false, err
+	}
 	replay, err := beginSecurityEnrichmentRefreshTx(ctx, tx, a, run)
 	if err != nil {
 		return false, err
@@ -118,6 +121,9 @@ func (s *Store) CompleteSecurityEnrichmentRefresh(ctx context.Context, completio
 		return SecurityEnrichmentImportResult{}, fmt.Errorf("begin refresh completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := guardLegacyEnrichmentWriteTx(ctx, tx, c.Attempt.Connector); err != nil {
+		return SecurityEnrichmentImportResult{}, err
+	}
 	result, err := completeSecurityEnrichmentRefreshTx(ctx, tx, c, running, success)
 	if err != nil {
 		return SecurityEnrichmentImportResult{}, err
@@ -161,6 +167,9 @@ func (s *Store) FailSecurityEnrichmentRefresh(ctx context.Context, attempt Secur
 		return false, fmt.Errorf("begin refresh failure: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := guardLegacyEnrichmentWriteTx(ctx, tx, running.Connector); err != nil {
+		return false, err
+	}
 	replay, err := failSecurityEnrichmentRefreshTx(ctx, tx, running, failed)
 	if err != nil {
 		return false, err

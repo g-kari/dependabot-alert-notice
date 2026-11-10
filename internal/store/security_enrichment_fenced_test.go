@@ -197,8 +197,8 @@ func TestFencedBeginAndFailReplaysPreserveHistoricalBindingAndAllRows(t *testing
 	if err != nil || !fencedContractAckMatches(replay.Acknowledgement, begin, true) || replay.Business.State != "running" {
 		t.Fatal("Begin replay became fresh or revalidated current Finding")
 	}
-	if legacy, err := db.BeginSecurityEnrichmentRefresh(context.Background(), completion.Attempt); err != nil || !legacy {
-		t.Fatal("old generic Begin replay semantics changed")
+	if legacy, err := db.BeginSecurityEnrichmentRefresh(context.Background(), completion.Attempt); !errors.Is(err, ErrIngestConflict) || legacy {
+		t.Fatal("adopted source escaped through generic Begin replay")
 	}
 	if journalSnapshot(t, db, false) != before {
 		t.Fatal("Begin replays changed a table")
@@ -215,8 +215,8 @@ func TestFencedBeginAndFailReplaysPreserveHistoricalBindingAndAllRows(t *testing
 	if err != nil || !fencedContractAckMatches(replay.Acknowledgement, request, true) || replay.Business.State != "failed" || replay.Business.Receipt != "" {
 		t.Fatal("exact Fail replay changed its fixed-code proof")
 	}
-	if legacy, err := db.FailSecurityEnrichmentRefresh(context.Background(), completion.Attempt, "target_changed", completion.FinishedAt); err != nil || !legacy {
-		t.Fatal("old generic Fail replay semantics changed")
+	if legacy, err := db.FailSecurityEnrichmentRefresh(context.Background(), completion.Attempt, "target_changed", completion.FinishedAt); !errors.Is(err, ErrIngestConflict) || legacy {
+		t.Fatal("adopted source escaped through generic Fail replay")
 	}
 	fencedContractRead(t, db, request, true, "failed")
 	if journalSnapshot(t, db, false) != before {

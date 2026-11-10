@@ -80,6 +80,9 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		return empty, journalError(ctx, errJournalStorage)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := guardLegacyEnrichmentWriteTx(ctx, tx, request.Checkpoint.Request.Connector); err != nil {
+		return empty, err
+	}
 	ack, err := appendJournalCheckpointTx(ctx, tx, request, payload, digest)
 	if err != nil {
 		return empty, err
