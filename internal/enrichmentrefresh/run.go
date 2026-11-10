@@ -189,7 +189,7 @@ func (s Service) run(ctx context.Context, request Request) (Result, error) {
 		return fail("parse_failed", finish)
 	}
 	// Retain the full completion before Complete; the digest is exactly the
-	// delivered uncompressed strict-offline-envelope input, not wire provenance.
+	// delivered uncompressed CSV/catalog JSON bytes, not compressed-wire provenance.
 	work.Completion = &store.SecurityEnrichmentRefreshCompletion{
 		Attempt: work.Attempt, Feed: feed, OriginalDigest: "sha256:" + hex.EncodeToString(digest[:]), FinishedAt: finish,
 	}

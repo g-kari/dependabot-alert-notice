@@ -19,8 +19,10 @@ type Repository interface {
 	ReconcileSecurityEnrichmentRefresh(context.Context, store.SecurityEnrichmentRefreshCompletion) (store.SecurityEnrichmentRefreshState, error)
 }
 
-// Fetcher supplies owned, complete, uncompressed synthetic strict-offline-envelope
-// bytes for epss or kev. No real wire/HTTP/compression adapter is supplied here.
+// Fetcher supplies owned, complete, uncompressed synthetic metadata-bearing EPSS
+// CSV or projection-minimal KEV catalog JSON for the existing offline parser.
+// This is not full provider-schema or wire compatibility. No HTTP or compression
+// adapter is supplied here.
 type Fetcher interface {
 	Fetch(context.Context, string) ([]byte, error)
 }
