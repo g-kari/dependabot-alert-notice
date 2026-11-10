@@ -5,8 +5,6 @@
 package enrichmentrelease
 
 import (
-	"errors"
-
 	"github.com/g-kari/dependabot-alert-notice/internal/enrichmentjournal"
 )
 
@@ -64,17 +62,17 @@ type Certificate struct {
 // InspectTerminal validates only the retained binding and legal nonpending
 // returned checkpoint shape, using the existing journal contract. It is pure.
 func InspectTerminal(request ReleaseRequest) (Inspection, error) {
-	return Inspection{}, errors.New("release inspection unavailable")
+	return inspectTerminal(request)
 }
 
 // EncodeCertificate validates bounded shape before canonical JSON marshaling.
 // Its syntactic success cannot replace SQL proof or an atomic release.
 func EncodeCertificate(certificate Certificate) ([]byte, error) {
-	return nil, errors.New("release certificate codec unavailable")
+	return encodeCertificate(certificate)
 }
 
 // DecodeCertificate rejects non-closed/oversized certificate JSON and owns its
 // decoded values. It never reads a journal or attests that a release occurred.
 func DecodeCertificate(data []byte) (Certificate, error) {
-	return Certificate{}, errors.New("release certificate codec unavailable")
+	return decodeCertificate(data)
 }
