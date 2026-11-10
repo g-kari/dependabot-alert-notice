@@ -213,14 +213,16 @@ func (c *ManualController) Reconcile(ctx context.Context, operationID string) (M
 	c.busy = true
 	c.mu.Unlock()
 
+	// Keep work private for resolution; the dependency receives a second copy.
+	argument := cloneManualPending(work)
 	readCtx, stop := context.WithTimeout(ctx, cleanupBudget)
 	defer stop()
 	success, failed := false, false
 	if work.Completion != nil {
-		state, err := c.service.Store.ReconcileSecurityEnrichmentRefresh(readCtx, *work.Completion)
+		state, err := c.service.Store.ReconcileSecurityEnrichmentRefresh(readCtx, *argument.Completion)
 		success = err == nil && state.State == "success" && state.Receipt != ""
 	} else {
-		state, err := c.service.Store.ReadSecurityEnrichmentRefreshAttempt(readCtx, work.Attempt, work.ExpectedFailure)
+		state, err := c.service.Store.ReadSecurityEnrichmentRefreshAttempt(readCtx, argument.Attempt, argument.ExpectedFailure)
 		failed = err == nil && work.ExpectedFailure != nil && state.State == "failed" && state.Receipt == ""
 	}
 

@@ -612,3 +612,118 @@ func TestManualControllerRetainsOnlyClosedErrorClassification(t *testing.T) {
 		t.Fatal("failed response-loss replay acquired dependency work")
 	}
 }
+
+type manualArgumentMutatingRepository struct {
+	Repository
+	mutate    bool
+	mutations int
+}
+
+func (r *manualArgumentMutatingRepository) ReadSecurityEnrichmentRefreshAttempt(ctx context.Context, attempt store.SecurityEnrichmentRefreshAttempt, expected *store.SecurityEnrichmentRefreshFailure) (store.SecurityEnrichmentRefreshState, error) {
+	state, err := r.Repository.ReadSecurityEnrichmentRefreshAttempt(ctx, attempt, expected)
+	if r.mutate && err == nil {
+		r.mutations++
+		if len(attempt.Targets) != 0 {
+			attempt.Targets[0].FindingID = "PRIVATE-mutated-target"
+		}
+		if expected != nil {
+			// Mutate only after real Store readback has verified the original
+			// failed receipt. These must never become resolution inputs.
+			expected.Code = "PRIVATE-mutated"
+			expected.FinishedAt = expected.FinishedAt.Add(time.Hour)
+		}
+	}
+	return state, err
+}
+
+func (r *manualArgumentMutatingRepository) ReconcileSecurityEnrichmentRefresh(ctx context.Context, completion store.SecurityEnrichmentRefreshCompletion) (store.SecurityEnrichmentRefreshState, error) {
+	state, err := r.Repository.ReconcileSecurityEnrichmentRefresh(ctx, completion)
+	if r.mutate && err == nil {
+		r.mutations++
+		if len(completion.Attempt.Targets) != 0 {
+			completion.Attempt.Targets[0].FindingID = "PRIVATE-mutated-target"
+		}
+		if len(completion.Feed.SelectedCVEs) != 0 {
+			completion.Feed.SelectedCVEs[0] = "CVE-2026-9999"
+		}
+		if len(completion.Feed.Entries) != 0 {
+			entry := &completion.Feed.Entries[0]
+			if entry.EPSS != nil {
+				*entry.EPSS = 1
+			}
+			if entry.Percentile != nil {
+				*entry.Percentile = 1
+			}
+			if entry.KEVDateAdded != nil {
+				*entry.KEVDateAdded = entry.KEVDateAdded.Add(time.Hour)
+			}
+		}
+	}
+	return state, err
+}
+
+func manualPrivatePendingJSON(t *testing.T, c *ManualController, id string) string {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	record, ok := c.operations[id]
+	if !ok {
+		t.Fatal("private operation record absent")
+	}
+	return jsonValue(t, record.retained)
+}
+
+func TestManualControllerReadbackArgumentMutationCannotSupplyResolvedValues(t *testing.T) {
+	for _, kind := range []string{"failure", "completion"} {
+		t.Run(kind, func(t *testing.T) {
+			db := contractStore(t, true)
+			h := harness(t, db)
+			if kind == "failure" {
+				h.fetchError = errors.New("PRIVATE-synthetic-fetch-error")
+				h.repo.failAfter, h.repo.readError = true, true
+			} else {
+				h.repo.completeAfter, h.repo.reconcileError = true, true
+			}
+			mutator := &manualArgumentMutatingRepository{Repository: h.repo}
+			h.service.Store = mutator
+			c, err := NewManualController(h.service)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := manualOperationID(100)
+			request := Request{Connector: "epss_feed", Limit: 200}
+			pending, _, err := c.Call(context.Background(), id, request)
+			if !errors.Is(err, ErrPending) || pending.Result.Pending == nil {
+				t.Fatalf("pending fixture failed: %+v %v", pending, err)
+			}
+			private := manualPrivatePendingJSON(t, c, id)
+			clock, uuid, fetch := h.clockCalls, h.uuidCalls, h.fetchCalls
+			begin, complete, fail := h.repo.calls["begin"], h.repo.calls["complete"], h.repo.calls["fail"]
+			h.repo.readError, h.repo.reconcileError, mutator.mutate = false, false, true
+			resolved, err := c.Reconcile(context.Background(), id)
+			if err != nil || resolved.State != "resolved" || resolved.Result.RunID != pending.Result.RunID || resolved.Result.Pending != nil || mutator.mutations != 1 {
+				t.Fatalf("real receipt did not resolve once: %+v err=%v mutations=%d", resolved, err, mutator.mutations)
+			}
+			if kind == "failure" {
+				if resolved.Result.Outcome != "failed" || resolved.Result.Code != "fetch_failed" || resolved.Result.Advance || resolved.Result.NextAfter != request.After || h.repo.calls["read"] != 2 {
+					t.Fatalf("dependency mutation supplied failure result: %+v", resolved)
+				}
+			} else if resolved.Result.Outcome != "success" || resolved.Result.Code != "" || !resolved.Result.Advance || resolved.Result.NextAfter != pending.Result.ScanAfter || h.repo.calls["reconcile"] != 2 {
+				t.Fatalf("dependency mutation supplied completion/cursor result: %+v", resolved)
+			}
+			if manualPrivatePendingJSON(t, c, id) != private || strings.Contains(jsonValue(t, resolved), "PRIVATE") || h.clockCalls != clock || h.uuidCalls != uuid || h.fetchCalls != fetch || h.repo.calls["begin"] != begin || h.repo.calls["complete"] != complete || h.repo.calls["fail"] != fail {
+				t.Fatal("readback changed private evidence, leaked mutation or performed fresh write/clock/fetch")
+			}
+			counts := manualCounts(t, h)
+			snapshot, ok := c.Snapshot(id)
+			replay, cached, err := c.Call(context.Background(), id, request)
+			if !ok || err != nil || !cached || !reflect.DeepEqual(snapshot, resolved) || !reflect.DeepEqual(replay, resolved) || manualCounts(t, h) != counts || manualPrivatePendingJSON(t, c, id) != private {
+				t.Fatalf("resolved snapshot/cached replay changed owned result: %+v %+v %v", snapshot, replay, err)
+			}
+			again, err := c.Reconcile(context.Background(), id)
+			if err != nil || !reflect.DeepEqual(again, resolved) || manualCounts(t, h) != counts || mutator.mutations != 1 {
+				t.Fatal("resolved recovery repeated dependency I/O")
+			}
+		})
+	}
+}
