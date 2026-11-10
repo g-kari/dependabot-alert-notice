@@ -148,7 +148,6 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerTUI(mux)
-	s.registerManualEnrichmentAPI(mux)
 	s.registerFindingsAPI(mux)
 	s.registerFindingsConsole(mux)
 	mux.HandleFunc("GET /", s.handleDashboard)
@@ -202,6 +201,9 @@ func (s *Server) Handler() http.Handler {
 			if !validCSRF(w, r) {
 				return
 			}
+		}
+		if s.serveManualEnrichmentAPI(w, r) {
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})
