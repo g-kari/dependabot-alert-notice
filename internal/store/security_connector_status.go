@@ -82,8 +82,8 @@ type ConnectorStatusPage struct {
 	Boundary ConnectorCoverageBoundary `json:"coverage_boundary"`
 }
 
-// IsConnectorStatusSource reports whether a source belongs to the current
-// ingestion contract. It does not claim that the source is configured or live.
+// IsConnectorStatusSource reports whether a source belongs to the frozen v1
+// receipt contract. It does not claim that the source is configured or live.
 func IsConnectorStatusSource(source string) bool {
 	switch source {
 	case "dependabot", "trivy", "github_code_scanning", "github_secret_scanning", "epss_offline", "kev_offline":
@@ -93,14 +93,36 @@ func IsConnectorStatusSource(source string) bool {
 	}
 }
 
+// IsConnectorStatusSourceV2 reports whether a source belongs to the v2 receipt
+// contract. Feed origins are distinct from offline imports and domain enrichment
+// tags; accepting an origin does not mean it is configured, connected or live.
+func IsConnectorStatusSourceV2(source string) bool {
+	return IsConnectorStatusSource(source) || source == "epss_feed" || source == "kev_feed"
+}
+
 // QueryConnectorStatusPage reads only scalar run metadata, never body_json,
 // cursor, error or observation payloads. SQL groups retained history; Go holds
 // at most Limit groups and two run summaries per group, not all historical runs.
 func (s *Store) QueryConnectorStatusPage(ctx context.Context, query ConnectorStatusQuery) (ConnectorStatusPage, error) {
+	return s.queryConnectorStatusPage(ctx, query, false)
+}
+
+// QueryConnectorStatusPageV2 reads the same bounded scalar receipt schema as v1
+// with eight accepted origins, including distinct epss_feed and kev_feed rows.
+// It does not collect feeds or establish configuration, coverage or liveness.
+func (s *Store) QueryConnectorStatusPageV2(ctx context.Context, query ConnectorStatusQuery) (ConnectorStatusPage, error) {
+	return s.queryConnectorStatusPage(ctx, query, true)
+}
+
+func (s *Store) queryConnectorStatusPage(ctx context.Context, query ConnectorStatusQuery, includeFeeds bool) (ConnectorStatusPage, error) {
+	validSource := IsConnectorStatusSource
+	if includeFeeds {
+		validSource = IsConnectorStatusSourceV2
+	}
 	if err := validateSecurityPagination(query.Limit, query.Offset); err != nil {
 		return ConnectorStatusPage{}, fmt.Errorf("validate connector pagination: %w", err)
 	}
-	if (query.Source != "" && !IsConnectorStatusSource(query.Source)) || (query.Scope != "" && (!securityField(query.Scope, true, 256) || strings.TrimSpace(query.Scope) != query.Scope)) || !securityTime(query.AsOf) || !securityTime(query.AsOf.UTC()) {
+	if (query.Source != "" && !validSource(query.Source)) || (query.Scope != "" && (!securityField(query.Scope, true, 256) || strings.TrimSpace(query.Scope) != query.Scope)) || !securityTime(query.AsOf) || !securityTime(query.AsOf.UTC()) {
 		return ConnectorStatusPage{}, fmt.Errorf("invalid connector query")
 	}
 	s.mu.RLock()
@@ -110,7 +132,7 @@ func (s *Store) QueryConnectorStatusPage(ctx context.Context, query ConnectorSta
 		return ConnectorStatusPage{}, fmt.Errorf("begin connector status: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	where, args := connectorStatusWhere(query)
+	where, args := connectorStatusWhere(query, includeFeeds)
 	page := ConnectorStatusPage{
 		AsOf: query.AsOf.UTC(), Limit: query.Limit, Offset: query.Offset, Items: []ConnectorStatus{},
 		Boundary: ConnectorCoverageBoundary{Basis: "recorded_source_scope_pairs", AttemptHistory: "unknown"},
@@ -123,7 +145,7 @@ func (s *Store) QueryConnectorStatusPage(ctx context.Context, query ConnectorSta
 	if err != nil {
 		return ConnectorStatusPage{}, fmt.Errorf("query connector scopes: %w", err)
 	}
-	if err := scanConnectorGroups(rows, &page.Items); err != nil {
+	if err := scanConnectorGroups(rows, &page.Items, validSource); err != nil {
 		return ConnectorStatusPage{}, err
 	}
 	for i := range page.Items {
@@ -148,9 +170,15 @@ func (s *Store) QueryConnectorStatusPage(ctx context.Context, query ConnectorSta
 	return page, nil
 }
 
-func connectorStatusWhere(query ConnectorStatusQuery) (string, []any) {
+func connectorStatusWhere(query ConnectorStatusQuery, includeFeeds bool) (string, []any) {
 	var clauses []string
 	var args []any
+	if !includeFeeds {
+		// Exclude only the two origins newly recognized by v2. Do not whitelist
+		// v1 sources here: unknown retained kinds must still fail projection.
+		clauses = append(clauses, "connector NOT IN (?,?)")
+		args = append(args, "epss_feed", "kev_feed")
+	}
 	for _, field := range []struct{ column, value string }{{"connector", query.Source}, {"scope", query.Scope}} {
 		if field.value != "" {
 			clauses, args = append(clauses, field.column+"=?"), append(args, field.value)
@@ -162,7 +190,7 @@ func connectorStatusWhere(query ConnectorStatusQuery) (string, []any) {
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func scanConnectorGroups(rows *sql.Rows, items *[]ConnectorStatus) error {
+func scanConnectorGroups(rows *sql.Rows, items *[]ConnectorStatus, validSource func(string) bool) error {
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var item ConnectorStatus
@@ -170,7 +198,7 @@ func scanConnectorGroups(rows *sql.Rows, items *[]ConnectorStatus) error {
 		if err := rows.Scan(&item.Source, &item.Scope, &counts.Total, &counts.Running, &counts.Success, &counts.Partial, &counts.Failed); err != nil {
 			return fmt.Errorf("scan connector scope: %w", err)
 		}
-		if !IsConnectorStatusSource(item.Source) || !securityField(item.Scope, true, 256) || strings.TrimSpace(item.Scope) != item.Scope {
+		if !validSource(item.Source) || !securityField(item.Scope, true, 256) || strings.TrimSpace(item.Scope) != item.Scope {
 			return ErrInvalidConnectorSnapshot
 		}
 		*items = append(*items, item)
