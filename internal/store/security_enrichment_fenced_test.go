@@ -241,7 +241,11 @@ func TestFencedBusinessCorruptionNeverBorrowsCheckpointOnlyProof(t *testing.T) {
 			args := []any{completion.Attempt.RunID}
 			switch kind {
 			case "run-body-oversize":
-				query, args = "UPDATE ingest_runs SET body_json=? WHERE id=?", []any{strings.Repeat("PRIVATE", 1000), completion.Attempt.RunID}
+				body, err := json.Marshal(map[string]string{"oversize": strings.Repeat("PRIVATE", 1000)})
+				if err != nil || !json.Valid(body) || len(body) <= 4096 {
+					t.Fatal("fixture must be valid JSON above the stored body byte cap")
+				}
+				query, args = "UPDATE ingest_runs SET body_json=? WHERE id=?", []any{string(body), completion.Attempt.RunID}
 			case "run-connector-oversize":
 				query, args = "UPDATE ingest_runs SET connector=? WHERE id=?", []any{strings.Repeat("PRIVATE", 1000), completion.Attempt.RunID}
 			case "run-scope-oversize":
@@ -268,16 +272,22 @@ func TestFencedBusinessCorruptionNeverBorrowsCheckpointOnlyProof(t *testing.T) {
 			if _, err := db.db.Exec(query, args...); err != nil {
 				t.Fatal(err)
 			}
+			if kind == "run-body-oversize" {
+				var valid, size int
+				if err := db.db.QueryRow("SELECT json_valid(body_json),length(CAST(body_json AS BLOB)) FROM ingest_runs WHERE id=?", completion.Attempt.RunID).Scan(&valid, &size); err != nil || valid != 1 || size <= 4096 {
+					t.Fatal("oversize fixture did not reach the DB as valid JSON above the byte cap")
+				}
+			}
 			before := journalSnapshot(t, db, false)
 			fencedContractRead(t, db, complete, false, "unknown")
 			proof, readErr := db.ReadSecurityEnrichmentFencedRefresh(context.Background(), complete)
-			if readErr == nil || strings.Contains(readErr.Error(), "PRIVATE") {
-				t.Fatal("corrupt business evidence was accepted or leaked raw content")
+			if !errors.Is(readErr, errFencedCorrupt) || strings.Contains(readErr.Error(), "PRIVATE") {
+				t.Fatal("corrupt business evidence was misclassified, accepted or leaked raw content")
 			}
 			fencedAssertNoAck(t, proof)
 			proof, writeErr := db.ApplySecurityEnrichmentFencedRefresh(context.Background(), complete)
-			if writeErr == nil || strings.Contains(writeErr.Error(), "PRIVATE") {
-				t.Fatal("corrupt replay was accepted or leaked raw content")
+			if !errors.Is(writeErr, errFencedCorrupt) || strings.Contains(writeErr.Error(), "PRIVATE") {
+				t.Fatal("corrupt replay was misclassified, accepted or leaked raw content")
 			}
 			fencedAssertNoAck(t, proof)
 			if journalSnapshot(t, db, false) != before {
@@ -352,17 +362,37 @@ func TestFencedRequestBoundsContextAndNilStoreRejectBeforeDependencyIO(t *testin
 			case "finding-id":
 				request.Checkpoint.Checkpoint.Prepared.Attempt.Targets[0].FindingID = strings.Repeat("x", 129)
 			}
-			var absent *Store
-			ack, appendErr := absent.AppendSecurityEnrichmentFencedCheckpoint(context.Background(), request)
-			applied, applyErr := absent.ApplySecurityEnrichmentFencedRefresh(context.Background(), request)
-			cp, cpErr := absent.ReadSecurityEnrichmentFencedCheckpoint(context.Background(), request)
-			business, readErr := absent.ReadSecurityEnrichmentFencedRefresh(context.Background(), request)
-			if appendErr == nil || applyErr == nil || cpErr == nil || readErr == nil || !reflect.DeepEqual(ack, SecurityEnrichmentFencedAcknowledgement{}) || strings.Contains(appendErr.Error(), "PRIVATE") {
-				t.Fatal("invalid shape reached nil dependency or leaked input")
+			if kind != "digest" {
+				// Keep syntax/digest sound: malformed closed shape must not be
+				// rejected only because its earlier digest became stale. Unlike
+				// the strict leaf encoder, json.Marshal permits invalid shapes.
+				raw, err := json.Marshal(request.Checkpoint.Checkpoint)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.CheckpointDigest = journalDigest(raw)
 			}
-			fencedAssertNoAck(t, applied)
-			fencedAssertNoAck(t, cp)
-			fencedAssertNoAck(t, business)
+			before := journalSnapshot(t, db, false)
+			for _, store := range []*Store{nil, db} {
+				ack, appendErr := store.AppendSecurityEnrichmentFencedCheckpoint(context.Background(), request)
+				applied, applyErr := store.ApplySecurityEnrichmentFencedRefresh(context.Background(), request)
+				cp, cpErr := store.ReadSecurityEnrichmentFencedCheckpoint(context.Background(), request)
+				business, readErr := store.ReadSecurityEnrichmentFencedRefresh(context.Background(), request)
+				for _, err := range []error{appendErr, applyErr, cpErr, readErr} {
+					if !errors.Is(err, errFencedConflict) || strings.Contains(err.Error(), "PRIVATE") {
+						t.Fatal("invalid shape did not return conflict before dependency I/O, or leaked input")
+					}
+				}
+				if !reflect.DeepEqual(ack, SecurityEnrichmentFencedAcknowledgement{}) {
+					t.Fatal("invalid shape exposed acknowledgement")
+				}
+				fencedAssertNoAck(t, applied)
+				fencedAssertNoAck(t, cp)
+				fencedAssertNoAck(t, business)
+			}
+			if journalSnapshot(t, db, false) != before {
+				t.Fatal("invalid shape changed an owned database table")
+			}
 		})
 	}
 	before := journalSnapshot(t, db, false)
