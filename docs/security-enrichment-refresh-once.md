@@ -189,6 +189,70 @@ a call that never returns, or process-crash/restart guarantee is implemented.
 Those are separate requirements before live/scheduled use. Pending is not an
 ownership grant or authorization to create a replacement attempt.
 
+
+## Manual caller ownership controller: no write route
+
+ManualController is an explicitly injected Go caller boundary around the existing
+Service. It adds no HTTP write route, UI, CLI, main/config wiring or default
+dependencies. Construction copies the Service value and requires its Store,
+Clock, UUID factory and Fetcher, but never opens or closes caller-owned storage.
+
+A canonical lowercase operation ID is distinct from the Service's run UUID and
+binds the exact connector/after/limit request without normalization. Before retention,
+IDs use the existing 36-byte lowercase UUID format, connector is closed to the two
+feed kinds, limit is 1..200 and cursor is at most 128 UTF-8 bytes without control
+or format characters. Records contain projected bounded DTOs and fixed error
+classifications, never raw response bodies, arbitrary errors or per-call closures.
+The explicitly injected dependency capabilities remain caller-trusted; copying
+the Service value does not freeze arbitrary state captured inside a dependency.
+The controller
+reserves a calling slot before invoking Service. It never holds its metadata
+mutex across Service or Store I/O, and allows only one in-flight service or
+explicit recovery call per controller. Reentrant/concurrent fresh work is refused,
+not queued or retried. Snapshot remains available while a call is in flight.
+
+Service owns its prepared attempt/failure/full Completion before each write and
+until return. Immediately after return, the controller takes its own deep copy
+of the complete Result/Pending, including both target manifests, selected CVEs,
+entry slices, probability/percentile/date pointers and exact clocks/digest. Every
+outer Call/Snapshot/Reconcile result is another deep copy. A run ID alone is not
+an adequate replacement for that envelope. The private original is retained even
+after verified resolution.
+
+Same-ID/same-content calls replay retained state with zero dependency I/O, so a
+lost outer response does not cause a new UUID, clock, fetch or write. Same ID
+with different content conflicts. A calling slot reports busy. An unresolved
+pending operation blocks fresh IDs for that connector, including other cursors;
+it does not grant fetch ownership from recorded running or missing state.
+An independent connector may proceed when no call is in flight.
+
+Retention is at most 16 operation records per controller, with no eviction,
+expiration or automatic reset. Full retention rejects new operations before I/O;
+existing matching operations can still replay, and mismatched reuse still
+conflicts. Invalid/context/busy/source/capacity refusals never call Service,
+Store, business Clock, UUID factory or Fetcher. This is not an unbounded job queue.
+
+Recovery is an explicit read-only Reconcile call, not a side effect of replay.
+A retained full Completion uses existing full Store reconciliation. A retained
+expected failure uses the attempt reader with exactly the same code/finish.
+Begin-only readback can observe running/missing but cannot obtain ownership,
+fetch or allocate a replacement UUID. Unknown/read-error/canceled recovery keeps
+the complete original envelope. Readback receives the original caller context
+with at most two seconds; it does not use WithoutCancel or perform cleanup writes.
+Verified success alone applies the existing Service success/cursor rule to the
+saved ScanAfter; exact verified failure retains the input cursor. No clocks,
+metadata, HTTP/parse or writes are regenerated. Already resolved operations use
+cached state instead of reading external storage again. A cached operation outcome
+is not a fresh liveness or current-database-health assertion.
+
+This ownership chain is in-process only. Controller replacement, process
+crash/restart, an unreturned/panicking call, durable acknowledgment/outbox and
+multi-controller shared ownership are not solved. A non-returning call keeps
+its reserved in-flight slot; clearing it is not permission to retry. No user
+principal, HTTP authentication, CSRF/origin enforcement or public write API is
+claimed. Any later app route must separately provide those guards while retaining
+this controller; existing read-only v1/v2 APIs remain unchanged.
+
 ## Verification scope
 
 Synthetic tests use owned SQLite databases and per-test Repository wrappers that
