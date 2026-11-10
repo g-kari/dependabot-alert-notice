@@ -4,7 +4,6 @@ package enrichmentrefresh
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
@@ -71,5 +70,5 @@ type Result struct {
 // The store caller retains its attempt/completion in memory before each write;
 // process crashes, unreturned calls and restart recovery are outside this slice.
 func (s Service) RefreshOnce(ctx context.Context, request Request) (Result, error) {
-	return Result{}, fmt.Errorf("refresh orchestration unavailable")
+	return s.run(ctx, request)
 }
