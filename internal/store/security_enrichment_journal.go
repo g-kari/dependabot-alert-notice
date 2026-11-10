@@ -106,10 +106,8 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		if request.Sequence != 1 || request.PreviousDigest != "" || enrichmentjournal.ValidateTransition(nil, c) != nil {
 			return empty, journalError(ctx, errJournalConflict)
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_operations(operation_id,format_version,connector,request_after,request_limit,run_id,head_sequence,head_digest) VALUES(?,?,?,?,?,NULL,?,?)`,
-			c.OperationID, c.Version, c.Request.Connector, c.Request.After, c.Request.Limit, request.Sequence, digest)
-		if err != nil {
-			return empty, journalError(ctx, errJournalStorage)
+		if err := insertJournalOperationTx(ctx, tx, request, digest); err != nil {
+			return empty, err
 		}
 	} else {
 		last := rows[len(rows)-1]
@@ -129,9 +127,8 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 			return empty, journalError(ctx, errJournalCorrupt)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_checkpoints(operation_id,sequence,stage,previous_digest,payload_digest,payload_json) VALUES(?,?,?,?,?,?)`,
-		c.OperationID, request.Sequence, string(c.Stage), request.PreviousDigest, digest, string(payload)); err != nil {
-		return empty, journalError(ctx, errJournalStorage)
+	if err := insertJournalCheckpointTx(ctx, tx, request, payload, digest); err != nil {
+		return empty, err
 	}
 	if exists {
 		var runID any
@@ -156,6 +153,25 @@ func (s *Store) AppendSecurityEnrichmentCheckpoint(ctx context.Context, request 
 		return empty, journalError(ctx, errJournalStorage)
 	}
 	return enrichmentjournal.Acknowledgement{OperationID: c.OperationID, Sequence: request.Sequence, Digest: digest}, nil
+}
+
+func insertJournalOperationTx(ctx context.Context, tx *sql.Tx, request enrichmentjournal.AppendRequest, digest string) error {
+	c := request.Checkpoint
+	_, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_operations(operation_id,format_version,connector,request_after,request_limit,run_id,head_sequence,head_digest) VALUES(?,?,?,?,?,NULL,?,?)`,
+		c.OperationID, c.Version, c.Request.Connector, c.Request.After, c.Request.Limit, request.Sequence, digest)
+	if err != nil {
+		return journalError(ctx, errJournalStorage)
+	}
+	return nil
+}
+
+func insertJournalCheckpointTx(ctx context.Context, tx *sql.Tx, request enrichmentjournal.AppendRequest, payload []byte, digest string) error {
+	c := request.Checkpoint
+	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_checkpoints(operation_id,sequence,stage,previous_digest,payload_digest,payload_json) VALUES(?,?,?,?,?,?)`,
+		c.OperationID, request.Sequence, string(c.Stage), request.PreviousDigest, digest, string(payload)); err != nil {
+		return journalError(ctx, errJournalStorage)
+	}
+	return nil
 }
 
 func readJournalHeader(ctx context.Context, tx *sql.Tx, id string) (journalHeader, bool, error) {

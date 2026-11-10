@@ -23,6 +23,9 @@ var securityEnrichmentSchema string
 //go:embed migrations/004_security_enrichment_journal.sql
 var securityEnrichmentJournalSchema string
 
+//go:embed migrations/005_security_enrichment_reservation.sql
+var securityEnrichmentReservationSchema string
+
 func securityID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -111,6 +114,9 @@ func (s *Store) migrateSecurity() error {
 	}
 	if _, err := tx.ExecContext(ctx, securityEnrichmentJournalSchema); err != nil {
 		return fmt.Errorf("security operation journal migration: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, securityEnrichmentReservationSchema); err != nil {
+		return fmt.Errorf("security operation reservation migration: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("security migration確定失敗: %w", err)
