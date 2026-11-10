@@ -367,3 +367,49 @@ No production behavior, public export, DTO or main/config wiring is changed.
 This is one composed synthetic acceptance test, not real-provider interoperability,
 live/production activation, account authentication or crash/restart durability.
 The CLI build/replay runs only in formal tests; local static checks do not execute it.
+
+## Optional pre-write preservation seam
+
+NewPreservingManualController requires an explicit PreservationSink and reuses
+the existing controller's exact request binding, one in-flight call, source gate,
+16-record non-evicting retention and cached same-ID replay. The old constructor,
+Service.RefreshOnce, HTTP DTOs and default-disabled application remain unchanged.
+There is no main/config, scheduler, disk journal, schema or migration in this slice.
+
+Version 1 PreservationCheckpoint binds OperationID and the exact request to the
+scan counts/cursors and zero or one run UUID. Stages are reserved before Service
+I/O, begin/fail/complete before the corresponding Store write, and returned before
+a candidate result can be published. Prepared preserves the complete original
+attempt/failure/Completion even when a candidate terminal Result clears Pending.
+No-run/exhausted outcomes still require returned acknowledgement; they generate
+no business clock, run UUID or feed metadata.
+
+The controller owns a separate deep copy before invoking the sink with another
+copy. Result.Pending, Prepared, target lists, selection/entry slices and nested
+probability/percentile/date/failure pointers do not alias the private original.
+The sink is caller-trusted; this protects prepared values, not arbitrary behavior
+of a dependency or the state captured by its closures.
+
+Only nil error with an active checkpoint context acknowledges preservation.
+Any error or cancellation during acknowledgement is classified as
+preservation_unknown without retaining the underlying error. The checkpoint
+might already have been saved. No unacknowledged dependent write/fetch, replacement
+UUID, compensated timestamp or cursor advancement is permitted. A private flag
+retains this uncertainty even when Pending is nil before Begin or for no-run work.
+Same-ID replay returns it, fresh same-source operations are blocked, and existing
+Store missing/failed/success readback cannot clear that flag. There is no automatic
+sink retry or acknowledgement readback in this slice.
+
+Begin/Complete preservation uses the original context. Fail and returned
+preservation after cleanup has begun reuse the existing one WithoutCancel
+two-second cleanup context/deadline; no second budget is created. A candidate
+terminal state established by explicit Store-read-only Reconcile also requires
+returned preservation before publication. Such reconciliation never rewrites
+Store receipts or refetches; the sink is a separate explicit preservation
+capability. Unknown Store outcomes retain the same envelope.
+
+No real durable sink, restart restoration, ownership transfer, terminal archive,
+multi-process coordination or continuous scheduling is provided. The trusted
+sink must cooperate with context cancellation. A panic or a call that never
+returns keeps the controller reserved; it cannot be forcibly stopped here.
+These checkpoints alone are not crash/restart or durable acknowledgement proof.
