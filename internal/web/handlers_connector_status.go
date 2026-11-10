@@ -11,6 +11,20 @@ import (
 )
 
 func (s *Server) handleConnectorStatusAPI(w http.ResponseWriter, r *http.Request) {
+	s.handleConnectorStatusVersion(w, r, false)
+}
+
+func (s *Server) handleConnectorStatusAPIV2(w http.ResponseWriter, r *http.Request) {
+	s.handleConnectorStatusVersion(w, r, true)
+}
+
+func (s *Server) handleConnectorStatusVersion(w http.ResponseWriter, r *http.Request, includeFeeds bool) {
+	validSource := store.IsConnectorStatusSource
+	queryPage := s.store.QueryConnectorStatusPage
+	if includeFeeds {
+		validSource = store.IsConnectorStatusSourceV2
+		queryPage = s.store.QueryConnectorStatusPageV2
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		findingsAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -22,7 +36,7 @@ func (s *Server) handleConnectorStatusAPI(w http.ResponseWriter, r *http.Request
 		return
 	}
 	limit, offset, err := findingsAPIPagination(values)
-	if err != nil || (values.Has("source") && !store.IsConnectorStatusSource(values.Get("source"))) || (values.Has("scope") && (strings.TrimSpace(values.Get("scope")) == "" || strings.TrimSpace(values.Get("scope")) != values.Get("scope") || !validFindingsAPIText(values.Get("scope"), 256) || strings.ContainsFunc(values.Get("scope"), func(r rune) bool { return unicode.Is(unicode.Cf, r) }))) {
+	if err != nil || (values.Has("source") && !validSource(values.Get("source"))) || (values.Has("scope") && (strings.TrimSpace(values.Get("scope")) == "" || strings.TrimSpace(values.Get("scope")) != values.Get("scope") || !validFindingsAPIText(values.Get("scope"), 256) || strings.ContainsFunc(values.Get("scope"), func(r rune) bool { return unicode.Is(unicode.Cf, r) }))) {
 		findingsAPIError(w, http.StatusBadRequest, "invalid_query")
 		return
 	}
@@ -39,7 +53,7 @@ func (s *Server) handleConnectorStatusAPI(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	page, err := s.store.QueryConnectorStatusPage(r.Context(), store.ConnectorStatusQuery{Source: values.Get("source"), Scope: values.Get("scope"), AsOf: at, Limit: limit, Offset: offset})
+	page, err := queryPage(r.Context(), store.ConnectorStatusQuery{Source: values.Get("source"), Scope: values.Get("scope"), AsOf: at, Limit: limit, Offset: offset})
 	if errors.Is(err, store.ErrInvalidConnectorSnapshot) {
 		findingsAPIError(w, http.StatusUnprocessableEntity, "invalid_snapshot")
 		return
