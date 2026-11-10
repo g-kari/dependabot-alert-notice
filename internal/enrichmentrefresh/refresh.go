@@ -21,8 +21,8 @@ type Repository interface {
 
 // Fetcher supplies owned, complete, uncompressed synthetic metadata-bearing EPSS
 // CSV or projection-minimal KEV catalog JSON for the existing offline parser.
-// This is not full provider-schema or wire compatibility. No HTTP or compression
-// adapter is supplied here.
+// BoundedHTTPFetcher is optional and explicitly injected, with no default/live
+// wiring or claim of full provider-schema or wire compatibility.
 type Fetcher interface {
 	Fetch(context.Context, string) ([]byte, error)
 }
