@@ -32,11 +32,11 @@ func (s *Server) manualEnrichmentControllerSnapshot() *enrichmentrefresh.ManualC
 }
 
 func (s *Server) registerManualEnrichmentAPI(mux *http.ServeMux) {
-	mux.HandleFunc("/api/tui/enrichment-refresh/operations", s.handleManualEnrichmentUnavailable)
-	mux.HandleFunc("/api/tui/enrichment-refresh/operations/{operationID}", s.handleManualEnrichmentUnavailable)
-	mux.HandleFunc("/api/tui/enrichment-refresh/operations/{operationID}/reconcile", s.handleManualEnrichmentUnavailable)
-	mux.HandleFunc("/api/tui/enrichment-refresh", s.handleManualEnrichmentUnavailable)
-	mux.HandleFunc("/api/tui/enrichment-refresh/", s.handleManualEnrichmentUnavailable)
+	mux.HandleFunc("POST /api/tui/enrichment-refresh/operations", s.handleManualEnrichmentUnavailable)
+	mux.HandleFunc("GET /api/tui/enrichment-refresh/operations/{operationID}", s.handleManualEnrichmentUnavailable)
+	mux.HandleFunc("POST /api/tui/enrichment-refresh/operations/{operationID}/reconcile", s.handleManualEnrichmentUnavailable)
+	mux.HandleFunc("GET /api/tui/enrichment-refresh", s.handleManualEnrichmentUnavailable)
+	mux.HandleFunc("GET /api/tui/enrichment-refresh/", s.handleManualEnrichmentUnavailable)
 }
 
 // This Red checkpoint registers a real runtime seam without dispatching any
