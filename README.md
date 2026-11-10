@@ -160,7 +160,7 @@ bash Start.command --update-interval 1h
 SECURITY_NOTICE_AUTO_UPDATE=0 bash Start.command
 ```
 
-Mac/Linuxでは配布バイナリから手動で確認・更新することもできます。設定ファイルやDBを開かずに実行します。
+Mac/Linux/Windowsでは配布バイナリから手動で確認・更新することもできます。設定ファイルやDBを開かずに実行します。
 
 ```bash
 ./dependabot-alert-notice --check-update
@@ -169,7 +169,9 @@ Mac/Linuxでは配布バイナリから手動で確認・更新することも�
 ./dependabot-alert-notice --update --update-repo owner/repo --update-gh-path /path/to/gh
 ```
 
-`v1.2.3` 形式のSemVerタグを基準に比較します。draft、プレリリース、同じ版、旧版は適用しません。現在の版がプレビューでも、それより新しい安定版へ移行できます。`dev` やソースからの `go run`、`--once` では定期更新を起動しません。Windowsは `--check-update` で確認し、Releaseの配布物から手動更新してください。
+`v1.2.3` 形式のSemVerタグを基準に比較します。draft、プレリリース、同じ版、旧版は適用しません。現在の版がプレビューでも、それより新しい安定版へ移行できます。`dev` やソースからの `go run`、`--once` では定期更新を起動しません。
+
+Windows のリース版は Mac/Linux と同様に常駐中の自動更新に対応しますが、実行中イメージをその場で上書きできないため、現在のバイナリを `.old` に退避してから新版を配置します。`.old` は旧プロセスが解放するまで残り、次回起動時に削除されます。`--check-update` で確認だけ行い、`--update` で適用（次回起動から有効）できます。
 
 配布側はReleaseワークフローで対象OS/CPUの `dependabot-alert-notice_<version>_<os>_<arch>.tar.gz` と `checksums.txt` を同じReleaseに用意します。安定版タグのpush後、全検証とアップロードが成功してReleaseが公開された時点で更新対象になります。draftは配信されません。チェックサムは同じReleaseから取得するSHA-256で、署名検証とは異なります。
 

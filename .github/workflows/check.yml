@@ -31,3 +31,18 @@ jobs:
         run: go build ./...
       - name: Verify Mac packaging helpers
         run: python3 scripts/test_macos_tools.py
+
+  windows-check:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Updater regression tests
+        run: go test ./internal/updater/... -count=1

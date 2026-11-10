@@ -8,3 +8,5 @@ import "syscall"
 func restartProcess(path string, args, env []string) error {
 	return syscall.Exec(path, args, env)
 }
+
+func cleanupPreviousBinary() {}
