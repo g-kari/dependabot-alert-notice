@@ -100,8 +100,16 @@ func TestApplyWindowsRunsDefaultVersionVerificationBeforeReplacing(t *testing.T)
 				t.Fatalf("tag=%s: expected the default verifier to reject the version: err=%v", tt.tag, err)
 			}
 			ran, readErr := os.ReadFile(marker)
-			if readErr != nil || filepath.Base(string(ran)) != "candidate.exe" || filepath.Dir(filepath.Dir(string(ran))) != dir {
-				t.Fatalf("staged candidate.exe must run --version: path=%q err=%v", ran, readErr)
+			if readErr != nil || !filepath.IsAbs(string(ran)) || filepath.Base(string(ran)) != "candidate.exe" {
+				t.Fatalf("staged candidate.exe must run --version: path=%q expected parent=%q err=%v", ran, dir, readErr)
+			}
+			// EvalSymlinks may change Windows path spelling, so compare the
+			// physical parent directory two levels above the staged executable.
+			actualParent := filepath.Dir(filepath.Dir(string(ran)))
+			actualInfo, actualErr := os.Stat(actualParent)
+			expectedInfo, expectedErr := os.Stat(dir)
+			if actualErr != nil || expectedErr != nil || !actualInfo.IsDir() || !expectedInfo.IsDir() || !os.SameFile(actualInfo, expectedInfo) {
+				t.Fatalf("staging parent must be the target directory: actual=%q expected=%q actualInfo=%v expectedInfo=%v actualErr=%v expectedErr=%v", actualParent, dir, actualInfo, expectedInfo, actualErr, expectedErr)
 			}
 			want := old
 			if tt.updated {
