@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/enrichmentrefresh"
 	"github.com/g-kari/dependabot-alert-notice/internal/feed"
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
 	"github.com/g-kari/dependabot-alert-notice/internal/policy"
@@ -28,6 +29,8 @@ import (
 var templateFS embed.FS
 
 type Server struct {
+	manualRefreshMu          sync.RWMutex
+	manualRefreshController  *enrichmentrefresh.ManualController
 	port                     int
 	address                  string
 	store                    *store.Store
@@ -145,6 +148,7 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerTUI(mux)
+	s.registerManualEnrichmentAPI(mux)
 	s.registerFindingsAPI(mux)
 	s.registerFindingsConsole(mux)
 	mux.HandleFunc("GET /", s.handleDashboard)
