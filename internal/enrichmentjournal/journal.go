@@ -3,7 +3,6 @@
 package enrichmentjournal
 
 import (
-	"errors"
 	"time"
 )
 
@@ -131,19 +130,17 @@ type Acknowledgement struct {
 	Replay      bool
 }
 
-var errCodecUnavailable = errors.New("journal codec unavailable")
-
 // Encode validates all bounded fields before producing canonical versioned JSON.
 func Encode(checkpoint Checkpoint) ([]byte, error) {
-	return nil, errCodecUnavailable
+	return encodeCheckpoint(checkpoint)
 }
 
 // Decode rejects oversize, malformed, non-closed or semantically invalid input.
 func Decode(data []byte) (Checkpoint, error) {
-	return Checkpoint{}, errCodecUnavailable
+	return decodeCheckpoint(data)
 }
 
 // ValidateTransition checks initial reservation or an exact allowed advancement.
 func ValidateTransition(previous *Checkpoint, next Checkpoint) error {
-	return errCodecUnavailable
+	return validateTransition(previous, next)
 }
