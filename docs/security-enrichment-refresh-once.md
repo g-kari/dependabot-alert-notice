@@ -193,7 +193,8 @@ ownership grant or authorization to create a replacement attempt.
 ## Manual caller ownership controller: no write route
 
 ManualController is an explicitly injected Go caller boundary around the existing
-Service. It adds no HTTP write route, UI, CLI, main/config wiring or default
+Service. The controller itself adds no HTTP write route; the separately injected
+web capability below supplies the optional surface. It adds no UI, CLI, main/config wiring or default
 dependencies. Construction copies the Service value and requires its Store,
 Clock, UUID factory and Fetcher, but never opens or closes caller-owned storage.
 
@@ -250,8 +251,82 @@ crash/restart, an unreturned/panicking call, durable acknowledgment/outbox and
 multi-controller shared ownership are not solved. A non-returning call keeps
 its reserved in-flight slot; clearing it is not permission to retry. No user
 principal, HTTP authentication, CSRF/origin enforcement or public write API is
-claimed. Any later app route must separately provide those guards while retaining
-this controller; existing read-only v1/v2 APIs remain unchanged.
+claimed by the controller itself. The optional web capability below reuses the
+existing local guards without claiming account authentication; existing read-only
+v1/v2 APIs remain unchanged.
+
+
+## Optional manual HTTP API: disabled by default
+
+The web Server exposes a separate /api/tui/enrichment-refresh namespace through
+a narrow outer dispatcher, not methodless patterns in the legacy ServeMux.
+This avoids conflicts with the existing GET / subtree and prevents canonical
+redirects inside this namespace. Old routes/middleware and read-only v1/v2 remain
+unchanged. No UI, CLI, main/config wiring, default Controller/Service or endpoint
+is created. New leaves the controller nil; a valid guarded request then gets
+503 disabled without dependency construction or operation reservation.
+
+SetManualEnrichmentController accepts the first explicit nonnil pointer.
+Repeating that same pointer is a no-op; nil clearing and different-instance
+replacement are refused. The server takes its pointer under a lock and releases
+that lock before any controller work. It cannot discard retention/source gates
+by reconfiguration. Per-controller limits and pending ownership are not a
+multi-Server or multi-controller shared-ownership protocol.
+
+Three operations are available:
+- POST /api/tui/enrichment-refresh/operations calls exactly once with a flat
+  JSON object containing operation_id, connector, after and limit, all required.
+- GET /api/tui/enrichment-refresh/operations/{operationID} reads only Snapshot.
+- POST /api/tui/enrichment-refresh/operations/{operationID}/reconcile requires
+  exactly an empty JSON object and requests one explicit read-only recovery.
+
+The existing localTUI decision is reused through a pure helper. Its loopback
+Host/RemoteAddr checks, optional Origin parsed http-scheme/Host comparison and
+non-GET cookie/X-CSRF-Token comparison are unchanged. Origin omission is allowed,
+and this is the existing local trust boundary, not principal/account
+authentication or a newly strengthened Origin grammar. The legacy TUI wrapper
+retains its exact status/body/header behavior; the new API renders fixed JSON
+denials without proxying/capturing a ResponseWriter.
+
+Guards run before controller calls. Supported methods are explicit; HEAD is not
+a new snapshot method. Queries (including an empty ?), escaped/noncanonical paths
+and unexpected bodies are rejected. POST requires one application/json
+Content-Type, optionally charset=utf-8, with no other parameters. GET has no
+Content-Type/body. Content-Encoding must be absent/empty/identity. Request input
+is at most 1 KiB, including trailing whitespace, and must reach supplied-body EOF
+with consistent known ContentLength. Unknown/duplicate/escaped-duplicate keys,
+missing fields, nested objects, trailing JSON, null/wrong types, noninteger limits,
+invalid UTF-8 and malformed surrogate escapes are rejected before reservation.
+Valid UTF-8 and valid surrogate pairs retain identical decoded request values.
+The controller's lowercase operation-ID, closed source, 1..200 limit and bounded
+UTF-8 cursor rules are checked before dispatch. No clocks, run UUID, CVEs, targets,
+URLs or credentials can be submitted as extra fields.
+
+Responses are an explicit small DTO: operation ID, request binding, state/replay,
+outcome/fixed code, run ID, scan/target counts, next_after/advance/exhausted.
+No ManualOperation/Result is embedded or directly serialized. Full Pending,
+Completion, Feed, target manifests, source timestamps, digests and raw errors
+remain private to the owned controller. Snapshot does not reconcile; replay does
+not fetch. Existing controller response-loss replay, source gate and non-evicting
+16-record capacity rules remain authoritative. The API does not create a cache,
+queue, retry loop, background job or replacement controller.
+
+Resolved calls and lookups return200; known failed collection is an explicit
+failed outcome. Pending/busy/content-conflict/source-gate outcomes return409.
+Disabled/retention-full return503, absent operation404, malformed request400,
+oversize413, media415, method405, local guard403 and cancellation408. There are
+no Retry-After, redirect or CORS additions. All namespace responses are no-store.
+A failed/partial ResponseWriter only produces a fixed log message; the controller
+already owns the result, and the handler never redispatches. Retrying the same
+operation ID/request returns cached state rather than generating work.
+
+Tests invoke Handler directly with NewRequest/NewRecorder, owned synthetic SQLite
+and fake dependencies. No HTTP listener/server/socket or real feed is exercised.
+Shared guard decisions/responses are compared to the immutable old implementation.
+Strict/guard/disabled rejection, complete Handler construction, old read routes,
+private-payload exclusion, response loss, source/capacity gates and explicit
+read-only recovery are checked. Crash/restart, unreturned calls, durable outbox,
+account authentication and real-provider/live approval remain separate.
 
 ## Verification scope
 
