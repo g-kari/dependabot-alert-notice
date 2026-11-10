@@ -598,3 +598,33 @@ func TestRefreshOnceInvalidUUIDFactoryNeverReachesBegin(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshOnceAllEligiblePageCannotSkipBeyondLastTarget(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		name := "all-eligible"
+		if partial {
+			name = "partially-eligible"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := contractStore(t, true)
+			h := harness(t, db)
+			page, err := db.QuerySecurityEnrichmentRefreshTargets(context.Background(), "", 200)
+			if err != nil || page.Scanned != 1 || len(page.Targets) != 1 {
+				t.Fatalf("fixture page=%+v err=%v", page, err)
+			}
+			page.After = "zz-last-scanned-ineligible"
+			if partial {
+				page.Scanned++
+			}
+			h.repo.page = &page
+			out, err := h.service.RefreshOnce(context.Background(), Request{Connector: "epss_feed", Limit: 200})
+			if !partial {
+				if err == nil || out.Outcome != "invalid" || out.Code != "invalid_page" || out.Advance || out.NextAfter != "" || out.RunID != "" || out.Pending != nil || h.clockCalls != 0 || h.uuidCalls != 0 || h.repo.calls["begin"] != 0 || h.fetchCalls != 0 {
+					t.Fatalf("all-eligible page skipped unseen rows=%+v err=%v calls=%v", out, err, h.repo.calls)
+				}
+			} else if err != nil || out.Outcome != "success" || !out.Advance || out.NextAfter != page.After || h.repo.calls["begin"] != 1 || h.uuidCalls != 1 || h.fetchCalls != 1 {
+				t.Fatalf("legitimate ineligible tail was rejected=%+v err=%v calls=%v", out, err, h.repo.calls)
+			}
+		})
+	}
+}

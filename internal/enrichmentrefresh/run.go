@@ -293,6 +293,9 @@ func pageCVEs(page store.SecurityEnrichmentRefreshTargetPage, request Request) (
 		selected = append(selected, target.CVEID)
 		previous = target.FindingID
 	}
+	if len(page.Targets) > 0 && len(page.Targets) == page.Scanned && page.After != previous {
+		return nil, errInvalid
+	}
 	if len(selected) == 0 {
 		return nil, nil
 	}
