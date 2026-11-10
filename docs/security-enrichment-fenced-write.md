@@ -3,9 +3,10 @@
 The explicit unconnected Store APIs fence their own checkpoint/Begin/Fail/Complete
 transactions; they do not create a controller or a live collector. The four public
 generic Append/Begin/Fail/Complete entrypoints now refuse an adopted feed source,
-including exact replay. StartIngestRun/FinishIngestRun still bypass this boundary.
-K292 and new-binary enforcement are NOT complete until those remaining entrances
-are closed and verified. Existing constructors, manual 16-record retention, schema,
+including exact replay. StartIngestRun/FinishIngestRun now also guard adopted feed
+origins in their write transactions. These six operation/receipt entrances are
+covered in the current binary; this is not exclusive fencing of all fact writers,
+execution ownership, or proof that an older binary stopped. Existing constructors, manual 16-record retention, schema,
 public HTTP/CLI DTOs and main/config are unchanged.
 
 ## One retained request and two proof meanings
@@ -91,7 +92,7 @@ reserve again, generate another UUID/intent, repair data, replace deadlines or
 perform TTL takeover. The context/deadline supplied by the caller is used directly.
 No new WithoutCancel context, timer or cleanup budget is created.
 
-## Conditional legacy guard: four of six operation/receipt entrances
+## Conditional legacy guard: initial four operation/receipt entrances
 
 Only the public AppendSecurityEnrichmentCheckpoint, BeginSecurityEnrichmentRefresh,
 FailSecurityEnrichmentRefresh and CompleteSecurityEnrichmentRefresh wrappers call
@@ -138,6 +139,61 @@ unadopted generic replay remains read-only. The prior unfenced implementation an
 characterization remain in Git history rather than being claimed retroactively
 fenced.
 
+## Generic ingest Start/Finish: remaining two entrances
+
+StartIngestRun preserves its existing source/scope/time input validation. Only the
+exact connector values epss_feed and kev_feed take the new private branch: begin
+writeTx, existing adopted-source guard, context check, UUID generation, at.UTC,
+INSERT and Commit. Adopted refusal exposes no run and reaches no UUID factory.
+There is no new clock generator. A missing/invalid/corrupt adoption state does not
+become a fetch or restart grant. Arbitrary other nonempty labels are not trimmed
+or lowercased into a feed value, and keep their entire former Start path.
+
+For unadopted feed Start, Begin failure now precedes UUID generation and returns a
+zero run. This differs deliberately from the old UUID-before-Begin error result.
+Once generation succeeds, INSERT/Commit errors retain the old ID-bearing run plus
+error; a commit error is uncertain, not proof of rollback or a reason to call Start
+again with a new UUID. Nonfeed Start retains its UUID-before-Begin order/error
+result. Gofmt/static reconstruction removes only the feed dispatch branch and the
+explicit Finish additions to reproduce the whole prior security.go source.
+
+FinishIngestRun retains its result/coverage/time and machine-code validation order,
+then uses one writeTx for metadata classification, feed guard, body SELECT, old
+model decode/time comparison/update, UPDATE and Commit. All paths, including
+nonfeed, now have additional Begin/Commit errors and different cross-connection
+contention boundaries. This is an intentional change, not a byte-identical overall
+control flow. No precheck outside the transaction authorizes the update.
+
+The metadata query selects indexed exact ID plus its finite BLOB alias (LIMIT3),
+and emits only four small flags per candidate. It returns no raw identifier,
+connector or body strings to Go. TEXT/BLOB aliases, unknown types, inconsistent
+row/body identity and ambiguous recognized attributes fail closed. json_each
+preserves duplicate/escaped keys; attribute-name folding accounts for Go JSON's
+ASCII case matching and long-s/Kelvin folds. Each of the nine IngestRun attributes
+must appear exactly once, with a scalar value consistent with the stored running
+row. Unknown extra attributes remain allowed. Attribute VALUE strings are never
+folded/trimmed into another origin. A healthy nonfeed label, or a truly unadopted
+feed, keeps its original arbitrary ID, large scope/body, empty generic cursor and
+valid legacy calendar range. The refresh-specific UUID/manifest/4KiB decoder is
+not reused for this generic ledger.
+
+Only rejected-candidate Go metadata materialization is small. SQL JSON parsing,
+index/page work and the later healthy-body Go allocation are not globally
+byte/heap/time capped. Malformed legacy rows can now be rejected earlier; no
+repair, metadata default or synthesized failure is written. Canonical absent or
+non-running IDs preserve wrapped sql.ErrNoRows. Corrupt finite aliases are not
+silently classified as missing. The old UPDATE predicate id plus running, supplied
+UTC finish time and deliberately unchecked RowsAffected remain unchanged; a
+trigger returning zero affected rows still gives the historical nil result.
+
+There is no new public exact-proof API for generic Start/Finish. Unknown callers
+must stop; they must not invent a target manifest/Completion for ReadAttempt or
+reconcile by generating another UUID/clock. Synthetic tests inspect owned SQLite
+after a successful real Store call followed by an outer lost-return error for
+Start and Finish. That is not an actual driver ambiguous-Commit injection, restart
+adoption, or execution ownership. Reserve-versus-Start contention permits at most
+one stored path, can make no progress, and never retries automatically.
+
 ## Verification scope and remaining gates
 
 Synthetic owned SQLite tests cover both feed domains, exact Begin/Complete/Fail,
@@ -161,11 +217,14 @@ connections, and trigger rollback. Offline/latest evidence history and last-good
 remain independent while exact historical feed completion proof still matches.
 Owned corruption fixtures are not release or actual generation-handoff tests.
 
-The next K292 slice must close StartIngestRun and FinishIngestRun in their write
-transactions while characterizing their existing arbitrary-ID/non-feed/missing/
-RowsAffected/time/context/Commit behavior. Until then even the current binary has
-known bypasses. Mixed older binaries that ignore the registry are not made safe
-by these four guards. Erasing all adoption evidence or restoring a pre-adoption DB
+The Start/Finish follow-up adds owned synthetic controls for arbitrary IDs, large
+healthy nonfeed and unadopted-feed bodies, literal connector labels, attribute
+aliases, validation order, zero affected rows, missing IDs, cancellation/read/closed
+DB errors, indexed flags, rollback and independent connections. No operational
+DB or live collector is exercised. K292 integration acceptance still requires the
+candidate's own formal CI, independent review, merge and post-merge verification.
+Mixed older binaries that ignore the registry are not made safe by these six
+guards. Erasing all adoption evidence or restoring a pre-adoption DB
 cannot be distinguished from never-enrolled state by this guard alone.
 
 Source release/certificate, positive-idle acceptance, stopped-old-writer proof,

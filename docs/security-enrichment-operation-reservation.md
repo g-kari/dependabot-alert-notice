@@ -6,7 +6,9 @@ unconnected. The initial reservation-storage checkpoint left generic APIs unfenc
 subsequent explicit fenced APIs now validate their own write transactions, and the
 four public generic Append/Begin/Fail/Complete APIs refuse adopted sources (positive
 generation, including active NULL) while preserving genuinely unadopted behavior.
-StartIngestRun/FinishIngestRun remain unguarded pending K292's next slice. See
+StartIngestRun/FinishIngestRun now use the same adopted-source policy within their
+write transactions, completing the six current-binary operation/receipt entrypoints.
+This is not an exclusive common-facts lock or mixed-old-binary safety. See
 [the current fenced-write and legacy-guard contract](security-enrichment-fenced-write.md).
 This is not complete enforcement, controller restore, fresh fetch ownership,
 continuous scheduling or live startup. Independent offline common-fact updates
@@ -110,7 +112,9 @@ Old-binary/new-DB and concurrent mixed-binary safety remain unverified.
 
 Explicit fenced CP/business write-Tx checks and the adopted-source guard for four
 generic APIs have been added in follow-up slices; StartIngestRun/FinishIngestRun
-still require their separate old-API guard. Terminal proof/release CAS, positive-idle
+now also guard adoption in the write transaction. Their feed-UUID allocation and
+all-Finish Tx/error/contention compatibility differences are documented separately
+in the linked current contract. Terminal proof/release CAS, positive-idle
 admission, reserved ownership recovery in a controller, privateunknown/source-gate
 release, restart restoration and terminal retention/archive remain later work. K286 owns wider stopped-writer,
 backup/restore, mixed-release operation, retention and runbook acceptance.
