@@ -21,6 +21,5 @@ CREATE TABLE IF NOT EXISTS security_enrichment_source_generations (
     CHECK(generation>0 OR active_operation_id IS NULL)
 );
 CREATE INDEX IF NOT EXISTS security_enrichment_operation_source ON security_enrichment_operations(connector,operation_id);
-CREATE INDEX IF NOT EXISTS security_enrichment_ingest_source ON ingest_runs(connector,id);
 INSERT OR IGNORE INTO app_migrations(version,applied_at) VALUES(5,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 
