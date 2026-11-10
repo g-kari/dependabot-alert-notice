@@ -1,10 +1,12 @@
 # Explicit fenced checkpoint and business-write operations
 
-This slice adds unconnected Store APIs, not a new controller or a live collector.
-They fence their own checkpoint/Begin/Fail/Complete transactions. Existing generic
-Append, business APIs and StartIngestRun/FinishIngestRun still bypass this new
-boundary. New-binary enforcement is NOT complete. Existing constructors, manual
-16-record retention, schema, public HTTP/CLI DTOs and main/config are unchanged.
+The explicit unconnected Store APIs fence their own checkpoint/Begin/Fail/Complete
+transactions; they do not create a controller or a live collector. The four public
+generic Append/Begin/Fail/Complete entrypoints now refuse an adopted feed source,
+including exact replay. StartIngestRun/FinishIngestRun still bypass this boundary.
+K292 and new-binary enforcement are NOT complete until those remaining entrances
+are closed and verified. Existing constructors, manual 16-record retention, schema,
+public HTTP/CLI DTOs and main/config are unchanged.
 
 ## One retained request and two proof meanings
 
@@ -69,12 +71,18 @@ entry cap200, and bounded receipt/manifest/observation reads. No new dependency 
 index/schema is added. Bounds describe materialization, not all SQLite work,
 total heap or a measured concurrency/latency budget.
 
-The shared write helpers contain exactly the former transaction work. Original
-public validation and context/error behavior are preserved. Their replay control
-flow matters: Begin/Complete/Fail replay returns without Commit and the deferred
+The shared write helpers contain exactly the former transaction work. The four
+public wrappers retain their original validation before opening the transaction;
+they then perform the conditional legacy guard described below. For genuinely
+unadopted sources, the old work, return/context checks, errors, SQL and Commit
+control flow are unchanged after those added reads. Guard reads introduce new
+failure/cancellation points and adopted/corrupt sources are intentionally refused.
+Their replay control flow matters: Begin/Complete/Fail replay returns without Commit and the deferred
 Rollback ends the read; Append replay commits its transaction. Reconstructing the
 original wrappers and exact extracted helper bodies reproduces both complete
-baseline files byte-for-byte. New fenced business replay is also rollback-only.
+pre-extraction baseline files byte-for-byte. In this guard slice, removing only
+the four guard insertions reproduces both complete immediate-baseline production
+files byte-for-byte; shared private helpers are unchanged. New fenced business replay is also rollback-only.
 There are no nested public Store calls/transactions.
 
 Commit errors return zero Ack. The caller retains the same complete request and
@@ -82,6 +90,53 @@ may use only the matching read-only proof. APIs do not automatically retry write
 reserve again, generate another UUID/intent, repair data, replace deadlines or
 perform TTL takeover. The context/deadline supplied by the caller is used directly.
 No new WithoutCancel context, timer or cleanup budget is created.
+
+## Conditional legacy guard: four of six operation/receipt entrances
+
+Only the public AppendSecurityEnrichmentCheckpoint, BeginSecurityEnrichmentRefresh,
+FailSecurityEnrichmentRefresh and CompleteSecurityEnrichmentRefresh wrappers call
+guardLegacyEnrichmentWriteTx. The call is in their existing write transaction,
+before replay or mutation. Fenced and reservation APIs continue to use shared
+private helpers without that legacy guard. No precheck or cached constructor flag
+can authorize a later write: even a Store opened before adoption reads the current
+registry in its write transaction. SQLite contention may fail; no retry or progress
+guarantee is added.
+
+A positive source generation is adopted even when active operation/intent is NULL;
+this is refusal, not proof of release or positive-idle reservation eligibility.
+An empty registry is unadopted only without any residual reservation. An intact
+zero-generation source also must have no indexed reservation for its connector or
+finite BLOB alias, and no journal-linked reservation claiming that source. A
+mislabeled reservation connector or finite operation-ID alias cannot hide that
+link. Partial/malformed/aliased/oversized registry rows, invalid generations and
+residual bindings fail closed, without acknowledgement or repair. The existing
+reader returns at most three type/byte-guarded scalar rows. Other lookups return
+only EXISTS booleans using existing source and operation-ID indexes; they do not
+materialize arbitrary reservation payloads or all journal history. These bounds
+are not a total SQLite CPU/latency limit or general hostile-DB protection.
+
+A genuinely unadopted source, including the other feed at idle generation zero,
+keeps its generic fresh/replay behavior. Old unbound running attempts or v1 pending
+journals are neither adopted nor rewritten into failures. Initial reservation
+admission remains independently conservative about such old data. Guard failure
+returns no Ack/replay/import result and does not generate UUIDs or clocks. Error
+text is fixed; cancellation identity is retained. The new helper rejects nil
+private dependencies; existing public nil-receiver/context behavior is not widened.
+
+The inventory distinguished six feed-origin operation/receipt entrypoints from
+other writers. ImportSecurityFindings only accepts its existing scanner origins;
+Dependabot projection remains dependabot. ImportSecurityEnrichment requires honest
+*_offline origin. It may independently change the latest common EPSS/KEV fact by
+publication/observation order and retains its own history/last-good behavior. This
+is not an exclusive lock on all common-fact writers. UpsertThreat only changes the
+separate legacy threat table. Those paths are not feed-operation ownership bypasses
+and are not blocked by this slice. Read-only historical inspection/proof is unchanged.
+
+The former unfenced characterization is updated only for adopted-source generic
+calls. Explicit fenced replay still succeeds after later Finding changes; genuinely
+unadopted generic replay remains read-only. The prior unfenced implementation and
+characterization remain in Git history rather than being claimed retroactively
+fenced.
 
 ## Verification scope and remaining gates
 
@@ -98,11 +153,20 @@ error. They are not an actual SQLite-driver ambiguous-Commit injection. Separate
 connection contention permits at most one fresh write and does not promise
 progress after locks/commit errors. Gofmt/static is not a Go/SQL/runtime pass.
 
-The next legacy-guard slice must inventory all feed-origin write entrances,
-including generic import/receipt/upsert paths, not assume the known Start/Finish
-bypasses are the only ones. Offline enrichment already uses *_offline origins;
-legacy threat snapshot upserts are a separate data path. This slice does not
-close any old bypass or revise the prior unfenced characterization.
+This slice adds synthetic adopted fresh/replay rejection for all four guarded
+public APIs, explicit fenced positive controls, zero acknowledgements/all-table
+preservation, corrupt/aliased/overflow/oversized registry and residual-binding
+fixtures, cancellation/read/closed-DB errors, indexed lookups, independent Store
+connections, and trigger rollback. Offline/latest evidence history and last-good
+remain independent while exact historical feed completion proof still matches.
+Owned corruption fixtures are not release or actual generation-handoff tests.
+
+The next K292 slice must close StartIngestRun and FinishIngestRun in their write
+transactions while characterizing their existing arbitrary-ID/non-feed/missing/
+RowsAffected/time/context/Commit behavior. Until then even the current binary has
+known bypasses. Mixed older binaries that ignore the registry are not made safe
+by these four guards. Erasing all adoption evidence or restoring a pre-adoption DB
+cannot be distinguished from never-enrolled state by this guard alone.
 
 Source release/certificate, positive-idle acceptance, stopped-old-writer proof,
 controller wiring/privateunknown release, restart restore, terminal eviction/

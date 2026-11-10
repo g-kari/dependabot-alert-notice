@@ -1,10 +1,16 @@
 # Experimental operation reservation storage
 
 ReserveSecurityEnrichmentOperation stores a caller-prepared reservation intent,
-source generation and journal reserved checkpoint atomically. The feature is
-unconnected: existing generic Append and business Begin/Fail/Complete APIs remain
-unfenced and unchanged. This is not enforcement completion, controller restore,
-fresh fetch ownership, continuous scheduling or live startup.
+source generation and journal reserved checkpoint atomically. The feature remains
+unconnected. The initial reservation-storage checkpoint left generic APIs unfenced;
+subsequent explicit fenced APIs now validate their own write transactions, and the
+four public generic Append/Begin/Fail/Complete APIs refuse adopted sources (positive
+generation, including active NULL) while preserving genuinely unadopted behavior.
+StartIngestRun/FinishIngestRun remain unguarded pending K292's next slice. See
+[the current fenced-write and legacy-guard contract](security-enrichment-fenced-write.md).
+This is not complete enforcement, controller restore, fresh fetch ownership,
+continuous scheduling or live startup. Independent offline common-fact updates
+remain non-exclusive; the separate legacy threat path is unchanged.
 
 ## Exact retained intent, not an authentication credential
 
@@ -62,7 +68,7 @@ is generated.
 ReadSecurityEnrichmentReservation uses one read-only snapshot and the complete
 retained request. Only matched returns Ack and a verified still-reserved current
 head. Missing/conflict return no Ack/head; corruption/storage/cancel errors return
-unknown with sanitized errors. Advancing the generic journal past reserved makes
+unknown with sanitized errors. Advancing the journal past reserved makes
 this specific proof conflict rather than manufacturing a new execution grant.
 The reader never initializes missing storage, repairs, reserves, releases or
 adopts another caller's intent.
@@ -79,8 +85,10 @@ page/index work or global DB size. No general DB integrity or old-writer stop
 certificate is claimed.
 
 The two generic journal INSERT blocks are shared through private transaction
-helpers. Inlining those helpers reproduces the exact original method's SQL,
-validation, context/error branches and both Commit locations. No nested public
+helpers. Historically, inlining that extraction reproduced the original method's
+SQL, validation, context/error branches and both Commit locations. The later guard
+adds same-write-Tx reads before the public generic work/replay; removing those guard
+insertions reproduces the immediate pre-guard production source exactly. No nested public
 Append or transaction is called inside the reservation transaction.
 
 ## Synthetic verification and remaining work
@@ -100,10 +108,11 @@ restore drill. Store startup's existing migration framework runs this additive
 DDL when the new code is deployed; no operational database was opened/applied here.
 Old-binary/new-DB and concurrent mixed-binary safety remain unverified.
 
-Business-write generation checks inside each writeTx, guarded CP advancement,
-terminal proof/release CAS and old-API bypass guards are later slices. So are
-reserved ownership recovery in a controller, privateunknown/source-gate release,
-restart restoration and terminal retention/archive. K286 owns wider stopped-writer,
+Explicit fenced CP/business write-Tx checks and the adopted-source guard for four
+generic APIs have been added in follow-up slices; StartIngestRun/FinishIngestRun
+still require their separate old-API guard. Terminal proof/release CAS, positive-idle
+admission, reserved ownership recovery in a controller, privateunknown/source-gate
+release, restart restoration and terminal retention/archive remain later work. K286 owns wider stopped-writer,
 backup/restore, mixed-release operation, retention and runbook acceptance.
 No main/config/API/UI/scheduler/live, HTTP/socket/feed, authentication/credential/
 persistent-access/rights/billing/public changes are included. Local static/gofmt
