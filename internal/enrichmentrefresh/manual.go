@@ -46,7 +46,9 @@ type manualRecord struct {
 	err       error
 	// Keep the original envelope even after a verified resolution. Neither
 	// repository readback arguments nor outer snapshots alias this evidence.
-	retained *Pending
+	retained            *Pending
+	checkpoint          *PreservationCheckpoint
+	preservationUnknown bool
 }
 
 // ManualController owns at most 16 non-evicting in-process operation records.
@@ -54,10 +56,11 @@ type manualRecord struct {
 // It has no route, default dependencies, background retry or crash durability.
 // A call that never returns (including panic) cannot release its reserved slot.
 type ManualController struct {
-	service    Service
-	mu         sync.Mutex
-	operations map[string]*manualRecord
-	busy       bool
+	service      Service
+	mu           sync.Mutex
+	operations   map[string]*manualRecord
+	busy         bool
+	preservation PreservationSink
 }
 
 // NewManualController requires explicit Service dependencies without any I/O.
@@ -143,6 +146,10 @@ func (c *ManualController) Call(ctx context.Context, operationID string, request
 	c.operations[operationID], c.busy = record, true
 	c.mu.Unlock()
 
+	if c.preservation != nil {
+		return c.callPreserving(ctx, record)
+	}
+
 	// Service owns its prepared envelope before each write. On return take an
 	// immediate deep copy before making the result available to any outer caller.
 	result, callErr := c.service.RefreshOnce(ctx, request)
@@ -194,6 +201,11 @@ func (c *ManualController) Reconcile(ctx context.Context, operationID string) (M
 		c.mu.Unlock()
 		return ManualOperation{}, ErrManualNotFound
 	}
+	if record.preservationUnknown {
+		snapshot := cloneManualOperation(record.operation)
+		c.mu.Unlock()
+		return snapshot, ErrPending
+	}
 	if record.operation.State == "resolved" {
 		snapshot, err := cloneManualOperation(record.operation), record.err
 		c.mu.Unlock()
@@ -224,6 +236,10 @@ func (c *ManualController) Reconcile(ctx context.Context, operationID string) (M
 	} else {
 		state, err := c.service.Store.ReadSecurityEnrichmentRefreshAttempt(readCtx, argument.Attempt, argument.ExpectedFailure)
 		failed = err == nil && work.ExpectedFailure != nil && state.State == "failed" && state.Receipt == ""
+	}
+
+	if c.preservation != nil {
+		return c.reconcilePreserving(ctx, readCtx, record, work, success, failed)
 	}
 
 	c.mu.Lock()

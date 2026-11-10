@@ -28,9 +28,55 @@ var errInvalid = errors.New("enrichment refresh: invalid input")
 var errUnavailable = errors.New("enrichment refresh: unavailable")
 
 func (s Service) run(ctx context.Context, request Request) (Result, error) {
-	out := Result{NextAfter: request.After}
+	return s.runPrepared(ctx, request, nil)
+}
+
+func (s Service) runPrepared(ctx context.Context, request Request, preserve preservationBeforeWrite) (out Result, runErr error) {
+	out = Result{NextAfter: request.After}
 	if ctx == nil {
 		return reject(out, "invalid_context")
+	}
+	var cleanupCtx context.Context
+	var cleanupCancel context.CancelFunc
+	cleanup := func() context.Context {
+		if cleanupCtx == nil {
+			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), cleanupBudget)
+		}
+		return cleanupCtx
+	}
+	defer func() {
+		if cleanupCancel != nil {
+			cleanupCancel()
+		}
+	}()
+	var work *Pending
+	preservationStopped := false
+	acknowledge := func(checkpointCtx context.Context, stage PreservationStage, candidate Result) error {
+		if preserve == nil {
+			return nil
+		}
+		if err := preserve(checkpointCtx, stage, candidate); err != nil {
+			preservationStopped = true
+			return ErrPending
+		}
+		return nil
+	}
+	if preserve != nil {
+		// Run before cleanup cancellation so Fail/readback/result preservation
+		// share the one existing two-second cleanup deadline without renewal.
+		defer func() {
+			if preservationStopped {
+				return
+			}
+			checkpointCtx := ctx
+			if cleanupCtx != nil || ctx.Err() != nil {
+				checkpointCtx = cleanup()
+			}
+			if err := acknowledge(checkpointCtx, PreserveReturned, out); err != nil {
+				out.Pending = work
+				out, runErr = preservationUnknown(out, request.After)
+			}
+		}()
 	}
 	if err := ctx.Err(); err != nil {
 		return canceled(out, err)
@@ -94,24 +140,14 @@ func (s Service) run(ctx context.Context, request Request) (Result, error) {
 		return reject(out, "invalid_uuid")
 	}
 	// Prepare and retain before Begin. No error path regenerates this envelope.
-	work := &Pending{Attempt: store.SecurityEnrichmentRefreshAttempt{
+	work = &Pending{Attempt: store.SecurityEnrichmentRefreshAttempt{
 		RunID: id, Connector: request.Connector, Scope: scope, StartedAt: start,
 		Targets: append([]store.SecurityEnrichmentRefreshTarget(nil), page.Targets...),
 	}}
 	out.RunID, out.Pending = id, work
-	var cleanupCtx context.Context
-	var cleanupCancel context.CancelFunc
-	cleanup := func() context.Context {
-		if cleanupCtx == nil {
-			cleanupCtx, cleanupCancel = context.WithTimeout(context.WithoutCancel(ctx), cleanupBudget)
-		}
-		return cleanupCtx
+	if err := acknowledge(ctx, PreserveBegin, out); err != nil {
+		return preservationUnknown(out, request.After)
 	}
-	defer func() {
-		if cleanupCancel != nil {
-			cleanupCancel()
-		}
-	}()
 	replay, beginErr := s.Store.BeginSecurityEnrichmentRefresh(ctx, work.Attempt)
 	if beginErr != nil || replay {
 		state, readErr := s.Store.ReadSecurityEnrichmentRefreshAttempt(cleanup(), work.Attempt, nil)
@@ -132,6 +168,9 @@ func (s Service) run(ctx context.Context, request Request) (Result, error) {
 		}
 		// Capture this exact expected write before Fail, including its clock.
 		work.ExpectedFailure = &store.SecurityEnrichmentRefreshFailure{Code: code, FinishedAt: finish.UTC()}
+		if err := acknowledge(cleanup(), PreserveFail, out); err != nil {
+			return preservationUnknown(out, request.After)
+		}
 		_, failErr := s.Store.FailSecurityEnrichmentRefresh(cleanup(), work.Attempt, code, work.ExpectedFailure.FinishedAt)
 		if failErr == nil {
 			out.Outcome, out.Code, out.Pending = "failed", code, nil
@@ -192,6 +231,9 @@ func (s Service) run(ctx context.Context, request Request) (Result, error) {
 	// delivered uncompressed CSV/catalog JSON bytes, not compressed-wire provenance.
 	work.Completion = &store.SecurityEnrichmentRefreshCompletion{
 		Attempt: work.Attempt, Feed: feed, OriginalDigest: "sha256:" + hex.EncodeToString(digest[:]), FinishedAt: finish,
+	}
+	if err := acknowledge(ctx, PreserveComplete, out); err != nil {
+		return preservationUnknown(out, request.After)
 	}
 	result, completeErr := s.Store.CompleteSecurityEnrichmentRefresh(ctx, *work.Completion)
 	if completeErr == nil && result.Entries == len(feed.Entries) {
