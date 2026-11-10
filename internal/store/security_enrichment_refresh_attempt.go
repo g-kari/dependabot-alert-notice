@@ -45,6 +45,20 @@ func (s *Store) ReadSecurityEnrichmentRefreshAttempt(ctx context.Context, attemp
 		return unknown, fmt.Errorf("begin refresh attempt readback: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	state, err := readSecurityEnrichmentRefreshAttemptTx(ctx, tx, running, failed)
+	if err != nil {
+		return unknown, err
+	}
+	if err := tx.Commit(); err != nil {
+		return unknown, fmt.Errorf("finish refresh attempt readback: %w", err)
+	}
+	return state, nil
+}
+
+// readSecurityEnrichmentRefreshAttemptTx shares the bounded proof checks with
+// operation inspection without opening a nested transaction or consulting current facts.
+func readSecurityEnrichmentRefreshAttemptTx(ctx context.Context, tx *sql.Tx, running model.IngestRun, failed *model.IngestRun) (SecurityEnrichmentRefreshState, error) {
+	unknown := SecurityEnrichmentRefreshState{State: "unknown"}
 	body, exists, err := boundedRefreshAttemptBody(ctx, tx, running.ID)
 	if err != nil {
 		return unknown, err
@@ -108,9 +122,6 @@ func (s *Store) ReadSecurityEnrichmentRefreshAttempt(ctx context.Context, attemp
 		default:
 			return unknown, ErrIngestConflict
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return unknown, fmt.Errorf("finish refresh attempt readback: %w", err)
 	}
 	return state, nil
 }
