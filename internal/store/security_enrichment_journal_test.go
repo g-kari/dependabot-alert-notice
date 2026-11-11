@@ -88,7 +88,11 @@ func journalSnapshot(t *testing.T, db *Store, oldOnly bool) string {
 		if oldOnly && name == "app_migrations" {
 			query += " WHERE version<>4"
 		}
-		query += " ORDER BY rowid"
+		if name == "security_enrichment_release_certificates" {
+			query += " ORDER BY operation_id"
+		} else {
+			query += " ORDER BY rowid"
+		}
 		r, err := db.db.Query(query)
 		if err != nil {
 			t.Fatal(err)
