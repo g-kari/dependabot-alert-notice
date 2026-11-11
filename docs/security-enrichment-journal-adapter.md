@@ -76,7 +76,8 @@ are unknown. It performs no Append, repair, receipt rewrite or business decision
 
 The controller's private preservationUnknown flag remains authoritative,
 including before Begin with nil Pending. Same-ID pending replay and same-source
-gates remain closed. This slice does not clear that flag, restore a controller,
+gates remain closed under the original constructors and ordinary Reconcile.
+Those paths do not clear that flag, restore a controller,
 transfer ownership, add DB source fencing, evict terminal operations or coordinate
 multiple processes/controllers. A fresh factory does not resume old journals.
 The trusted dependency may still panic or fail to return; no forced-stop or
@@ -93,3 +94,40 @@ context and whole-owned-table equality around acknowledgement reads.
 No local Go/SQL/runtime pass is inferred from gofmt/static checks. No real HTTP,
 socket/listener, provider data, operational DB migration, new credentials/access,
 billing, public exposure, main/config/API/UI or scheduler activation is included.
+
+## Opt-in same-lifetime terminal acknowledgement recovery
+
+NewRecoverableJournalManualController adds only the explicit
+ReconcileJournalTerminal method capability. Existing constructors and Reconcile
+remain unchanged. The new repository embeds JournalRepository plus the existing
+InspectSecurityEnrichmentOperation read-only inspection. No route, scheduler,
+automatic loop, restart restoration or runtime wiring is added.
+
+The only eligible candidate is the privately retained returned, nonpending
+success or failed checkpoint from this exact controller/adapter lifetime, with a
+confirmed fresh reservation acknowledgement. Success requires the full retained
+Completion; failure requires the exact ExpectedFailure. Reserved, begin, fail,
+complete, returned-pending, no-run, new and foreign controllers remain blocked.
+A controller-unknown terminal whose adapter already acknowledged is also eligible:
+cancellation can occur between adapter acknowledgement and seam publication.
+
+The method reserves both busy slots with controller-then-adapter lock order and
+holds neither lock during the single inspection. The caller's context receives
+the existing two-second maximum; cancellation or expiration is checked again at
+publication. A valid inspection with nil error must match operation, exact head
+sequence/digest and canonical checkpoint bytes. It must independently prove
+business success with a nonempty receipt, or exact failure with an empty receipt.
+Missing/newer heads, corruption, errors and mismatches leave the original pending
+result and evidence untouched. A later explicit read may try again.
+
+On proof, both private unknown gates clear together and the original privately
+retained terminal Result is published. Checkpoint/payload/prepared evidence stays
+retained and all outward snapshots remain independent. Cached replay needs no
+inspection. There is no Append, business retry, UUID/clock generation, fetch,
+replacement failure record, eviction or additional retained slot.
+
+This releases only the in-process pending-source gate. It neither calls nor
+integrates the separate durable generation-fenced Store admission/release APIs.
+The controller still uses generic business/journal APIs, not generation-fenced
+execution; the 16-record cap and Store source H4 limit are unchanged. No guarantee
+of cross-controller/process exclusion or restart ownership is added.
