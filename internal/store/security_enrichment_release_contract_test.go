@@ -185,21 +185,15 @@ func TestOperationReleaseContractRefusalOtherSourceCompetitionAndRollback(t *tes
 	probe, request, receipt := releaseContractFixture(t, "epss", "success", 4120)
 	releaseContractRequire(t, probe, request, receipt)
 
-	t.Run("other-source-continues-positive-idle-target-stops", func(t *testing.T) {
+	t.Run("both-sources-continue-after-proved-release", func(t *testing.T) {
 		before := journalSnapshot(t, probe, false)
 		next := reservationContractRequest(t, 4121, "epss_feed")
 		next.ExpectedGeneration = 1
-		ack, err := probe.ReserveSecurityEnrichmentOperation(context.Background(), next)
-		if err == nil {
-			t.Fatal("positive idle implicitly enabled next generation before admission implementation")
-		}
-		if !reflect.DeepEqual(ack, SecurityEnrichmentReservationAcknowledgement{}) {
-			t.Fatal("blocked next generation exposed acknowledgement")
-		}
 		missing, err := probe.ReadSecurityEnrichmentReservation(context.Background(), next)
-		if err != nil || missing.State != "conflict" || !reflect.DeepEqual(missing.Acknowledgement, SecurityEnrichmentReservationAcknowledgement{}) || journalSnapshot(t, probe, false) != before {
-			t.Fatal("readonly positive-idle candidate became clean missing/admission or wrote")
+		if err != nil || missing.State != "missing" || !reflect.DeepEqual(missing.Acknowledgement, SecurityEnrichmentReservationAcknowledgement{}) || journalSnapshot(t, probe, false) != before {
+			t.Fatal("proved positive-idle candidate must be read-only missing")
 		}
+		reservationContractRequire(t, probe, next)
 		other := reservationContractRequest(t, 4122, "kev_feed")
 		reservationContractRequire(t, probe, other)
 		returned := other.Reserved.Checkpoint

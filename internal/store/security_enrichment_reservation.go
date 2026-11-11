@@ -256,9 +256,9 @@ func reservationStateTx(ctx context.Context, tx *sql.Tx, p preparedReservation, 
 		}
 		return SecurityEnrichmentReservationState{State: "matched", Acknowledgement: reservationAck(p, true), HeadSequence: header.Sequence, HeadDigest: header.Digest}, nil
 	}
-	// Certified idle is readable, but next-generation admission is a separate
-	// bounded-history slice. Reads must not classify this as clean missing.
-	if source.Generation > 0 && source.OperationID == nil {
+	// The source checker has fully proved all closed generations. At the
+	// lifetime budget, exact existing requests above remain readable/replayable.
+	if source.Generation >= reservationHistoryLimit {
 		return conflict, nil
 	}
 	if exists || source.OperationID != nil || source.Generation != p.request.ExpectedGeneration {

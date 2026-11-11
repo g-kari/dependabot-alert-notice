@@ -1,6 +1,6 @@
 # Dormant atomic release storage
 
-This is K293 stage 2: an internal Store API, not a running connector, restored
+This is K293 stages 2 and 3: an internal Store API, not a running connector, restored
 controller, scheduler, account/authentication feature, or live configuration.
 Stage 1's pure [release candidate codec](security-enrichment-release-candidate.md)
 continues to inspect syntax only. Store proof is a separate operation.
@@ -103,12 +103,46 @@ observation or expected failure prevents reads/admission from trusting its
 certificate alone. Legitimate newer offline facts/Finding revisions remain
 independent.
 
-Next-generation admission is deliberately disabled: both Reserve and a new
-read-only reservation candidate explicitly conflict on the target's positive
-idle generation, including no-run histories without an ingest receipt. An
-unadopted other source remains usable. A fully certified old reservation's
-missing-active condition becomes stale conflict with zero acknowledgement;
-uncertified missing active state remains unknown/corrupt.
+Next-generation admission is now enabled only after bounded full-history proof.
+The deliberately small dormant pilot lifetime limit H is **4 generations per
+source**, counting the active generation, independently of the unchanged
+16-record manual controller cap. This is not operational capacity or a rolling
+window: there is no eviction, reset, retention cleanup or legacy-history adoption.
+
+Before loading any stored reservation, journal or certificate payload, the
+source checker preflights **both** sources. For each source, reservation and
+certificate selectors use the existing unique `(connector,generation)` indexes,
+including finite BLOB connector aliases, and return only validated generation
+metadata with `ORDER BY connector,generation LIMIT H+1`. Scalar type/byte checks
+run in SQL. More than H rows, aliases, invalid scalars, gaps or unexpected counts
+fail closed. Reservation generations must be exactly 1..current; certificate
+generations must be exactly 1..current when idle, or 1..current-1 when active.
+
+Only after all four metadata reads pass, every closed generation is processed
+sequentially through the existing exact certificate, retained root, complete
+journal and historical business evidence proof. Proof is not reduced to a
+certificate or current Finding/common-fact state. Bound historical ingest runs
+no longer count as legacy residue, but unbound receipts and journal residue
+still block new admission. The legacy feed entrances retain their positive-idle
+fence. An exact released request remains stale conflict with zero reservation
+acknowledgement; an unused candidate at the current idle generation is read-only
+missing only below H. Read-only missing is not a fetch/execution grant.
+
+H=4 limits the source check to four metadata queries with at most five scalar
+rows each and at most eight sequential closed-generation proofs across both
+sources. Each proof reuses the existing 1 MiB root/checkpoint, five-checkpoint,
+4 KiB certificate and 200-target historical-evidence limits. There is no
+all-history payload collection: the per-generation working set is released
+between proofs. Existing proof helpers may reread the same bounded rows, and
+public calls may additionally prove the requested operation. This is a bound
+on Go materialization and proof count, not on SQLite internal work, total DB
+size, disk I/O, or operational latency. The small pilot cap intentionally keeps
+those repeated proof costs modest without claiming measured capacity.
+
+Generation H can still be replayed while reserved, appended, completed/failed,
+released and read. Only a fresh H+1 reservation is denied. One source reaching
+H does not consume the other's quota. Corrupt historical proof in either source
+still fails the shared consistency check, rather than being silently ignored.
 
 Certificate-only adoption residue is checked by initial admission, source
 validation and the common six-entry legacy guard using source aliases and
@@ -116,12 +150,6 @@ reservation/journal identities. A positive generation still blocks all six
 legacy feed operation/receipt entrances after release. Independent offline
 common-fact updates, legacy threat snapshots and nonfeed defaults are not an
 exclusive source fence.
-
-Stage 3 remains required before next Reserve: a finite per-source admission
-budget with H+1 metadata overflow detection, contiguous generations and full
-proof of every closed generation, processed sequentially. A certificate must
-not replace historical observation proof. H is separate from the unchanged
-16-record non-evict manual controller.
 
 ## Evidence scope and work still separate
 
@@ -134,8 +162,18 @@ acknowledgement and do not repair, release or retry.
 
 Local Go/SQL execution was prohibited for candidate preparation; runtime claims
 must come from formal CI against the final immutable head. Further work remains
-for next-generation admission, K294 controller restoration/private-unknown
+for K294 controller restoration/private-unknown
 resolution, terminal capacity/retention, and K286 operational backup/mixed-writer
 checks. This slice changes no controller constructor, public DTO, 16-record
 retention, main/config/UI/scheduler/default endpoint or live operation.
 
+
+Stage 3 deliberately replaces two stage-2 test expectations: a fully proved
+positive-idle next candidate below H is now read-only missing and Reserve can
+admit it. All other release atomicity, no-run absence of business UUIDs,
+historical evidence, no-write reads and stale-request assertions remain.
+The new contracts cover both sources and all terminal branches through H,
+old-generation damage after a later closure, gaps, aliases and overflow.
+Local Go compilation/tests and the required PowerShell check were not run for
+this candidate: local Go execution remains prohibited and pwsh is absent.
+Formal CI against the immutable submitted head must establish runtime results.

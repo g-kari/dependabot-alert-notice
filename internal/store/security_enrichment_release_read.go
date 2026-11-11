@@ -118,19 +118,6 @@ func anyReleaseCertificateTx(ctx context.Context, tx *sql.Tx) (bool, error) {
 	return present, nil
 }
 
-// checkIdleReleaseTx validates exactly the current closed generation. It does
-// not implement next-generation admission or iterate all historical releases.
-func checkIdleReleaseTx(ctx context.Context, tx *sql.Tx, source reservationSource) error {
-	if source.Generation <= 0 || source.OperationID != nil || source.IntentID != nil {
-		return releaseError(ctx, errReleaseCorrupt)
-	}
-	records, err := readReleaseCertificatesTx(ctx, tx, "", "", source.Connector, source.Generation)
-	if err != nil || len(records) != 1 {
-		return releaseError(ctx, errReleaseCorrupt)
-	}
-	return verifyStoredReleaseTx(ctx, tx, records[0], source)
-}
-
 // certifiedReservationClosureTx narrows only a fully proved old binding's
 // missing-active state to stale conflict. Other missing-active states stay
 // corruption. It never returns an execution or reservation acknowledgement.
