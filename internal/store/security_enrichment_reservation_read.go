@@ -143,7 +143,11 @@ func checkReservationSources(ctx context.Context, tx *sql.Tx, sources map[string
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM security_enrichment_reservations LIMIT 1)").Scan(&orphan); err != nil {
 			return reservationError(ctx, errReservationStorage)
 		}
-		if orphan {
+		certificate, certErr := anyReleaseCertificateTx(ctx, tx)
+		if certErr != nil {
+			return reservationError(ctx, errReservationStorage)
+		}
+		if orphan || certificate {
 			return reservationError(ctx, errReservationCorrupt)
 		}
 		return nil
@@ -165,11 +169,22 @@ FROM security_enrichment_reservations WHERE connector=? ORDER BY generation DESC
 			return reservationError(ctx, errReservationStorage)
 		}
 		if source.Generation == 0 && source.OperationID == nil && !found {
+			residual, err := releaseCertificateResidualTx(ctx, tx, connector)
+			if err != nil || residual {
+				return reservationError(ctx, errReservationCorrupt)
+			}
 			continue
 		}
-		// This slice has no release API. A positive idle generation is not
-		// silently accepted as evidence that a previous owner stopped.
-		if !found || !latest.Valid || latest.Int64 != source.Generation || source.OperationID == nil || source.IntentID == nil {
+		if !found || !latest.Valid || latest.Int64 != source.Generation {
+			return reservationError(ctx, errReservationCorrupt)
+		}
+		if source.OperationID == nil {
+			if err := checkIdleReleaseTx(ctx, tx, source); err != nil {
+				return reservationError(ctx, errReservationCorrupt)
+			}
+			continue
+		}
+		if source.IntentID == nil || rejectActiveReleaseCertificateTx(ctx, tx, source) != nil {
 			return reservationError(ctx, errReservationCorrupt)
 		}
 		records, err := readReservationBindings(ctx, tx, *source.OperationID, *source.IntentID)
@@ -202,6 +217,7 @@ func initialReservationAdmission(ctx context.Context, tx *sql.Tx) error {
 EXISTS(SELECT 1 FROM security_enrichment_operations LIMIT 1) OR
 EXISTS(SELECT 1 FROM security_enrichment_checkpoints LIMIT 1) OR
 EXISTS(SELECT 1 FROM security_enrichment_reservations LIMIT 1) OR
+EXISTS(SELECT 1 FROM security_enrichment_release_certificates LIMIT 1) OR
 EXISTS(SELECT 1 FROM ingest_runs WHERE connector IN ('epss_feed','kev_feed') LIMIT 1) OR
 EXISTS(SELECT 1 FROM ingest_runs WHERE connector IN (CAST('epss_feed' AS BLOB),CAST('kev_feed' AS BLOB)) LIMIT 1)`).Scan(&legacy); err != nil {
 		return reservationError(ctx, errReservationStorage)

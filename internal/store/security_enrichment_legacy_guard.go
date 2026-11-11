@@ -29,12 +29,20 @@ func guardLegacyEnrichmentWriteTx(ctx context.Context, tx *sql.Tx, connector str
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM security_enrichment_reservations LIMIT 1)").Scan(&residual); err != nil {
 			return reservationError(ctx, errReservationStorage)
 		}
-		if residual {
+		certificate, certErr := anyReleaseCertificateTx(ctx, tx)
+		if certErr != nil {
+			return reservationError(ctx, errReservationStorage)
+		}
+		if residual || certificate {
 			return reservationError(ctx, errReservationCorrupt)
 		}
 	} else {
 		if sources[connector].Generation > 0 {
 			return reservationError(ctx, ErrIngestConflict)
+		}
+		certificate, certErr := releaseCertificateResidualTx(ctx, tx, connector)
+		if certErr != nil || certificate {
+			return reservationError(ctx, errReservationCorrupt)
 		}
 		// Both selectors are indexed source lookups with finite BLOB aliases;
 		// only an EXISTS boolean crosses SQL, never a payload/history. The

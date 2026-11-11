@@ -242,12 +242,24 @@ func reservationStateTx(ctx context.Context, tx *sql.Tx, p preparedReservation, 
 			return unknown, reservationError(ctx, errReservationCorrupt)
 		}
 		if source.Generation != p.generation || source.OperationID == nil || *source.OperationID != record.OperationID || source.IntentID == nil || *source.IntentID != record.IntentID {
+			closed, err := certifiedReservationClosureTx(ctx, tx, p, source)
+			if err != nil {
+				return unknown, reservationError(ctx, errReservationCorrupt)
+			}
+			if closed {
+				return conflict, nil
+			}
 			return unknown, reservationError(ctx, errReservationCorrupt)
 		}
 		if header.Sequence != 1 || header.Digest != record.Digest || len(rows) != 1 || !bytes.Equal(rows[0].payload, record.payload) {
 			return conflict, nil
 		}
 		return SecurityEnrichmentReservationState{State: "matched", Acknowledgement: reservationAck(p, true), HeadSequence: header.Sequence, HeadDigest: header.Digest}, nil
+	}
+	// Certified idle is readable, but next-generation admission is a separate
+	// bounded-history slice. Reads must not classify this as clean missing.
+	if source.Generation > 0 && source.OperationID == nil {
+		return conflict, nil
 	}
 	if exists || source.OperationID != nil || source.Generation != p.request.ExpectedGeneration {
 		return conflict, nil

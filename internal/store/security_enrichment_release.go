@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -24,19 +25,124 @@ type SecurityEnrichmentReleaseProof struct {
 	Acknowledgement SecurityEnrichmentReleaseAcknowledgement
 }
 
-var errReleaseUnavailable = errors.New("operation release unavailable")
+var errReleaseConflict = errors.New("operation release conflict")
+var errReleaseCorrupt = errors.New("operation release stored data invalid")
+var errReleaseStorage = errors.New("operation release storage unavailable")
 
-// ReleaseSecurityEnrichmentOperation is the explicit fresh-active-only release
-// boundary. The retained request supplies the root and complete terminal CP;
-// no second Attempt/Completion, replacement UUID or clock is accepted. Until
-// implemented, it refuses without changing existing runtime or storage.
-func (s *Store) ReleaseSecurityEnrichmentOperation(ctx context.Context, request enrichmentrelease.ReleaseRequest) (SecurityEnrichmentReleaseAcknowledgement, error) {
-	return SecurityEnrichmentReleaseAcknowledgement{}, fmt.Errorf("release operation: %w", errReleaseUnavailable)
+func releaseError(ctx context.Context, category error) error {
+	if ctx != nil && ctx.Err() != nil {
+		return fmt.Errorf("operation release: %w", ctx.Err())
+	}
+	return fmt.Errorf("operation release: %w", category)
 }
 
-// ReadSecurityEnrichmentRelease is a read-only same-full-request proof boundary,
-// not a release retry, repair, restore or execution grant. Until implemented,
-// it exposes no acknowledgement and makes no schema or storage changes.
+// ReleaseSecurityEnrichmentOperation verifies the exact retained root, complete
+// legal journal and historical business proof in its write transaction. Only a
+// fresh active binding can INSERT a certificate and CAS-clear both active IDs.
+// Generation is preserved. Errors, including Commit/cancellation, expose no Ack;
+// callers retain their request and use only the read-only proof, never retry.
+func (s *Store) ReleaseSecurityEnrichmentOperation(ctx context.Context, request enrichmentrelease.ReleaseRequest) (SecurityEnrichmentReleaseAcknowledgement, error) {
+	empty := SecurityEnrichmentReleaseAcknowledgement{}
+	p, err := prepareRelease(ctx, request)
+	if err != nil {
+		return empty, err
+	}
+	if s == nil || s.db == nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	defer func() { _ = tx.Rollback() }()
+	sources, err := readReservationSources(ctx, tx)
+	if err != nil {
+		return empty, releaseError(ctx, errReleaseCorrupt)
+	}
+	if err := checkReservationSources(ctx, tx, sources); err != nil {
+		return empty, releaseError(ctx, errReleaseCorrupt)
+	}
+	source := sources[p.inspection.Request.Reservation.Reserved.Checkpoint.Request.Connector]
+	if !releaseActiveMatches(source, p.reservation) {
+		return empty, releaseError(ctx, errReleaseConflict)
+	}
+	ack, state, err := expectedReleaseTx(ctx, tx, p)
+	if err != nil || state != "matched" {
+		if err != nil {
+			return empty, err
+		}
+		return empty, releaseError(ctx, errReleaseConflict)
+	}
+	stored, err := readReleaseCertificatesTx(ctx, tx, ack.Certificate.OperationID, ack.Certificate.IntentID, ack.Certificate.Connector, ack.Certificate.Generation)
+	if err != nil {
+		return empty, err
+	}
+	if len(stored) != 0 {
+		return empty, releaseError(ctx, errReleaseCorrupt)
+	}
+	payload, err := enrichmentrelease.EncodeCertificate(ack.Certificate)
+	if err != nil {
+		return empty, releaseError(ctx, errReleaseCorrupt)
+	}
+	c := ack.Certificate
+	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_release_certificates(
+operation_id,intent_id,connector,generation,format_version,reserved_digest,terminal_sequence,
+terminal_previous_digest,terminal_digest,kind,run_id,receipt,certificate_digest,certificate_json)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.OperationID, c.IntentID, c.Connector, c.Generation, c.Version, c.ReservedDigest, c.TerminalSequence,
+		c.TerminalPreviousDigest, c.TerminalDigest, c.Kind, c.RunID, c.Receipt, ack.CertificateDigest, string(payload)); err != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE security_enrichment_source_generations
+SET active_operation_id=NULL,active_intent_id=NULL
+WHERE connector=? AND generation=? AND active_operation_id=? AND active_intent_id=?`,
+		c.Connector, c.Generation, c.OperationID, c.IntentID)
+	if err != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return empty, releaseError(ctx, errReleaseConflict)
+	}
+	if err := tx.Commit(); err != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	if ctx.Err() != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	return ack, nil
+}
+
+// ReadSecurityEnrichmentRelease re-proves the complete retained request and
+// historical business evidence in one read-only snapshot. Matched is historical
+// release storage only, never current execution ownership or next admission.
+// Missing is clean only for unused input or a fully proved still-active terminal.
 func (s *Store) ReadSecurityEnrichmentRelease(ctx context.Context, request enrichmentrelease.ReleaseRequest) (SecurityEnrichmentReleaseProof, error) {
-	return SecurityEnrichmentReleaseProof{State: "unknown"}, fmt.Errorf("read operation release: %w", errReleaseUnavailable)
+	unknown := SecurityEnrichmentReleaseProof{State: "unknown"}
+	p, err := prepareRelease(ctx, request)
+	if err != nil {
+		return unknown, err
+	}
+	if s == nil || s.db == nil {
+		return unknown, releaseError(ctx, errReleaseStorage)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return unknown, releaseError(ctx, errReleaseStorage)
+	}
+	defer func() { _ = tx.Rollback() }()
+	proof, err := releaseStateTx(ctx, tx, p)
+	if err != nil {
+		return unknown, err
+	}
+	if err := tx.Commit(); err != nil {
+		return unknown, releaseError(ctx, errReleaseStorage)
+	}
+	if ctx.Err() != nil {
+		return unknown, releaseError(ctx, errReleaseStorage)
+	}
+	return proof, nil
 }
