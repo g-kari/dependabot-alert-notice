@@ -15,6 +15,9 @@ package_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
 binary="$package_dir/dependabot-alert-notice"
 test -f "$binary"
 trial_dir="$(mktemp -d "${TMPDIR:-/tmp}/devsecops-trial.XXXXXXXX")"
+# macOS /var and /private/var may name the same directory. Freeze its physical
+# path before setting HOME, cwd and the explicit config argument.
+trial_dir="$(cd -- "$trial_dir" && pwd -P)"
 mkdir -p "$trial_dir/home/bin" "$trial_dir/home/config" "$trial_dir/home/gh" "$trial_dir/home/codex" "$trial_dir/tmp"
 cp "$package_dir/trial-config.yaml" "$trial_dir/config.yaml"
 cd -- "$trial_dir"

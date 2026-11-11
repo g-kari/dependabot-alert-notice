@@ -54,6 +54,8 @@ The first command must print `dependabot-alert-notice` followed by the exact
 manifest version. The second must print `http://127.0.0.1:18999`. Each invocation
 uses a fresh temporary directory and private HOME/config paths, clears the child
 environment, disables auto-update, and checks that the smoke created no DB.
+The Unix launcher resolves that new directory to its physical path so aliases
+such as macOS `/var` and `/private/var` use the same HOME, cwd and config identity.
 GitHub/AI/Slack/Discord credentials and normal app config are not inherited.
 
 ## Optional empty/offline UI trial

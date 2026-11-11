@@ -77,15 +77,18 @@ class TrialToolsTests(unittest.TestCase):
                 shutil.copyfile(item, package / item.name)
             binary = package / "dependabot-alert-notice"
             binary.write_text('''#!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'status=$?; printf "fixture assertion failed: status=%s line=%s command=%s\\nPWD=%s\\nHOME=%s\\nconfig=%s\\n" "$status" "$LINENO" "$BASH_COMMAND" "$PWD" "$HOME" "${2:-unset}" >&2; exit "$status"' ERR
 test -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}${SLACK_BOT_TOKEN:-}${SLACK_APP_TOKEN:-}${DISCORD_WEBHOOK_URL:-}${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}"
 test "$PATH" = "$HOME/bin"
 test "$GH_CONFIG_DIR" = "$HOME/gh"
 test "$CODEX_HOME" = "$HOME/codex"
 test "$SECURITY_NOTICE_AUTO_UPDATE" = 0
 test ! -f "$HOME/original-home-marker"
+test "$HOME" -ef "$PWD/home"
+test "$#" -eq 4
 test "$1" = --config
-test "$2" = "$PWD/config.yaml"
+test "$2" -ef "$PWD/config.yaml"
 test "$3" = --auto-update=false
 printf '%s\\n' "$PWD" > "$HOME/capture"
 case "${4:-}" in
@@ -100,27 +103,36 @@ esac
             (old_home / "original-home-marker").write_text("keep")
             temp = root / "temporary"
             temp.mkdir()
+            alias = root / "temporary alias"
+            alias.symlink_to(temp, target_is_directory=True)
             environment = dict(os.environ, HOME=str(old_home), TMPDIR=str(temp),
                                GH_TOKEN="synthetic-only", GITHUB_TOKEN="synthetic-only",
                                SLACK_BOT_TOKEN="synthetic-only", SLACK_APP_TOKEN="synthetic-only",
                                DISCORD_WEBHOOK_URL="synthetic-only", OPENAI_API_KEY="synthetic-only",
                                ANTHROPIC_API_KEY="synthetic-only")
-            for mode, expected in (([], "dependabot-alert-notice fixture"),
-                                   (["--web-url"], "http://127.0.0.1:18999")):
-                result = subprocess.run(["bash", str(package / "Trial.sh"), *mode],
-                                        env=environment, text=True, capture_output=True, check=True)
-                self.assertEqual(result.stdout.strip(), expected)
+            for temp_root in (temp, alias):
+                environment["TMPDIR"] = str(temp_root)
+                for mode, expected in (([], "dependabot-alert-notice fixture"),
+                                       (["--web-url"], "http://127.0.0.1:18999")):
+                    result = subprocess.run(["bash", str(package / "Trial.sh"), *mode],
+                                            env=environment, text=True, capture_output=True)
+                    diagnostic = (f"mode={mode!r} TMPDIR={temp_root} returncode={result.returncode}"
+                                  f"\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+                    self.assertEqual(result.returncode, 0, diagnostic)
+                    self.assertEqual(result.stdout.strip(), expected, diagnostic)
             directories = list(temp.glob("devsecops-trial.*"))
-            self.assertEqual(len(directories), 2)
+            self.assertEqual(len(directories), 4)
             for directory in directories:
-                self.assertEqual((directory / "home/capture").read_text().strip(), str(directory))
+                captured = pathlib.Path((directory / "home/capture").read_text().strip())
+                self.assertTrue(directory.samefile(captured), f"different trial directories: {directory} / {captured}")
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
                 self.assertEqual((directory / "config.yaml").read_bytes(), (TRIAL / "trial-config.yaml").read_bytes())
                 self.assertFalse((directory / "store.db").exists())
             self.assertEqual((old_home / "original-home-marker").read_text(), "keep")
             rejected = subprocess.run(["bash", str(package / "Trial.sh"), "--update"],
                                       env=environment, capture_output=True)
             self.assertEqual(rejected.returncode, 2)
-            self.assertEqual(len(list(temp.glob("devsecops-trial.*"))), 2)
+            self.assertEqual(len(list(temp.glob("devsecops-trial.*"))), 4)
 
 
 if __name__ == "__main__":
