@@ -1,0 +1,283 @@
+name: Trial artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trial-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Freeze trial source
+        id: source
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=0.0.0-trial.g$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Full Linux checks and packaging regressions
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./... -race -count=1
+          go build ./...
+          python3 scripts/test_macos_tools.py
+          python3 scripts/test_trial_tools.py
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: v2.20.0
+          install-only: true
+      - name: Build tagless snapshot and verify all checksums
+        env:
+          TRIAL_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          goreleaser check
+          goreleaser release --snapshot --clean
+          (cd dist && sha256sum -c checksums.txt)
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 6
+          go run ./cmd/package-macos -version "$TRIAL_VERSION" -out dist/macos
+          (cd dist/macos && sha256sum -c macos-checksums.txt)
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, tarfile
+          root = pathlib.Path('dist')
+          source = os.environ['SOURCE_SHA']
+          version = os.environ['TRIAL_VERSION']
+          for goos in ('linux', 'darwin', 'windows'):
+              for arch in ('amd64', 'arm64'):
+                  archive = root / f'dependabot-alert-notice_{version}_{goos}_{arch}.tar.gz'
+                  assert archive.is_file()
+                  with tarfile.open(archive, 'r:gz') as package:
+                      binary = 'dependabot-alert-notice.exe' if goos == 'windows' else 'dependabot-alert-notice'
+                      entries = package.getmembers()
+                      names = [entry.name for entry in entries]
+                      assert binary in names and len(names) == len(set(names))
+                      for entry in entries:
+                          assert entry.isfile() and '/' not in entry.name and '\\' not in entry.name
+                          assert entry.name == binary or entry.name.lower().startswith(('readme', 'license', 'changelog'))
+          manifest = {
+              'source_commit': source,
+              'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'version': version,
+              'binary_name': 'dependabot-alert-notice',
+              'module': 'github.com/g-kari/dependabot-alert-notice',
+              'event': os.environ['GITHUB_EVENT_NAME'],
+              'workflow_commit': os.environ['GITHUB_WORKFLOW_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'run_url': f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
+              'goreleaser_version': 'v2.20.0',
+              'channel': 'trial-only; no tag or GitHub Release',
+          }
+          (root / 'trial-source.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Native Linux amd64 artifact smoke without DB or network
+        env:
+          TRIAL_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/trial-linux"
+          tar -xzf "dist/dependabot-alert-notice_${TRIAL_VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/trial-linux" dependabot-alert-notice
+          cp packaging/trial/* "$RUNNER_TEMP/trial-linux/"
+          test "$(bash "$RUNNER_TEMP/trial-linux/Trial.sh")" = "dependabot-alert-notice $TRIAL_VERSION"
+          test "$(bash "$RUNNER_TEMP/trial-linux/Trial.sh" --web-url)" = 'http://127.0.0.1:18999'
+      - name: Stage candidates for native checks, never for user delivery
+        uses: actions/upload-artifact@v7
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+            dist/trial-source.json
+            dist/macos/*.zip
+            dist/macos/macos-checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  mac-smoke:
+    needs: build
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TRIAL_VERSION: ${{ needs.build.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mac-artifacts
+      - name: Native Mac regression and delivered binary smoke
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          go test ./... -race -count=1
+          python3 scripts/test_macos_tools.py
+          python3 scripts/test_trial_tools.py
+          (cd mac-artifacts && shasum -a 256 -c checksums.txt)
+          mkdir -p "$RUNNER_TEMP/trial-mac"
+          tar -xzf "mac-artifacts/dependabot-alert-notice_${TRIAL_VERSION}_darwin_${ARCH}.tar.gz" -C "$RUNNER_TEMP/trial-mac" dependabot-alert-notice
+          cp packaging/trial/* "$RUNNER_TEMP/trial-mac/"
+          test "$(bash "$RUNNER_TEMP/trial-mac/Trial.sh")" = "dependabot-alert-notice $TRIAL_VERSION"
+          test "$(bash "$RUNNER_TEMP/trial-mac/Trial.sh" --web-url)" = 'http://127.0.0.1:18999'
+      - name: Preserve existing convenient Mac packaging gate, do not distribute its ZIP
+        run: |
+          (cd mac-artifacts/macos && shasum -a 256 -c macos-checksums.txt)
+          unzip -q "mac-artifacts/macos/security-notice_${TRIAL_VERSION}_macos_${ARCH}.zip" -d "$RUNNER_TEMP/mac-package"
+          folder="$RUNNER_TEMP/mac-package/security-notice_${TRIAL_VERSION}_macos_${ARCH}"
+          test -x "$folder/Start.command"
+          for script in "$folder/"*.command "$folder/service-macos.sh"; do
+            test -x "$script"
+            bash -n "$script"
+          done
+          grep -Fx "Source commit: $SOURCE_SHA" "$folder/BUILD-INFO.txt"
+          grep -Fx 'Uncommitted changes: false' "$folder/BUILD-INFO.txt"
+          test "$("$folder/dependabot-alert-notice" --version)" = "dependabot-alert-notice $TRIAL_VERSION"
+          test "$("$folder/dependabot-alert-notice" --config "$folder/config.yaml.example" --web-url)" = 'http://127.0.0.1:8999'
+
+  windows-smoke:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      TRIAL_VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mac-artifacts
+      - name: Preserve Windows checks and smoke delivered amd64 artifact
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Windows PowerShell 5.1 is required for this native gate' }
+          Write-Host "Native trial smoke: Windows PowerShell $($PSVersionTable.PSVersion)"
+          if ((git rev-parse HEAD) -ne $env:SOURCE_SHA) { throw 'source mismatch' }
+          go vet ./...
+          if ($LASTEXITCODE) { throw 'go vet failed' }
+          go build ./...
+          if ($LASTEXITCODE) { throw 'go build failed' }
+          go test ./internal/updater/... -count=1
+          if ($LASTEXITCODE) { throw 'updater tests failed' }
+          $archive = "dependabot-alert-notice_$($env:TRIAL_VERSION)_windows_amd64.tar.gz"
+          $lines = @(Get-Content mac-artifacts/checksums.txt | Where-Object { ($_ -split '\s+')[1] -eq $archive })
+          if ($lines.Count -ne 1) { throw 'missing or duplicate checksum' }
+          $want = ($lines[0] -split '\s+')[0]
+          if ((Get-FileHash "mac-artifacts/$archive" -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' }
+          $out = Join-Path $env:RUNNER_TEMP 'trial-windows'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          tar -xzf "mac-artifacts/$archive" -C $out dependabot-alert-notice.exe
+          if ($LASTEXITCODE) { throw 'extract failed' }
+          Copy-Item packaging/trial/* $out
+          $version = & "$out/Trial.ps1"
+          if ($LASTEXITCODE -or $version -ne "dependabot-alert-notice $env:TRIAL_VERSION") { throw 'version mismatch' }
+          $url = & "$out/Trial.ps1" -Mode WebURL
+          if ($LASTEXITCODE -or $url -ne 'http://127.0.0.1:18999') { throw 'web URL mismatch' }
+
+  ready:
+    needs: [build, mac-smoke, windows-smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+    env:
+      TRIAL_VERSION: ${{ needs.build.outputs.version }}
+      TARGET_OS: ${{ matrix.os }}
+      TARGET_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mac-artifacts
+      - name: Assemble verified trial-only artifact
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil
+          source = pathlib.Path('mac-artifacts')
+          manifest = json.loads((source / 'trial-source.json').read_text())
+          assert manifest['source_commit'] == os.environ['SOURCE_SHA']
+          assert manifest['version'] == os.environ['TRIAL_VERSION']
+          assert manifest['event'] == 'push'
+          goos, arch = os.environ['TARGET_OS'], os.environ['TARGET_ARCH']
+          name = f"dependabot-alert-notice_{manifest['version']}_{goos}_{arch}.tar.gz"
+          matches = [line.split()[0] for line in (source / 'checksums.txt').read_text().splitlines() if len(line.split()) == 2 and line.split()[1] == name]
+          assert len(matches) == 1
+          digest = hashlib.sha256((source / name).read_bytes()).hexdigest()
+          assert digest == matches[0]
+          target = pathlib.Path('dist/trial')
+          target.mkdir(parents=True)
+          shutil.copyfile(source / name, target / name)
+          for item in pathlib.Path('packaging/trial').iterdir():
+              assert item.is_file() and not item.is_symlink()
+              shutil.copyfile(item, target / item.name)
+          native = (goos, arch) in {('linux', 'amd64'), ('windows', 'amd64'), ('darwin', 'amd64'), ('darwin', 'arm64')}
+          manifest.update({'target_os': goos, 'target_arch': arch, 'archive': name, 'archive_sha256': digest,
+              'native_binary_smoke': native, 'smoke_scope': 'isolated launcher --version / --web-url; no DB or network' if native else 'not run; cross-compiled only',
+              'full_native_race_tests': goos in ('linux', 'darwin') and native,
+              'windows_updater_tests': goos == 'windows' and arch == 'amd64',
+              'passed_build_native_gates': ['build', 'mac-smoke (arm64 and amd64)', 'windows-smoke (Windows PowerShell 5.1)'], 'ui_runtime_verified': False,
+              'real_device_verified': False, 'signed_or_notarized': False})
+          (target / 'trial-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          sums = ''.join(f"{hashlib.sha256(item.read_bytes()).hexdigest()}  {item.name}\n" for item in sorted(target.iterdir()) if item.is_file())
+          (target / 'SHA256SUMS').write_text(sums)
+          PY
+          (cd dist/trial && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: trial-${{ needs.build.outputs.source_sha }}-${{ matrix.os }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/trial/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
