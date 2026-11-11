@@ -1,0 +1,30 @@
+# Trial only. Each launcher copies this into a new, private temporary directory.
+poll_interval: 30m
+notification_interval: 1h
+targets: []
+gh_path: ./disabled-gh
+claude_path: ./disabled-claude
+codex_path: ./disabled-codex
+log_level: info
+data_path: store.db
+web:
+  host: 127.0.0.1
+  port: 18999
+disable_approval: true
+slack:
+  bot_token: ""
+  app_token: ""
+discord:
+  webhook_url: ""
+evaluator:
+  auto_eval: false
+  sandbox:
+    enabled: true
+    container_path: ./disabled-container
+rss:
+  enabled: false
+  feeds: []
+threat:
+  enabled: false
+service_profiles: []
+assessments: []
