@@ -12,6 +12,13 @@ The binary and module keep the compatible name `dependabot-alert-notice`.
 target, checksum, and verification limits. The version must equal
 `0.0.0-trial.g<full source SHA>`. SHA-256 checks provide integrity, not signing.
 
+The manifest keeps `build_run_attempt` and `candidate_artifact` from the producer
+build, separately from the ready artifact's `verification_run_attempt`. Retrying
+only failed jobs reuses the successful build's original candidate, not a name
+derived from the new attempt. Native jobs may also be reused; their exact attempts
+are recorded in the linked run's job history. Candidate retention is 1 day. If it
+has expired, rerun the whole workflow to rebuild rather than retry failed jobs.
+
 ## Extract and check
 
 Download the artifact for your OS/CPU and extract GitHub's outer ZIP into a **new

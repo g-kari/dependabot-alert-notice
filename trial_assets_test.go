@@ -25,6 +25,57 @@ func TestTrialConfigHasNoLiveSourcesOrApproval(t *testing.T) {
 	}
 }
 
+func TestTrialConsumersUseFrozenBuildArtifactIdentity(t *testing.T) {
+	body, err := os.ReadFile(".github/workflows/trial.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := workflow["jobs"].(map[string]any)
+	build := jobs["build"].(map[string]any)
+	outputs := build["outputs"].(map[string]any)
+	if outputs["artifact_name"] != "${{ steps.source.outputs.artifact_name }}" || outputs["build_attempt"] != "${{ steps.source.outputs.build_attempt }}" {
+		t.Fatal("artifact identity and generation attempt must be producer outputs")
+	}
+	uploads := 0
+	for _, raw := range build["steps"].([]any) {
+		step := raw.(map[string]any)
+		uses, _ := step["uses"].(string)
+		if strings.HasPrefix(uses, "actions/upload-artifact@") {
+			uploads++
+			with := step["with"].(map[string]any)
+			if with["name"] != "${{ steps.source.outputs.artifact_name }}" {
+				t.Fatal("producer upload must use the same frozen identity as consumers")
+			}
+		}
+	}
+	if uploads != 1 {
+		t.Fatal("build must upload exactly one frozen candidate artifact")
+	}
+	for _, name := range []string{"mac-smoke", "windows-smoke", "ready"} {
+		job := jobs[name].(map[string]any)
+		downloads := 0
+		for _, raw := range job["steps"].([]any) {
+			step := raw.(map[string]any)
+			uses, _ := step["uses"].(string)
+			if !strings.HasPrefix(uses, "actions/download-artifact@") {
+				continue
+			}
+			downloads++
+			with := step["with"].(map[string]any)
+			if with["name"] != "${{ needs.build.outputs.artifact_name }}" {
+				t.Errorf("%s must reuse its producer artifact on failed-jobs retries", name)
+			}
+		}
+		if downloads != 1 {
+			t.Errorf("%s must consume exactly one frozen candidate artifact", name)
+		}
+	}
+}
+
 func TestTrialWorkflowIsTaglessReadOnlyAndPostMergeGated(t *testing.T) {
 	body, err := os.ReadFile(".github/workflows/trial.yml")
 	if err != nil {

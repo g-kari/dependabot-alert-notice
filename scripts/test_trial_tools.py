@@ -2,6 +2,7 @@
 """Trial packaging tests; use synthetic environment values and a fake binary."""
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -12,13 +13,43 @@ TRIAL = ROOT / "packaging" / "trial"
 
 
 class TrialToolsTests(unittest.TestCase):
+    def test_failed_job_retries_keep_the_producer_artifact_and_attempt(self):
+        workflow = (ROOT / ".github/workflows/trial.yml").read_text()
+        reference = "${{ needs.build.outputs.artifact_name }}"
+        self.assertIn('echo "artifact_name=candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"', workflow)
+        self.assertIn('artifact_name: ${{ steps.source.outputs.artifact_name }}', workflow)
+        self.assertIn('build_attempt: ${{ steps.source.outputs.build_attempt }}', workflow)
+        for job in ("mac-smoke", "windows-smoke", "ready"):
+            section = re.search(r"(?ms)^  " + re.escape(job) + r":\n(.*?)(?=^  [a-z][a-z-]*:\n|\Z)", workflow).group(1)
+            self.assertIn("name: " + reference, section)
+            self.assertNotIn("name: candidate-", section)
+        self.assertIn("'build_run_attempt': os.environ['GITHUB_RUN_ATTEMPT']", workflow)
+        self.assertIn("'verification_run_attempt': os.environ['GITHUB_RUN_ATTEMPT']", workflow)
+        self.assertIn("manifest['build_run_attempt'] == os.environ['BUILD_RUN_ATTEMPT']", workflow)
+        self.assertIn("manifest['candidate_artifact'] == os.environ['CANDIDATE_ARTIFACT']", workflow)
+        # Mock GitHub's successful-build outputs surviving failed-jobs retries.
+        # No workflow, executable, network, or GitHub mutation is run here.
+        for producer_attempt, verification_attempt in ((1, 1), (1, 2), (1, 3), (2, 3)):
+            outputs = {"artifact_name": f"candidate-42-{producer_attempt}",
+                       "build_attempt": str(producer_attempt)}
+            artifact_store = {outputs["artifact_name"]: b"same-immutable-candidate"}
+            for job in ("mac-smoke", "windows-smoke", "ready"):
+                resolved_name = outputs["artifact_name"]
+                self.assertEqual(artifact_store[resolved_name], b"same-immutable-candidate", job)
+            manifest = {"build_run_attempt": outputs["build_attempt"],
+                        "verification_run_attempt": str(verification_attempt)}
+            self.assertEqual(manifest["build_run_attempt"], str(producer_attempt))
+            self.assertEqual(manifest["verification_run_attempt"], str(verification_attempt))
+            if verification_attempt != producer_attempt:
+                self.assertNotIn(f"candidate-42-{verification_attempt}", artifact_store)
+
     def test_config_is_empty_local_and_offline(self):
         text = (TRIAL / "trial-config.yaml").read_text()
         for line in (
             "targets: []", "  host: 127.0.0.1", "  port: 18999",
             "disable_approval: true", "  auto_eval: false", "  feeds: []",
             "gh_path: ./disabled-gh", "claude_path: ./disabled-claude",
-            "codex_path: ./disabled-codex", "  container_path: ./disabled-container",
+            "codex_path: ./disabled-codex", "    container_path: ./disabled-container",
         ):
             self.assertIn(line, text.splitlines())
         self.assertRegex(text, r"rss:\n  enabled: false\n")

@@ -22,6 +22,8 @@ jobs:
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
       version: ${{ steps.source.outputs.version }}
+      artifact_name: ${{ steps.source.outputs.artifact_name }}
+      build_attempt: ${{ steps.source.outputs.build_attempt }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,6 +40,8 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=normal)"
           echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "version=0.0.0-trial.g$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "build_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Full Linux checks and packaging regressions
         run: |
           test -z "$(gofmt -l .)"
@@ -54,6 +58,7 @@ jobs:
       - name: Build tagless snapshot and verify all checksums
         env:
           TRIAL_VERSION: ${{ steps.source.outputs.version }}
+          CANDIDATE_ARTIFACT: ${{ steps.source.outputs.artifact_name }}
         run: |
           goreleaser check
           goreleaser release --snapshot --clean
@@ -87,7 +92,8 @@ jobs:
               'event': os.environ['GITHUB_EVENT_NAME'],
               'workflow_commit': os.environ['GITHUB_WORKFLOW_SHA'],
               'run_id': os.environ['GITHUB_RUN_ID'],
-              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'build_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'candidate_artifact': os.environ['CANDIDATE_ARTIFACT'],
               'run_url': f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
               'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
               'goreleaser_version': 'v2.20.0',
@@ -107,7 +113,7 @@ jobs:
       - name: Stage candidates for native checks, never for user delivery
         uses: actions/upload-artifact@v7
         with:
-          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.source.outputs.artifact_name }}
           path: |
             dist/*.tar.gz
             dist/checksums.txt
@@ -143,7 +149,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/download-artifact@v8
         with:
-          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.artifact_name }}
           path: mac-artifacts
       - name: Native Mac regression and delivered binary smoke
         run: |
@@ -188,7 +194,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/download-artifact@v8
         with:
-          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.artifact_name }}
           path: mac-artifacts
       - name: Preserve Windows checks and smoke delivered amd64 artifact
         shell: powershell
@@ -232,6 +238,8 @@ jobs:
       TRIAL_VERSION: ${{ needs.build.outputs.version }}
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
+      CANDIDATE_ARTIFACT: ${{ needs.build.outputs.artifact_name }}
+      BUILD_RUN_ATTEMPT: ${{ needs.build.outputs.build_attempt }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -239,7 +247,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.artifact_name }}
           path: mac-artifacts
       - name: Assemble verified trial-only artifact
         run: |
@@ -250,6 +258,9 @@ jobs:
           assert manifest['source_commit'] == os.environ['SOURCE_SHA']
           assert manifest['version'] == os.environ['TRIAL_VERSION']
           assert manifest['event'] == 'push'
+          assert manifest['run_id'] == os.environ['GITHUB_RUN_ID']
+          assert manifest['candidate_artifact'] == os.environ['CANDIDATE_ARTIFACT']
+          assert manifest['build_run_attempt'] == os.environ['BUILD_RUN_ATTEMPT']
           goos, arch = os.environ['TARGET_OS'], os.environ['TARGET_ARCH']
           name = f"dependabot-alert-notice_{manifest['version']}_{goos}_{arch}.tar.gz"
           matches = [line.split()[0] for line in (source / 'checksums.txt').read_text().splitlines() if len(line.split()) == 2 and line.split()[1] == name]
@@ -264,6 +275,8 @@ jobs:
               shutil.copyfile(item, target / item.name)
           native = (goos, arch) in {('linux', 'amd64'), ('windows', 'amd64'), ('darwin', 'amd64'), ('darwin', 'arm64')}
           manifest.update({'target_os': goos, 'target_arch': arch, 'archive': name, 'archive_sha256': digest,
+              'verification_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'verification_attempt_scope': 'ready assembly and checksum; native prerequisite jobs may be reused across attempts, see run job records',
               'native_binary_smoke': native, 'smoke_scope': 'isolated launcher --version / --web-url; no DB or network' if native else 'not run; cross-compiled only',
               'full_native_race_tests': goos in ('linux', 'darwin') and native,
               'windows_updater_tests': goos == 'windows' and arch == 'amd64',
