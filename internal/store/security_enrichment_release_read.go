@@ -99,7 +99,10 @@ WHERE (r.connector=? OR r.connector=CAST(? AS BLOB)) AND
 OR EXISTS(SELECT 1 FROM security_enrichment_release_certificates AS c WHERE c.intent_id=r.intent_id OR c.intent_id=CAST(r.intent_id AS BLOB) LIMIT 1)) LIMIT 1) OR
 EXISTS(SELECT 1 FROM security_enrichment_operations AS o
 WHERE (o.connector=? OR o.connector=CAST(? AS BLOB)) AND
-EXISTS(SELECT 1 FROM security_enrichment_release_certificates AS c WHERE c.operation_id=o.operation_id OR c.operation_id=CAST(o.operation_id AS BLOB) LIMIT 1) LIMIT 1)`,
+(EXISTS(SELECT 1 FROM security_enrichment_release_certificates AS c WHERE c.operation_id=o.operation_id OR c.operation_id=CAST(o.operation_id AS BLOB) LIMIT 1)
+OR EXISTS(SELECT 1 FROM security_enrichment_reservations AS r
+WHERE (r.operation_id=o.operation_id OR r.operation_id=CAST(o.operation_id AS BLOB)) AND
+EXISTS(SELECT 1 FROM security_enrichment_release_certificates AS c WHERE c.intent_id=r.intent_id OR c.intent_id=CAST(r.intent_id AS BLOB) LIMIT 1) LIMIT 1)) LIMIT 1)`,
 		connector, connector, connector, connector, connector, connector).Scan(&residual)
 	if err != nil {
 		return false, releaseError(ctx, errReleaseStorage)

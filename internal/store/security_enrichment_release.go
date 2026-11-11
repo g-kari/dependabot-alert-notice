@@ -87,11 +87,16 @@ func (s *Store) ReleaseSecurityEnrichmentOperation(ctx context.Context, request 
 		return empty, releaseError(ctx, errReleaseCorrupt)
 	}
 	c := ack.Certificate
-	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_release_certificates(
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_release_certificates(
 operation_id,intent_id,connector,generation,format_version,reserved_digest,terminal_sequence,
 terminal_previous_digest,terminal_digest,kind,run_id,receipt,certificate_digest,certificate_json)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.OperationID, c.IntentID, c.Connector, c.Generation, c.Version, c.ReservedDigest, c.TerminalSequence,
-		c.TerminalPreviousDigest, c.TerminalDigest, c.Kind, c.RunID, c.Receipt, ack.CertificateDigest, string(payload)); err != nil {
+		c.TerminalPreviousDigest, c.TerminalDigest, c.Kind, c.RunID, c.Receipt, ack.CertificateDigest, string(payload))
+	if err != nil {
+		return empty, releaseError(ctx, errReleaseStorage)
+	}
+	count, err := inserted.RowsAffected()
+	if err != nil || count != 1 {
 		return empty, releaseError(ctx, errReleaseStorage)
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE security_enrichment_source_generations
@@ -101,9 +106,15 @@ WHERE connector=? AND generation=? AND active_operation_id=? AND active_intent_i
 	if err != nil {
 		return empty, releaseError(ctx, errReleaseStorage)
 	}
-	count, err := result.RowsAffected()
+	count, err = result.RowsAffected()
 	if err != nil || count != 1 {
 		return empty, releaseError(ctx, errReleaseConflict)
+	}
+	// Verify the exact post-write pair inside this same transaction before
+	// exposing an Ack. Trigger suppression or mutation cannot mimic a commit.
+	proved, err := releaseStateTx(ctx, tx, p)
+	if err != nil || proved.State != "matched" || !releaseAckEqual(proved.Acknowledgement, ack) {
+		return empty, releaseError(ctx, errReleaseCorrupt)
 	}
 	if err := tx.Commit(); err != nil {
 		return empty, releaseError(ctx, errReleaseStorage)
