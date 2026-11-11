@@ -152,6 +152,12 @@ func checkReservationSources(ctx context.Context, tx *sql.Tx, sources map[string
 		}
 		return nil
 	}
+	// Preflight BOTH sources before materializing any historical payload.
+	for _, connector := range []string{"epss_feed", "kev_feed"} {
+		if err := checkGenerationMetadataTx(ctx, tx, sources[connector]); err != nil {
+			return err
+		}
+	}
 	for _, connector := range []string{"epss_feed", "kev_feed"} {
 		source := sources[connector]
 		var alias bool
@@ -178,10 +184,10 @@ FROM security_enrichment_reservations WHERE connector=? ORDER BY generation DESC
 		if !found || !latest.Valid || latest.Int64 != source.Generation {
 			return reservationError(ctx, errReservationCorrupt)
 		}
+		if err := checkClosedGenerationsTx(ctx, tx, source); err != nil {
+			return err
+		}
 		if source.OperationID == nil {
-			if err := checkIdleReleaseTx(ctx, tx, source); err != nil {
-				return reservationError(ctx, errReservationCorrupt)
-			}
 			continue
 		}
 		if source.IntentID == nil || rejectActiveReleaseCertificateTx(ctx, tx, source) != nil {
@@ -231,7 +237,10 @@ EXISTS(SELECT 1 FROM ingest_runs WHERE connector IN (CAST('epss_feed' AS BLOB),C
 func unboundReservationSource(ctx context.Context, tx *sql.Tx, connector string) (bool, error) {
 	var legacy bool
 	if err := tx.QueryRowContext(ctx, `SELECT
-EXISTS(SELECT 1 FROM ingest_runs WHERE connector=? OR connector=CAST(? AS BLOB) LIMIT 1) OR
+EXISTS(SELECT 1 FROM ingest_runs AS i WHERE (i.connector=? OR i.connector=CAST(? AS BLOB))
+AND NOT EXISTS(SELECT 1 FROM security_enrichment_operations AS o
+JOIN security_enrichment_reservations AS r ON r.operation_id=o.operation_id
+WHERE o.run_id=i.id AND o.connector=i.connector AND r.connector=i.connector) LIMIT 1) OR
 EXISTS(SELECT 1 FROM security_enrichment_operations AS o WHERE (o.connector=? OR o.connector=CAST(? AS BLOB))
 AND NOT EXISTS(SELECT 1 FROM security_enrichment_reservations AS r WHERE r.operation_id=o.operation_id) LIMIT 1) OR
 EXISTS(SELECT 1 FROM security_enrichment_checkpoints AS c WHERE NOT EXISTS

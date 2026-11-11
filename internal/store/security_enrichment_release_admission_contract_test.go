@@ -3,14 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"reflect"
 	"testing"
 )
 
 // This locked follow-up is separate from the reconstructed original contracts.
 // A no-run release has no ingest receipt that could accidentally block Reserve.
-func TestOperationReleaseAdmissionContractNoRunPositiveIdleCannotReserveOrLookMissing(t *testing.T) {
+func TestOperationReleaseAdmissionContractNoRunPositiveIdleCanReserveAfterFullProof(t *testing.T) {
 	for index, source := range []string{"epss", "kev"} {
 		t.Run(source, func(t *testing.T) {
 			db, request, receipt := releaseContractFixture(t, source, "no_run", 4180+index)
@@ -24,18 +23,16 @@ func TestOperationReleaseAdmissionContractNoRunPositiveIdleCannotReserveOrLookMi
 			before := journalSnapshot(t, db, false)
 			next := reservationContractRequest(t, 4190+index, source+"_feed")
 			next.ExpectedGeneration = ack.Certificate.Generation
-			reserved, reserveErr := db.ReserveSecurityEnrichmentOperation(context.Background(), next)
-			if !errors.Is(reserveErr, errReservationConflict) || !reflect.DeepEqual(reserved, SecurityEnrichmentReservationAcknowledgement{}) {
-				t.Fatal("no-run positive idle admitted next generation or exposed acknowledgement")
-			}
 			proof, readErr := db.ReadSecurityEnrichmentReservation(context.Background(), next)
-			if readErr != nil || proof.State != "conflict" || !reflect.DeepEqual(proof.Acknowledgement, SecurityEnrichmentReservationAcknowledgement{}) || proof.HeadSequence != 0 || proof.HeadDigest != "" {
-				t.Fatal("no-run positive idle became a clean missing/admission candidate")
+			if readErr != nil || proof.State != "missing" || !reflect.DeepEqual(proof.Acknowledgement, SecurityEnrichmentReservationAcknowledgement{}) || proof.HeadSequence != 0 || proof.HeadDigest != "" || journalSnapshot(t, db, false) != before {
+				t.Fatal("proved no-run next candidate is not read-only missing")
 			}
+			reservationContractRequire(t, db, next)
 			runs, err = db.QueryIngestRuns(context.Background())
-			if err != nil || len(runs) != 0 || journalSnapshot(t, db, false) != before {
-				t.Fatal("blocked no-run admission changed a table or fabricated a business UUID")
+			if err != nil || len(runs) != 0 {
+				t.Fatal("no-run admission fabricated a business UUID")
 			}
+
 		})
 	}
 }
