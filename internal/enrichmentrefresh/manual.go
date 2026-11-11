@@ -61,6 +61,7 @@ type ManualController struct {
 	operations   map[string]*manualRecord
 	busy         bool
 	preservation PreservationSink
+	recovery     *journalTerminalRecovery
 }
 
 // NewManualController requires explicit Service dependencies without any I/O.
