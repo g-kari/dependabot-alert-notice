@@ -42,32 +42,43 @@ func loopbackHost(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+// localTUIRequestFailure is the shared pure decision used by legacy TUI and the
+// manual JSON API. The bool preserves legacy Cache-Control timing exactly.
+func localTUIRequestFailure(r *http.Request) (string, bool) {
+	remote, _, err := net.SplitHostPort(r.RemoteAddr)
+	host, _, hostErr := net.SplitHostPort(r.Host)
+	if hostErr != nil {
+		host = r.Host
+	}
+	if err != nil || !loopbackHost(remote) || !loopbackHost(host) {
+		return "TUI APIはローカル接続専用です", false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || u.Host != r.Host || u.Scheme != "http" {
+			return "Originが不正です", true
+		}
+	}
+	if r.Method != http.MethodGet {
+		cookie, err := r.Cookie("csrf_token")
+		token := r.Header.Get("X-CSRF-Token")
+		if err != nil || token == "" || cookie.Value == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) != 1 {
+			return "CSRF tokenが必要です", true
+		}
+	}
+	return "", true
+}
+
 func (s *Server) localTUI(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		remote, _, err := net.SplitHostPort(r.RemoteAddr)
-		host, _, hostErr := net.SplitHostPort(r.Host)
-		if hostErr != nil {
-			host = r.Host
+		message, noStore := localTUIRequestFailure(r)
+		if noStore {
+			w.Header().Set("Cache-Control", "no-store")
 		}
-		if err != nil || !loopbackHost(remote) || !loopbackHost(host) {
-			http.Error(w, "TUI APIはローカル接続専用です", 403)
+		if message != "" {
+			http.Error(w, message, http.StatusForbidden)
 			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		if origin := r.Header.Get("Origin"); origin != "" {
-			u, err := url.Parse(origin)
-			if err != nil || u.Host != r.Host || u.Scheme != "http" {
-				http.Error(w, "Originが不正です", 403)
-				return
-			}
-		}
-		if r.Method != http.MethodGet {
-			cookie, err := r.Cookie("csrf_token")
-			token := r.Header.Get("X-CSRF-Token")
-			if err != nil || token == "" || cookie.Value == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) != 1 {
-				http.Error(w, "CSRF tokenが必要です", 403)
-				return
-			}
 		}
 		next(w, r)
 	})

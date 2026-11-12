@@ -15,19 +15,23 @@ import (
 	"sync"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/enrichmentrefresh"
 	"github.com/g-kari/dependabot-alert-notice/internal/feed"
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
 	"github.com/g-kari/dependabot-alert-notice/internal/policy"
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 	"github.com/g-kari/dependabot-alert-notice/internal/risk"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
-	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/v2/parser"
+	"github.com/yuin/goldmark/v2/renderer/html"
 )
 
 //go:embed templates/*.html static/*
 var templateFS embed.FS
 
 type Server struct {
+	manualRefreshMu          sync.RWMutex
+	manualRefreshController  *enrichmentrefresh.ManualController
 	port                     int
 	address                  string
 	store                    *store.Store
@@ -118,7 +122,11 @@ var templateFuncs = template.FuncMap{
 			return ""
 		}
 		var buf bytes.Buffer
-		if err := goldmark.Convert([]byte(s), &buf); err != nil {
+		source := []byte(s)
+		// Keep parser and renderer state local to each request and retain the
+		// default safe renderer: raw HTML and dangerous URLs are not enabled.
+		doc := parser.New().Parse(source)
+		if err := html.New().Render(&buf, source, doc); err != nil {
 			return template.HTML(template.HTMLEscapeString(s))
 		}
 		return template.HTML(buf.String())
@@ -198,6 +206,9 @@ func (s *Server) Handler() http.Handler {
 			if !validCSRF(w, r) {
 				return
 			}
+		}
+		if s.serveManualEnrichmentAPI(w, r) {
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})

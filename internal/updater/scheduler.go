@@ -10,7 +10,7 @@ import (
 // SupportsAutomaticUpdates excludes development builds and unsupported platforms.
 func (u Updater) SupportsAutomaticUpdates() bool {
 	_, err := parseVersion(u.Current)
-	return err == nil && (u.OS == "darwin" || u.OS == "linux") && (u.Arch == "arm64" || u.Arch == "amd64")
+	return err == nil && (u.OS == "darwin" || u.OS == "linux" || u.OS == "windows") && (u.Arch == "arm64" || u.Arch == "amd64")
 }
 
 // Schedule applies releases serially until one is installed or ctx is canceled.

@@ -66,6 +66,14 @@ func parseVersion(version string) ([]string, error) {
 	return parts[1:5], nil
 }
 
+// releaseBinaryName returns the release archive entry name for the target platform.
+func releaseBinaryName(goos string) string {
+	if goos == "windows" {
+		return "dependabot-alert-notice.exe"
+	}
+	return "dependabot-alert-notice"
+}
+
 // Check compares semantic versions and never recommends a downgrade.
 func (u Updater) Check(ctx context.Context) (Result, error) {
 	result := Result{Current: u.Current}
@@ -108,8 +116,8 @@ func (u Updater) Apply(ctx context.Context) (Result, error) {
 	if err != nil || !result.Available {
 		return result, err
 	}
-	if u.OS != "linux" && u.OS != "darwin" {
-		return result, fmt.Errorf("自動置換はMac/Linux対応です。このOSはReleaseから手動更新してください")
+	if u.OS != "linux" && u.OS != "darwin" && u.OS != "windows" {
+		return result, fmt.Errorf("自動置換はMac/Linux/Windows対応です。このOSはReleaseから手動更新してください")
 	}
 	if u.Arch != "amd64" && u.Arch != "arm64" {
 		return result, fmt.Errorf("未対応CPU: %s", u.Arch)
@@ -150,8 +158,12 @@ func (u Updater) Apply(ctx context.Context) (Result, error) {
 	if err := verifyChecksum(dir, asset); err != nil {
 		return result, err
 	}
-	candidate := filepath.Join(dir, "candidate")
-	if err := extractBinary(filepath.Join(dir, asset), candidate); err != nil {
+	candidateName := "candidate"
+	if u.OS == "windows" {
+		candidateName += ".exe"
+	}
+	candidate := filepath.Join(dir, candidateName)
+	if err := extractBinary(filepath.Join(dir, asset), candidate, releaseBinaryName(u.OS)); err != nil {
 		return result, err
 	}
 	if err := os.Chmod(candidate, info.Mode().Perm()&0777); err != nil {
@@ -167,7 +179,7 @@ func (u Updater) Apply(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return result, fmt.Errorf("更新適用中止: %w", err)
 	}
-	if err := os.Rename(candidate, target); err != nil {
+	if err := installBinary(candidate, target); err != nil {
 		return result, fmt.Errorf("更新適用: %w", err)
 	}
 	result.Updated = true
@@ -221,7 +233,7 @@ func verifyChecksum(dir, asset string) error {
 
 const maxBinarySize = 256 << 20
 
-func extractBinary(archive, candidate string) error {
+func extractBinary(archive, candidate, name string) error {
 	file, err := os.Open(archive)
 	if err != nil {
 		return fmt.Errorf("更新アーカイブ読込: %w", err)
@@ -243,7 +255,7 @@ func extractBinary(archive, candidate string) error {
 			return fmt.Errorf("更新tar読込: %w", err)
 		}
 		// Never unpack ancillary files, symlinks or paths from the archive.
-		if header.Name != "dependabot-alert-notice" {
+		if header.Name != name {
 			continue
 		}
 		if found || header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size > maxBinarySize {
