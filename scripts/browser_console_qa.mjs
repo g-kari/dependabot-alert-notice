@@ -1,6 +1,7 @@
 // Opt-in normal-runner QA only. Node 22/24 builtins; no package or browser install.
 // Screenshots are actual CDP responses. Visual review remains a separate gate.
 import assert from 'node:assert/strict';
+import { classifyFailedUDPConnects } from './browser_udp_audit.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -46,18 +47,22 @@ class CDP {
     this.pending=new Map();
     this.listeners=[];
     this.closed=false;
+    this.receivedBytes=0;
+    this.receivedMessages=0;
     output.on('data', b=>this.accept(b));
     output.on('error', e=>this.close(e));
     output.on('end', ()=>this.close(new Error('CDP pipe ended')));
     input.on('error', e=>this.close(e));
   }
   accept(chunk) {
+    this.receivedBytes+=chunk.length;
     try {
       this.buffer=Buffer.concat([this.buffer, chunk]);
       assert(this.buffer.length<=MAX_PACKET, 'CDP packet bound exceeded');
       let end;
       while((end=this.buffer.indexOf(0))>=0) {
         const message=JSON.parse(this.buffer.subarray(0, end).toString('utf8'));
+        this.receivedMessages++;
         this.buffer=this.buffer.subarray(end+1);
         if(Number.isInteger(message.id)) {
           const p=this.pending.get(message.id);
@@ -184,7 +189,8 @@ function literalEndpoint(raw) {
   const linkLocal=family===4?/^169\.254\./.test(bare):first>=0xfe80&&first<=0xfebf;
   return {endpoint:`${host}:${port}`,family,scope:loopback?'loopback':linkLocal?'link_local':'non_loopback'};
 }
-// Diagnostics never authorize transport. V5's UDP/DNS failures remain intact.
+// Bounded diagnostic projection. Any failed-operation classification also
+// validates the original raw event sequence and metadata separately.
 // No raw params/URLs/payload bytes/local IPs enter this bounded projection.
 function udpNetlogDetails(log) {
   const limits=UDP_DETAIL_LIMITS,reasons=new Map(),sources=new Map(),allEdges=new Map(),seeds=new Set();
@@ -356,7 +362,9 @@ function netlogAudit(log, origins, endpoints) {
   for(const name of ['TCP_CONNECT', 'TCP_CONNECT_ATTEMPT', 'SOCKET_BYTES_SENT', 'UDP_CONNECT', 'UDP_BYTES_SENT'])assert(Number.isInteger(types?.[name]), `missing NetLog constant ${name}`);
   assert(Number.isInteger(phases?.PHASE_BEGIN)&&Number.isInteger(phases?.PHASE_END), 'missing NetLog phases');
   const names=new Map(Object.entries(types).map(([k, v])=>[v, k])), sockets=new Set(), attempts=new Map();
+  const udpDetails=udpNetlogDetails(log), failedUDP=classifyFailedUDPConnects(log,udpDetails);
   const report= {
+    failed_udp_connect_operations:failedUDP.operations, failed_udp_classification_reasons:failedUDP.reasons,
     socket_pool_stalls:0, url_attempt_count:0, non_fixture_url_attempt_count:0, non_fixture_url_attempts:[], tcp_endpoint_events:0, tcp_bytes_sent_events:0, udp_events:0, violations:[], scope:'Chromium NetLog socket events; not OS packet capture', url_attempts_are_not_transport_success:true
   };
   const bad=x=> {
@@ -375,14 +383,14 @@ function netlogAudit(log, origins, endpoints) {
       }else if(value&&typeof value==='object')visit(value);
     }
   }
-  for(const event of log.events) {
+  for(const [eventIndex,event] of log.events.entries()) {
     visit(event.params);
     const name=names.get(event.type), params=event.params?? {}, id=event.source?.id;
     if(name==='SOCKET_POOL_STALLED_MAX_SOCKETS_PER_GROUP'||name==='SOCKET_POOL_STALLED_MAX_SOCKETS')report.socket_pool_stalls++;
     if(['TCP_CONNECT', 'TCP_CONNECT_ATTEMPT', 'SOCKET_BYTES_SENT', 'UDP_CONNECT', 'UDP_BYTES_SENT'].includes(name)&&!Number.isInteger(id))bad('transport event source identity missing');
     if(name==='UDP_CONNECT'||name==='UDP_BYTES_SENT'||name?.startsWith('DNS_TRANSACTION')) {
       report.udp_events++;
-      bad(`unexpected ${name}; no UDP/DNS transport permitted`);
+      if(name!=='UDP_CONNECT'||!failedUDP.eventIndexes.has(eventIndex))bad(`unexpected ${name}; no UDP/DNS transport permitted`);
     }
     if(name==='TCP_CONNECT'||name==='TCP_CONNECT_ATTEMPT') {
       const addresses=[];
@@ -408,7 +416,7 @@ function netlogAudit(log, origins, endpoints) {
   }
   if(attempts.size)bad('unfinished TCP attempt; transport outcome unknown');
   if(report.tcp_endpoint_events===0||report.tcp_bytes_sent_events===0)bad('no actual loopback socket traffic evidence');
-  report.udp_diagnostics=udpNetlogDetails(log);
+  report.udp_diagnostics=udpDetails;
   for(const {reason}of report.udp_diagnostics.failure_reasons)bad(`UDP diagnostic incomplete/prohibited: ${reason}`);
   return report;
 }
@@ -476,6 +484,27 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   assert.equal(guarded.udp_events,2);
   assert.equal(guarded.violations.filter(x=>x==='unexpected UDP_CONNECT; no UDP/DNS transport permitted').length,2);
   assert.equal(guarded.udp_diagnostics.details_complete,true);
+  const failedConstants=structuredClone(constants);
+  failedConstants.logSourceType.SOCKET=24;
+  const failedFixture={constants:failedConstants,events:[
+    ...baseLog.events.map(e=>({...e,phase:e.phase??0,source:{...e.source,type:24}})),
+    event(6,1,102,22,{source_dependency:{id:101,type:21}}),
+    event(6,1,101,21,{source_dependency:{id:100,type:20}}),
+    event(7,0,101,21),
+    event(4,1,102,22,{address:'[2001:4860:4860::8888]:443'}),
+    event(4,2,102,22,{net_error:-109}),
+    event(8,0,101,21,{address:'[2001:4860:4860::8888]:443',net_error:-109}),
+    event(6,2,101,21),event(6,2,102,22),
+    event(13,0,100,20,{ipv6_available:false,cached:false})
+  ]};
+  const acceptedFailure=netlogAudit(failedFixture,origins,endpoints);
+  assert.equal(acceptedFailure.failed_udp_connect_operations,1);
+  assert.deepEqual(acceptedFailure.violations,[]);
+  for(const extra of [event(5,0,102,22,{byte_count:0}),event(11,0,102,22,{net_error:-109}),event(14,0,100,20)]) {
+    const rejected=netlogAudit({...failedFixture,events:[...failedFixture.events,extra]},origins,endpoints);
+    assert.equal(rejected.failed_udp_connect_operations,0);
+    assert(rejected.violations.length,'prohibited operation must still reject the complete audit');
+  }
   const failures=input=>udpNetlogDetails(input).failure_reasons.map(r=>r.reason);
   const change=fn=>{const f=structuredClone(fixture);fn(f);return f;};
   const zero=change(f=>f.events.splice(8,0,event(5,0,102,22,{byte_count:0,bytes:'secret-zero'})));
@@ -545,6 +574,9 @@ async function selfTest() {
   output.write('{"id":1,"res');
   output.write('ult":{"product":"synthetic protocol framing only"}}\0');
   assert.equal((await pending).product, 'synthetic protocol framing only');
+  assert(client.receivedBytes>0);
+  assert.equal(client.receivedMessages,1);
+  assert.equal(client.buffer.length,0);
   client.close(new Error('self-test done'));
   assert(allowedOrigin('http://127.0.0.1:123/assets', new Set(['http://127.0.0.1:123'])));
   for(const u of ['https://example.invalid', 'http://localhost:123', 'http://127.0.0.1:124', 'file:///tmp/x', 'data:text/html,x', 'http://user:secret@127.0.0.1:123'])assert(!allowedOrigin(u, new Set(['http://127.0.0.1:123'])));
@@ -719,6 +751,7 @@ async function main() {
   }, manifest= {
     synthetic:true, visual_review:'pending', metadata:fixture.metadata, as_of:fixture.as_of, images:[]
   };
+  let chromeStartedAt;
   let imageBytes=0, chrome, client, proxy, watchdog, chromeStderrBytes=0, fatal, exitCode, exitSignal, spawnError, proxyOrigin;
   let chromeParentCleanup= {
     parent_exit_observed:false, descendants:'unknown; see stability.json'
@@ -973,6 +1006,8 @@ async function main() {
     const flags=['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-extensions', '--disable-breakpad', '--disable-quic', '--no-first-run', '--no-default-browser-check', `--proxy-server=http://127.0.0.1:${proxy.address().port}`, `--proxy-bypass-list=${policy.bypass}`, `--host-resolver-rules=${policy.resolver}`, `--log-net-log=${netlog}`, '--net-log-capture-mode=Default', 'about:blank'];
     assert(!flags.some(s=>/^--(no-sandbox|disable-setuid-sandbox|disable-web-security|ignore-certificate-errors)/.test(s)), 'unsafe browser flag');
     const chromeEnv=Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'].filter(k=>process.env[k]!==undefined).map(k=>[k, process.env[k]]));
+    chromeStartedAt=performance.now();
+    checks.startup={chrome_binary:path.basename(args['--chrome']),cdp_command_timeout_ms:10000};
     chrome=spawn(args['--chrome'], flags, {
       stdio:['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], env:chromeEnv
     });
@@ -1101,6 +1136,7 @@ async function main() {
       }
     });
     checks.browser=await client.call('Browser.getVersion');
+    checks.startup.handshake_elapsed_ms=Math.round(performance.now()-chromeStartedAt);
     checks.cdp_pipe_handshake=true;
     manifest.browser=checks.browser;
     checks.node=process.version;
@@ -1158,10 +1194,16 @@ async function main() {
     }
   }catch(e) {
     fatal=e;
+    if(!checks.cdp_pipe_handshake&&chromeStartedAt!==undefined)checks.startup={
+      ...checks.startup,failed_after_ms:Math.round(performance.now()-chromeStartedAt),
+      received_bytes:client?.receivedBytes??0,received_messages:client?.receivedMessages??0,
+      buffered_bytes:client?.buffer.length??0,sent_commands:client?.next??0,
+      chrome_stderr_bytes:chromeStderrBytes
+    };
     checks.error=scrubNetworkText(e.stack??e).slice(0, 16384);
     // Preserve decisive bounded evidence in the job log even after artifacts expire.
     console.error('FAIL browser navigation diagnostics',JSON.stringify({
-      error:checks.error,events:checks.navigation_events,violations:checks.violations
+      error:checks.error,startup:checks.startup,events:checks.navigation_events,violations:checks.violations
     }));
   } finally {
     clearTimeout(watchdog);

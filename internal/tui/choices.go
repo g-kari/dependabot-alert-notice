@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-isatty"
 	"gopkg.in/yaml.v3"
@@ -35,7 +35,7 @@ func (m choiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch key := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = key.Width, key.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch key.String() {
 		case "ctrl+c", "ctrl+d":
 			m.done, m.interrupted = true, true
@@ -82,9 +82,9 @@ func (m choiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.done, m.value = true, value
 				return m, tea.Quit
 			}
-			if key.Type == tea.KeyRunes {
-				numeric := len(key.Runes) > 0
-				for _, r := range key.Runes {
+			if key.Text != "" {
+				numeric := len(key.Text) > 0
+				for _, r := range key.Text {
 					if r < '0' || r > '9' {
 						numeric = false
 					}
@@ -97,9 +97,9 @@ func (m choiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-func (m choiceModel) View() string {
+func (m choiceModel) View() tea.View {
 	if m.done {
-		return ""
+		return tea.NewView("")
 	}
 	var b strings.Builder
 	width := max(12, m.width-2)
@@ -117,7 +117,7 @@ func (m choiceModel) View() string {
 	fmt.Fprintf(&b, "\n%d–%d / %d件\n", start+1, end, len(m.options))
 	b.WriteString(ansi.Truncate("↑/↓ または j/k: 移動  Enter: 選択  Esc: 戻る", width, "…"))
 	fmt.Fprintf(&b, "\n番号+Enter: %s\n", m.digits)
-	return b.String()
+	return tea.NewView(b.String())
 }
 func (t *terminal) interactive() bool {
 	in, ok := t.reader.(*os.File)

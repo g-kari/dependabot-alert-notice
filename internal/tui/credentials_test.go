@@ -10,24 +10,24 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/g-kari/dependabot-alert-notice/internal/control"
 )
 
 func TestSecretInputNeverRendersValueAndCancels(t *testing.T) {
-	for _, key := range []tea.KeyType{tea.KeyEnter, tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlD} {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEsc}, {Code: 'c', Mod: tea.ModCtrl}, {Code: 'd', Mod: tea.ModCtrl}} {
 		model := secretInputModel{label: "Slack token"}
-		next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("xoxb-private-fixture")})
+		next, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "xoxb-private-fixture"})
 		model = next.(secretInputModel)
-		if strings.Contains(model.View(), "private") || strings.Contains(model.View(), "xoxb") {
+		if strings.Contains(model.View().Content, "private") || strings.Contains(model.View().Content, "xoxb") {
 			t.Fatal("secret rendered")
 		}
-		next, _ = model.Update(tea.KeyMsg{Type: key})
+		next, _ = model.Update(key)
 		model = next.(secretInputModel)
 		if !model.done {
 			t.Fatal("not finished")
 		}
-		if key == tea.KeyEnter {
+		if key.Code == tea.KeyEnter {
 			if string(model.value) != "xoxb-private-fixture" {
 				t.Fatal("input lost")
 			}
@@ -147,6 +147,55 @@ func TestCredentialsDeclineBlankDisableAndInherit(t *testing.T) {
 			}
 			if strings.Contains(out.String(), "private-fixture") {
 				t.Fatal("secret displayed")
+			}
+		})
+	}
+}
+
+func TestSecretInputV2PasteValidationAndEditing(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		text    string
+		invalid bool
+	}{
+		{"token", "xoxb-private-fixture", false},
+		{"space", "private fixture", true},
+		{"newline", "private\nfixture", true},
+		{"escape", "private\x1bfixture", true},
+		{"unicode", "秘密", true},
+		{"too long", strings.Repeat("x", 4097), true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model := secretInputModel{label: "Token"}
+			next, _ := model.Update(tea.PasteMsg{Content: tt.text})
+			model = next.(secretInputModel)
+			if model.invalid != tt.invalid || len(model.value) > 4096 || model.done {
+				t.Fatalf("paste validation: invalid=%t length=%d done=%t", model.invalid, len(model.value), model.done)
+			}
+			if strings.Contains(model.View().Content, "private") {
+				t.Fatal("paste rendered secret")
+			}
+			before := len(model.value)
+			next, _ = model.Update(tea.KeyReleaseMsg{Code: tea.KeyEnter})
+			model = next.(secretInputModel)
+			if model.done || len(model.value) != before {
+				t.Fatal("key release changed input")
+			}
+			next, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+			model = next.(secretInputModel)
+			if len(model.value) != max(0, before-1) {
+				t.Fatal("backspace did not remove one character")
+			}
+			buffer := model.value
+			next, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+			model = next.(secretInputModel)
+			if !model.cancelled || len(model.value) != 0 {
+				t.Fatal("cancel retained pasted secret")
+			}
+			for _, r := range buffer {
+				if r != 0 {
+					t.Fatal("cancel did not clear backing buffer")
+				}
 			}
 		})
 	}

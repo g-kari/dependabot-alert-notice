@@ -29,6 +29,10 @@ jobs:
         run: go test ./... -race -count=1
       - name: Build
         run: go build ./...
+      - name: Verify browser UDP audit
+        run: |
+          node scripts/test_browser_udp_audit.mjs
+          node scripts/browser_console_qa.mjs --self-test
       - name: Verify log stream lifecycle
         run: node scripts/test_log_stream_lifecycle.mjs
       - name: Verify Mac packaging helpers
