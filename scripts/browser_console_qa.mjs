@@ -586,6 +586,17 @@ function focusLegacyDangerDisclosure(doc=document) {
   summary.focus();
   return true;
 }
+// Real-page checks for sibling content that may overlap without main overflow.
+function responsiveLayoutIssues(doc=document) {
+  const issues=[];
+  const pairs=[['.finding-source-mix li','span','meter','source-label-meter'],['.cve-summary','.cve-summary-main','.cve-summary-meta','cve-summary-controls']];
+  for(const [root,left,right,label]of pairs)for(const el of [...doc.querySelectorAll(root)].slice(0,32)) {
+    const a=el.querySelector(left)?.getBoundingClientRect(),b=el.querySelector(right)?.getBoundingClientRect();
+    if(!a||!b){issues.push(label+'-missing');continue;}
+    if(Math.min(a.right,b.right)-Math.max(a.left,b.left)>1&&Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1)issues.push(label+'-overlap');
+  }
+  return issues;
+}
 function shouldCapture(info,viewport) {
   return info.screenshot||(info.name==='legacy-reports'&&viewport.name==='mobile');
 }
@@ -597,6 +608,11 @@ function checkCaptureBudget(cases) {
   return count;
 }
 async function selfTest() {
+  const rect=(left,top,right,bottom)=>({getBoundingClientRect:()=>({left,top,right,bottom})});
+  const layoutDoc=(a,b)=>({querySelectorAll:selector=>selector==='.finding-source-mix li'?[{querySelector:s=>s==='span'?a:b}]:[]});
+  assert.deepEqual(responsiveLayoutIssues(layoutDoc(rect(0,0,100,20),rect(50,0,150,20))),['source-label-meter-overlap']);
+  assert.deepEqual(responsiveLayoutIssues(layoutDoc(rect(0,0,100,20),rect(0,30,100,40))),[]);
+
   const captureCases=Array.from({length:14},(_,i)=>({name:`original-${i}`,screenshot:true}));
   captureCases.push({name:'legacy-reports',screenshot:false},{name:'empty-findings',screenshot:false});
   assert.equal(checkCaptureBudget(captureCases),29);
@@ -926,6 +942,11 @@ async function main() {
     assert.deepEqual(data.duplicateIds, [], 'duplicate DOM IDs');
     assert.deepEqual(data.missingRefs, [], 'broken ARIA reference');
     assert.equal(data.overflow, false, 'main body horizontally overflows');
+    if(viewport.mobile) {
+      const issues=await ev(session,`(${responsiveLayoutIssues.toString()})()`);
+      checks.cases.at(-1).responsive_layout_issues=issues;
+      assert.deepEqual(issues,[],'mobile labels or controls overlap');
+    }
     assert(data.reduced, 'reduced-motion override absent');
     assert.deepEqual(data.current, info.nav?[info.nav]:[], 'selected navigation mismatch');
     if(info.native) {
@@ -963,7 +984,8 @@ async function main() {
     await navigate(session, base+'/assets');
     await key(session, 'Tab', 'Tab', 9);
     assert(await ev(session, "document.activeElement.classList.contains('finding-skip')"), 'first Tab did not reach skip link');
-    const focus=await ev(session, "(()=>{const s=getComputedStyle(document.activeElement),r=document.activeElement.getBoundingClientRect();return{style:s.outlineStyle,width:parseFloat(s.outlineWidth),visible:r.top>=0&&r.bottom<=innerHeight}})()");
+    const focus=await ev(session, "(()=>{const el=document.activeElement,s=getComputedStyle(el),r=el.getBoundingClientRect();return{style:s.outlineStyle,width:parseFloat(s.outlineWidth),visible:r.top>=0&&r.bottom<=innerHeight,focus:el.matches(':focus'),focus_visible:el.matches(':focus-visible'),top:r.top,bottom:r.bottom,viewport_height:innerHeight}})()");
+    checks.flows.push({check:'skip-link keyboard focus',viewport:viewport.name,...focus});
     assert(focus.style!=='none'&&focus.width>=2&&focus.visible, 'keyboard focus is not visible');
     await key(session, 'Tab', 'Tab', 9);
     await key(session, 'Tab', 'Tab', 9, 8);

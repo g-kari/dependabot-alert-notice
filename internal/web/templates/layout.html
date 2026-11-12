@@ -512,7 +512,7 @@
       color-scheme: dark;
     }
     .finding-skip { position: fixed; left: 16px; top: -100px; z-index: 200; padding: 12px; color: var(--color-text); background: var(--color-surface); }
-    .finding-skip:focus { top: 12px; }
+    .finding-skip:focus { top: 12px; outline: 3px solid var(--color-accent); outline-offset: 2px; }
     .finding-sidebar { position: fixed; inset: 0 auto 0 0; width: 236px; padding: 28px 16px 20px; display: flex; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--finding-sidebar); overflow-y: auto; }
     .finding-brand { display: flex; align-items: center; gap: 12px; margin: 0 10px 42px; color: var(--color-text); font-size: 1.15rem; font-weight: 700; line-height: 1.4; }
     .finding-brand:hover { text-decoration: none; }
@@ -637,6 +637,13 @@
       .finding-item { grid-template-columns: 1fr; gap: 14px; }
       .finding-row-states { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .finding-page-heading { gap: 12px; }
+      .finding-page-heading > .badge { flex-shrink: 0; white-space: nowrap; }
+      .finding-source-mix li { grid-template-columns: minmax(0, 1fr) auto; }
+      .finding-source-mix li > span { grid-column: 1 / -1; overflow-wrap: anywhere; }
+      .cve-summary { flex-direction: column; align-items: stretch; }
+      .cve-summary-main { flex-wrap: wrap; }
+      .cve-summary-meta { align-self: flex-end; }
+      .cve-pkg, .cve-desc { white-space: normal; overflow-wrap: anywhere; }
     }
     @media (max-width: 440px) {
       .finding-filter-grid { grid-template-columns: 1fr; }
