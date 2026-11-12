@@ -109,6 +109,30 @@ class CDP {
     this.pending.clear();
   }
 }
+// Track only CDP interception decisions, never the lifetime of an SSE response.
+// A drain settles decisions already observed (including arrivals while draining),
+// not a promise that the page cannot start a later request. All errors stay fatal.
+class FetchDecisions {
+  constructor(onError) {
+    this.pending=new Set();
+    this.onError=onError;
+  }
+  track(operation, metadata) {
+    const pending=Promise.resolve().then(operation).catch(error=>this.onError(error,metadata)).finally(()=>this.pending.delete(pending));
+    this.pending.add(pending);
+  }
+  async drain(timeout=10000) {
+    let timer;
+    const expired=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Fetch decision drain deadline exceeded')),timeout);});
+    try {
+      await Promise.race([(async()=>{
+        while(this.pending.size)await Promise.all([...this.pending]);
+      })(),expired]);
+    }finally {
+      clearTimeout(timer);
+    }
+  }
+}
 function rgb(text) {
   let m=text.match(/^rgba?\(([^)]+)\)$/);
   if(m) {
@@ -650,6 +674,31 @@ function checkCaptureBudget(cases) {
   return count;
 }
 async function selfTest() {
+  const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+  const failures=[],decisions=new FetchDecisions((error,metadata)=>failures.push({error:error.message,...metadata}));
+  const first=deferred(),second=deferred();
+  decisions.track(()=>first.promise,{safe:true});
+  let closed=false;
+  const teardown=decisions.drain().then(()=>{closed=true;});
+  await delay(0);
+  assert.equal(closed,false,'teardown raced an outstanding continuation');
+  decisions.track(()=>second.promise,{safe:false});
+  first.resolve();
+  await delay(0);
+  assert.equal(closed,false,'drain missed a decision arriving during settlement');
+  second.reject(new Error('unsafe request blocking failed'));
+  await teardown;
+  assert.deepEqual(failures,[{error:'unsafe request blocking failed',safe:false}]);
+  decisions.track(()=>Promise.reject(new Error('Invalid InterceptionId.')),{safe:true});
+  await decisions.drain();
+  assert.equal(failures.at(-1).error,'Invalid InterceptionId.','safe continuation errors must not be waived');
+  const hung=deferred();
+  decisions.track(()=>hung.promise,{safe:true});
+  await assert.rejects(decisions.drain(5),/deadline/);
+  assert.equal(decisions.pending.size,1,'deadline must not discard pending decisions');
+  hung.resolve();
+  await decisions.drain();
+
   const focusDoc={activeElement:{matches:()=>true,getBoundingClientRect:()=>({top:-100,bottom:-53})},documentElement:{clientHeight:844}};
   const focusWindow={getComputedStyle:()=>({outlineStyle:'solid',outlineWidth:'3px',top:'12px',position:'fixed',transform:'none'}),innerHeight:844,scrollX:0,scrollY:0,visualViewport:{offsetTop:0,pageTop:0,height:844,scale:1}};
   assert.equal(skipFocusState(focusDoc,focusWindow).visible,false);
@@ -875,6 +924,13 @@ async function main() {
   const violation=text=> {
     if(checks.violations.length<32)checks.violations.push(String(text).slice(0, 512));
   };
+  const fetchDecisions=new FetchDecisions((error,metadata)=>{
+    violation(error.message);
+    checks.fetch_decision_failures??=[];
+    if(checks.fetch_decision_failures.length<16)checks.fetch_decision_failures.push({
+      ...metadata,error:scrubNetworkText(error.message).slice(0,512)
+    });
+  });
   async function writeJSON(name, value) {
     const bytes=Buffer.from(JSON.stringify(value, null, 2)+'\n');
     assert(bytes.length<=256*1024, 'JSON evidence too large');
@@ -902,6 +958,7 @@ async function main() {
     await ev(session, "(async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true})()");
   }
   async function reload(session, url) {
+    await fetchDecisions.drain();
     const prior=documents.get(session)?.loader;
     await client.call('Page.reload', {}, session);
     const deadline=Date.now()+10000;
@@ -911,6 +968,7 @@ async function main() {
   }
   async function navigate(session, url, status=200) {
     assert(allowedOrigin(url, origins), 'navigation escaped loopback');
+    await fetchDecisions.drain();
     navigationDiagnostic(checks.navigation_events,'navigate-start',{url,status});
     const r=await client.call('Page.navigate', {
       url
@@ -922,6 +980,7 @@ async function main() {
     navigationDiagnostic(checks.navigation_events,'navigate-ready',{url,status});
   }
   async function key(session, key, code, number, modifiers=0) {
+    if(key==='Enter')await fetchDecisions.drain();
     for(const type of ['keyDown', 'keyUp'])await client.call('Input.dispatchKeyEvent', {
       type, key, code, windowsVirtualKeyCode:number, nativeVirtualKeyCode:number, modifiers, ...(key==='Enter'&&type==='keyDown'? {
         text:'\r', unmodifiedText:'\r'
@@ -1059,6 +1118,7 @@ async function main() {
     assert(new URL(selected).pathname.startsWith('/assets/'));
     let history=await client.call('Page.getNavigationHistory', {}, session);
     assert(history.currentIndex>0);
+    await fetchDecisions.drain();
     await client.call('Page.navigateToHistoryEntry', {
       entryId:history.entries[history.currentIndex-1].id
     }, session);
@@ -1067,6 +1127,7 @@ async function main() {
     assert.equal(await ev(session, "new URL(location.href).searchParams.get('q')"), 'browser');
     history=await client.call('Page.getNavigationHistory', {}, session);
     assert(history.currentIndex+1<history.entries.length);
+    await fetchDecisions.drain();
     await client.call('Page.navigateToHistoryEntry', {
       entryId:history.entries[history.currentIndex+1].id
     }, session);
@@ -1090,6 +1151,7 @@ async function main() {
     await navigate(session, base+'/assets');
     const legacyHistory=await client.call('Page.getNavigationHistory', {}, session);
     assert(legacyHistory.currentIndex>0);
+    await fetchDecisions.drain();
     await client.call('Page.navigateToHistoryEntry', {
       entryId:legacyHistory.entries[legacyHistory.currentIndex-1].id
     }, session);
@@ -1229,14 +1291,22 @@ async function main() {
         });
         const safe=(request.url==='about:blank'||allowedOrigin(request.url, origins))&&['GET', 'HEAD'].includes(request.method);
         if(!safe)violation(`blocked off-origin/action page request ${request.method} ${networkLabel(request.url)}`);
-        client.call(safe?'Fetch.continueRequest':'Fetch.failRequest', safe? {
+        fetchDecisions.track(()=>client.call(safe?'Fetch.continueRequest':'Fetch.failRequest', safe? {
           requestId
         }
         : {
           requestId, errorReason:'BlockedByClient'
         }, message.sessionId).then(()=>{
           if(message.params.resourceType==='Document')navigationDiagnostic(checks.navigation_events,safe?'document-continued':'document-blocked',{url:request.url});
-        }).catch(e=>violation(e.message));
+        }),{
+          safe,method:['GET','HEAD'].includes(request.method)?request.method:'other',
+          resource_type:['Document','Stylesheet','Image','Media','Font','Script','TextTrack','XHR','Fetch','Prefetch','EventSource','WebSocket','Manifest','SignedExchange','Ping','CSPViolationReport','Preflight','Other'].includes(message.params.resourceType)?message.params.resourceType:'unknown',
+          session:sha256(String(message.sessionId)).slice(0,16),
+          interception:sha256(String(requestId)).slice(0,16),
+          network_request:message.params.networkId?sha256(String(message.params.networkId)).slice(0,16):null,
+          url:networkLabel(request.url).slice(0,256),
+          response_stage:Number.isInteger(message.params.responseStatusCode)
+        });
       }else if(message.method==='Network.requestWillBeSent') {
         const request=message.params.request;
         if(request.url==='about:blank')return;
@@ -1319,6 +1389,7 @@ async function main() {
         assert.equal(checks.violations.length, 0, 'offline/browser guard violation');
       }
       await flows(session, viewport);
+      await fetchDecisions.drain();
       await client.call('Target.closeTarget', {
         targetId
       });
@@ -1339,6 +1410,7 @@ async function main() {
   } finally {
     clearTimeout(watchdog);
     if(chrome&&!spawnError) {
+      try { await fetchDecisions.drain(); } catch(e) { violation(e.message); }
       chromeParentCleanup=await stopChromeParent(chrome, async()=> {
         try {
           await client?.call('Browser.close');
