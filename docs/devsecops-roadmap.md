@@ -1,6 +1,6 @@
 # DevSecOps Console: 全体仕様と実装ロードマップ
 
-基準日: 2026-11-09。対象リポジトリ: [g-kari/devsecops-console](https://github.com/g-kari/devsecops-console)。コードの到達点は native Findings UI の PR #47、GitHub credential context の PR #48、記録済み収集状態 API の PR #49 を含む main `f88b89c63d8a613926eb4f9a8170bbc256f84f61` のスナップショット。
+基準日: 2026-11-12。対象リポジトリ: [g-kari/devsecops-console](https://github.com/g-kari/devsecops-console)。コードの到達点は Overview/Assets の PR #53、更新保存層の PR #70–76、同一 controller 内の限定復旧の PR #77、品質 gate の PR #81、GoReleaser 契約修復の PR #83 を含む main `a6d5e18710bca70a842dc23aaf6904c512c06448` のスナップショット。マージ済みコード、個別の検証結果、正式リリースへの収録は別に確認する。
 
 本書は [アーキテクチャ設計 v1.0 のロードマップ](https://devsecops-architecture-ggg.mail590137.chatgpt.site/#roadmap) を、実装済みの範囲と残る製品要件に分けた仕様である。画面統合と GitHub 接続認証は全体の一部であり、それだけで DevSecOps 対応の完了とはしない。以降の「必要」「合格条件」は未実装部分の要求を含む。予定の API 名や状態は、既存契約と区別して記す。
 
@@ -32,11 +32,19 @@
 | Phase 1 証拠と関連付け | [PR #30](https://github.com/g-kari/devsecops-console/pull/30): EPSS/KEV オフライン証拠と manifest・鮮度。[PR #31](https://github.com/g-kari/devsecops-console/pull/31): source/native ID 投影、literal 検索、厳密 CVE、same-CVE related API。 | 共通 Finding の継続 feed 更新や永続優先度再評価ではない。legacy risk は変更していない。 |
 | 共通優先度の参考試算 | [PR #36](https://github.com/g-kari/devsecops-console/pull/36): 既存モデルへの pure adapter。[PR #37](https://github.com/g-kari/devsecops-console/pull/37): bounded base input。[PR #38](https://github.com/g-kari/devsecops-console/pull/38): 明示的 profile binding。[PR #39](https://github.com/g-kari/devsecops-console/pull/39): bounded CVE assessment input。[PR #41](https://github.com/g-kari/devsecops-console/pull/41): stdin-only offline CLI。 | profile/assessment の自動選択、共通スコアの保存、期限作成、通知は行わない。 |
 | 共通優先度 API | [PR #42](https://github.com/g-kari/devsecops-console/pull/42): 明示的 `as_of` の GET-only priority-preview と CLI 再現用 snapshot。 | 現在の DB snapshot を指定時刻で評価する。過去 DB の再構成ではない。API では profile/assessment/CVSS を推定・選択しない。 |
-| native UI の第 1 工程 | [PR #47](https://github.com/g-kari/devsecops-console/pull/47): `/findings` 一覧・詳細、既存 API と共通の検証、同一 CVE 関連、EPSS/KEV、参考試算への導線。詳細は [native Findings Console](native-findings-console.md)。 | 全画面の統一、Overview/Assets の完成、Web 認証、共通変更操作は含まない。ページ内件数は全体集計ではない。PR CI と当該 merge の事後 CI は成功しているが、実ブラウザーの desktop/mobile 表示確認は別である。 |
+| native UI の第 1 工程 | [PR #47](https://github.com/g-kari/devsecops-console/pull/47): `/findings` 一覧・詳細、既存 API と共通の検証、同一 CVE 関連、EPSS/KEV、参考試算への導線。詳細は [native Findings Console](native-findings-console.md)。 | 全画面の統一、Overview/Assets の完成、Web 認証、共通変更操作は含まない。ページ内件数は全体集計ではない。PR CI と当該 merge の事後 CI は成功。後続 PR #53 の画面統合と実ブラウザー検証は native 画面統合の行に分けて記録する。 |
 | GitHub credential context | [PR #48](https://github.com/g-kari/devsecops-console/pull/48): 明示的な GitHub 認証 context と共有 command runner のコード統合。 | 最終 head の全体 CI とレビューを確認してマージ済み。[事後 CI](https://github.com/g-kari/devsecops-console/actions/runs/42664337692) も実 merge commit で format/vet/race/build/Mac helper が成功。実アカウントでの認証設定は有効化しておらず、ライブ接続や Web 利用者認証の確認ではない。legacy `inherited` mode は対話 CLI の認証依存を維持し、分離を保証しない。 |
 | 記録済み収集状態/coverage | [PR #49](https://github.com/g-kari/devsecops-console/pull/49): 明示的 `as_of`、厳密な source/scope と bounded query/page による GET-only 読み取り。最新の記録済み試行と最後の成功 receipt を分離する。詳細は [connector status 契約](security-connector-status.md)。 | 最終 head の全体 CI と実 merge の [事後 CI](https://github.com/g-kari/devsecops-console/actions/runs/42677991408) で format/vet/race/build/Mac helper が成功。設定 scope/inventory、全試行履歴、生存監視は未実装で、asset 母数も unknown/null。変更操作、認証、新規 feed は追加しない。 |
+| native 画面統合 | [PR #53](https://github.com/g-kari/devsecops-console/pull/53): Overview、Assets 一覧/詳細、記録済み Integrations と共通 shell、履歴移動後の SSE 復帰。 | 実 Chrome 32 ケース・10 フロー・29 画像を確認し、実 merge の [Check](https://github.com/g-kari/devsecops-console/actions/runs/43188786770) / [Trial](https://github.com/g-kari/devsecops-console/actions/runs/43188786584) が成功。captured viewport 外の全描画、ユーザー端末、実運用有効化は未確認。設定母数・生存監視は unknown のまま。 |
+| 共通 enrichment の限定経路 | [PR #56](https://github.com/g-kari/devsecops-console/pull/56)〜[#69](https://github.com/g-kari/devsecops-console/pull/69): receipt・合成 refresh・明示的な手動操作、journal/checkpoint と保持 operation/reservation 証拠。詳細は [refresh](security-enrichment-refresh.md)、[journal adapter](security-enrichment-journal-adapter.md)、[reservation](security-enrichment-operation-reservation.md)。 | 個別 slice の opt-in・保持要求・上限を維持する。共通 Finding のライブ継続収集、再起動をまたぐ実行所有権、運用 DB への適用ではない。 |
+| 世代付き書込みと旧入口 guard | [PR #70](https://github.com/g-kari/devsecops-console/pull/70)、[#71](https://github.com/g-kari/devsecops-console/pull/71)、[#72](https://github.com/g-kari/devsecops-console/pull/72): 明示的 fenced write と採用済み feed の旧 6 入口の防御。 | コード・合成回帰・統合まで完了。旧 binary 混在やあらゆる SQL 書込みの防御を保証しない。controller 接続は残る。 |
+| 証拠付き予約解除と次世代受付 | [PR #73](https://github.com/g-kari/devsecops-console/pull/73)、[#74](https://github.com/g-kari/devsecops-console/pull/74)、[#76](https://github.com/g-kari/devsecops-console/pull/76): 同一 transaction の certificate/CAS と保持履歴・業務証拠の再検証。詳細は [atomic release](security-enrichment-atomic-release.md)。 | #74 の [事後 CI](https://github.com/g-kari/devsecops-console/actions/runs/43007002373)、#76 の [Check](https://github.com/g-kari/devsecops-console/actions/runs/43071386607) / [Trial](https://github.com/g-kari/devsecops-console/actions/runs/43071386702) が成功。source ごとの生涯上限 H=4 は試験的な上限で、運用容量・retention の保証ではない。 |
+| 同一 controller 内の限定復旧 | [PR #77](https://github.com/g-kari/devsecops-console/pull/77): 保持した terminal checkpoint の acknowledgement が不明な場合の明示的な読取照合。 | [事後 Check](https://github.com/g-kari/devsecops-console/actions/runs/43079548036) / [Trial](https://github.com/g-kari/devsecops-console/actions/runs/43079548185) 成功。同じ controller の存続期間内に限る。fetch/書込み再試行、新 reservation、durable release、fenced controller 接続、再起動復旧、runtime/UI caller 接続は行わない。 |
+| 配布と品質 gate | [PR #54](https://github.com/g-kari/devsecops-console/pull/54) の Windows 常駐更新、[#75](https://github.com/g-kari/devsecops-console/pull/75) の tagless Trial、[#78](https://github.com/g-kari/devsecops-console/pull/78) の正式公開準備、[#81](https://github.com/g-kari/devsecops-console/pull/81) の lint/govulncheck/coverage/license gate。 | [v0.4.0](https://github.com/g-kari/devsecops-console/releases/tag/v0.4.0) は 2026-11-12 01:41 UTC に公開。後続 main 全変更の収録や各時点の CI 成功を意味しない。#81 は既存 lint 63 件を別課題として残し、PR では新規指摘のみをブロックする。 |
 
-残る主要要件は、設定 scope/inventory・全試行履歴の記録契約・生存監視を含む収集状態/coverage の拡張、GitHub の継続収集、Trivy CI 経路、共通 enrichment と保存評価、全体 UI、Web 認証/RBAC、共通調査・対応・通知・SLA、AWS/WAF/SBOM、傾向分析、復旧・運用である。GitHub credential context のコード統合はこれらの完了を意味しない。未マージの候補実装をこの表の実装済みに含めない。
+残る主要要件は、設定 scope/inventory・全試行履歴・生存監視、GitHub 継続収集、Trivy CI 経路、共通 enrichment の予約付き controller 接続と継続実行、保存評価と根拠 UI、Web 認証/RBAC、共通調査・対応・通知・SLA、AWS/WAF/SBOM、傾向分析、復旧・運用である。画面統合や保存層の完了を製品全体の完了としない。新しい読取中心の機能案は第 5.6 節に記す。
+
+未マージの候補は上表に含めない。[PR #83](https://github.com/g-kari/devsecops-console/pull/83) の GoReleaser pin/provenance と契約テストの修復は基準 main に統合済み。旧 main の固定 version テスト失敗を引き継いだままとは扱わず、統合後の [Check](https://github.com/g-kari/devsecops-console/actions/runs/43223772505) / [Trial](https://github.com/g-kari/devsecops-console/actions/runs/43223772623) はこのスナップショットでは検証中として区別する。[PR #82](https://github.com/g-kari/devsecops-console/pull/82) の Go 更新と後続正式公開は既存の担当工程で、文書更新から重複着手しない。正式公開は最終 source の CI、tag、公開済み Release、成果物・checksum・version の一致を個別に確認する。
 
 ## 2. 互換性と既存機能の再利用
 
@@ -151,7 +159,7 @@ Dependabot の既存収集を維持した上で Code Scanning / secret-free Secr
 
 ### 5.5 Overview / Assets / 優先度表示と画面統合
 
-native Findings 一覧・詳細を土台に、同一アプリの navigation、theme、object vocabulary を統一する。既存 Alerts、評価、設定、ログ、RSS、TUI を壊さず段階移行する。
+PR #53 で native Overview/Assets/記録済み Integrations と共通 shell を統合し、既存画面の回帰と、記録された実 Chrome 32 ケース・撮影範囲の表示を確認した。以下は表示要件の全体像であり、個々の指標まで全て実装済みという意味ではない。未実装の期限・実 coverage・根拠 UI はデモ値で補わず、既存 Alerts、評価、設定、ログ、RSS、TUI の契約を保って追加する。
 
 - Overview は open/critical/KEV/期限超過、source 別件数、同期状態と coverage、直近重大イベントを共通 filter scope と集計時刻付きで示す。page-only count と全体 count を明確に分ける。
 - Assets は provider/account/region、repository/artifact、環境・重要性、検出元、最終観測を検索できる。Finding 一覧との行き来で filter を維持する。未管理資産と未検査資産を区別する。
@@ -162,6 +170,36 @@ native Findings 一覧・詳細を土台に、同一アプリの navigation、th
 合格条件: 同じ合成 DB に対し Overview の母数、Assets の内訳、Findings の検索結果が一致する。フィルター・paging・Back/Forward・再読込・無効 ID・履歴打切り・長い証拠・空状態を確認し、desktop/mobile の実レンダリング検証を別記録にする。全画面統一の完了を Findings 2 画面だけで宣言しない。
 
 Phase 1 の終了条件: 上記の共通 read/coverage、継続収集の失敗安全性、相関・証拠・優先度の説明、主要画面の導線がオフライン統合テストで成立すること。ライブ接続・scanner 実行の運用受入は実施対象ごとに追加する。共通調査・外部修正など Phase 3 の完了をここで先取りしない。
+
+### 5.6 追加する読取中心の機能案（未実装）
+
+以下の 4 案は計画への追加であり、実装済みの機能や外部操作の許可ではない。既存の Findings API、source-native identity、参考試算、UI を再利用する。新しい live collector、認証情報、通知先、課金・公開範囲の変更を前提にしない。
+
+#### 修正候補ボード
+
+更新・設定変更などの候補を、その根拠と対象 Finding/Asset に結び付けて並べる。最初は読取専用とし、検証できる package identity/version、修正版、対象、検出元、観測時刻、既存 Issue/PR 参照だけを使う。外部操作と再検査を扱う第 7.1 節の Action 管理とは分離する。
+
+合格条件: 同じ CVE や package 名だけで別 Asset・環境・版を統合しない。根拠が揃う範囲だけ同じ候補としてまとめ、元の Finding と履歴を保つ。欠損・古い証拠・部分取得を明示し、候補件数を修正可能件数や一括解消件数と呼ばない。ページ内集計と全体集計を区別し、合成データ・読取不変試験で確認する。自動修正、Issue/PR 作成・merge、triage/解消変更はこの工程に含めない。
+
+#### Findings の保存検索
+
+頻繁に使う検出元・重要度・Asset・CVE・source status 等の条件を名前付きで保存・再実行する。保存するのは条件であり、結果 snapshot ではない。KEV/EPSS の条件を追加する場合は、陽性・陰性・欠落・古い証拠・対象外を区別する。既存 filter/parser を再利用する。
+
+合格条件: 条件 schema/version、空・不正・廃止 filter、更新・削除・競合、Back/Forward/reload を検証する。実行時刻・証拠の鮮度・件数範囲を示し、KEV 欠落を陰性や安全と扱わない。保存場所・所有者 scope を実装前に定め、利用者をまたぐ共有を既定にしない。server-side 保存を選ぶ場合は Web 認可契約を前提とする。秘密値や raw payload を保存条件・名前・URL に含めない。自動通知・定期実行・公開リンクは別工程とする。
+
+#### Dependabot と Trivy の比較
+
+元 Finding/Asset、source-native ID、repository/commit または image digest/対象 path、package identity/version、CVE、観測時刻、収集 scope/完全性を並べ、共通点・差分・比較不能な理由を示す。既存の same-CVE 関連 API は参考関連として再利用し、厳密な対象一致と区別する。
+
+合格条件: 同じ CVE でも別 Asset・環境・版・時刻の観測を同一状態と扱わない。片方に無いだけで解消・未検出・製品の優劣を断定しない。部分取得、未 scan、古い観測、identity 不一致を合成 fixture で区別し、根拠が不足する組合せは比較不能とする。元 Finding/履歴を統合・削除せず、読取専用・件数/入力上限を検証する。collector/scanner 実行や一括 triage は含めない。
+
+#### 優先度の条件比較
+
+第 5.5 節の根拠付き優先度 UI の一部として、同じ Finding/Asset・評価時刻・入力 snapshot を固定し、モデルで扱える明示的な仮定を変えた参考結果を並べる。独立した保存評価エンジンを新設しない。
+
+合格条件: baseline、変更した条件、model/profile/assessment version、as_of、理由・不足情報・差分を表示し、同じ snapshot から CLI/API で再現できる。公開範囲や資産重要度等の仮定と保存済み観測/判断を区別し、モデルに存在しない入力効果を推測しない。別 Asset の assessment、期限切れ・矛盾・欠落入力を検証する。試算だけで永続 risk、実期限、通知抑止、triage/解消を変更しない。
+
+着手順は、既存の読取契約を使える範囲から小さく切り出す。保存検索の所有者 scope、比較の対象一致、候補集約の根拠、試算の入力契約を先に確定し、各案の合成受入と実画面検証を別に記録する。
 
 ## 6. Phase 2: AWS の形式別取り込みと同期
 
@@ -289,7 +327,7 @@ GitHub credential context は collector/updater/action がどの GitHub principa
 
 実環境の許可待ちで、全コード作業を一律に止める必要はない。schema、pure adapter、読み取り API、mock collector、workflow、UI、業務モデルは合成データで先行できる。
 
-1. **基盤の可視化**: 実装済みの収集状態/coverage read API を土台に、Overview/Assets・native theme 統合と、設定 inventory/attempt/liveness の別契約へ進む。記録 pair の件数を資産の母数へ転用せず、既存 offline slice と ID/時計の規約を固定する。
+1. **基盤の可視化**: 統合済みの Overview/Assets・native theme と収集状態 read API を土台に、設定 inventory/attempt/liveness の別契約と第 5.6 節の読取機能へ進む。記録 pair の件数を資産の母数へ転用せず、既存 offline slice と ID/時計の規約を固定する。
 2. **継続収集と説明**: GitHub context/collector、Trivy CI 契約、common enrichment/永続評価を独立実装し、共通キュー・根拠 UI につなぐ。外部接続は adapter 後に個別確認する。
 3. **安全な共通変更**: Web 認証/RBAC、監査、revision/idempotency を整備してから triage、調査、Action、SLA/例外、通知を接続する。read-only 開発はこの完了を待たなくてよい。
 4. **対象拡張**: AWS の形式別 offline adapter → fake API/event reconciliation → 許可された account/region の導入。WAF/SBOM は方式選定 → 共通契約 → adapter → 必要なライブ接続の順に進める。
