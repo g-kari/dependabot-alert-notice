@@ -22,7 +22,8 @@ import (
 	"github.com/g-kari/dependabot-alert-notice/internal/queue"
 	"github.com/g-kari/dependabot-alert-notice/internal/risk"
 	"github.com/g-kari/dependabot-alert-notice/internal/store"
-	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/v2/parser"
+	"github.com/yuin/goldmark/v2/renderer/html"
 )
 
 //go:embed templates/*.html static/*
@@ -121,7 +122,11 @@ var templateFuncs = template.FuncMap{
 			return ""
 		}
 		var buf bytes.Buffer
-		if err := goldmark.Convert([]byte(s), &buf); err != nil {
+		source := []byte(s)
+		// Keep parser and renderer state local to each request and retain the
+		// default safe renderer: raw HTML and dangerous URLs are not enabled.
+		doc := parser.New().Parse(source)
+		if err := html.New().Render(&buf, source, doc); err != nil {
 			return template.HTML(template.HTMLEscapeString(s))
 		}
 		return template.HTML(buf.String())
