@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/g-kari/dependabot-alert-notice/internal/control"
 )
 
@@ -21,34 +21,41 @@ type secretInputModel struct {
 }
 
 func (m secretInputModel) Init() tea.Cmd { return nil }
-func (m secretInputModel) View() string {
-	return clean(m.label) + "\n入力は非表示です。Enter: 確定（空欄は保持） / Esc: 取消\n"
+func (m secretInputModel) View() tea.View {
+	return tea.NewView(clean(m.label) + "\n入力は非表示です。Enter: 確定（空欄は保持） / Esc: 取消\n")
+}
+func (m secretInputModel) appendText(text string) secretInputModel {
+	for _, r := range text {
+		if r >= 33 && r <= 126 && len(m.value) < 4096 {
+			m.value = append(m.value, r)
+		} else {
+			m.invalid = true
+		}
+	}
+	return m
 }
 func (m secretInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
+	switch key := msg.(type) {
+	case tea.PasteMsg:
+		m = m.appendText(key.Content)
+	case tea.KeyPressMsg:
+		switch key.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlD:
-			m.interrupted = key.Type != tea.KeyEsc
+		case "esc", "ctrl+c", "ctrl+d":
+			m.interrupted = key.String() != "esc"
 			clear(m.value)
 			m.value = nil
 			m.done, m.cancelled = true, true
 			return m, tea.Quit
-		case tea.KeyBackspace, tea.KeyDelete:
+		case "backspace", "delete":
 			if len(m.value) > 0 {
 				m.value[len(m.value)-1] = 0
 				m.value = m.value[:len(m.value)-1]
 			}
-		case tea.KeyRunes:
-			for _, r := range key.Runes {
-				if r >= 33 && r <= 126 && len(m.value) < 4096 {
-					m.value = append(m.value, r)
-				} else {
-					m.invalid = true
-				}
-			}
+		default:
+			m = m.appendText(key.Text)
 		}
 	}
 	return m, nil
