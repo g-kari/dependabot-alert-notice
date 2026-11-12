@@ -1,6 +1,6 @@
 module github.com/g-kari/dependabot-alert-notice
 
-go 1.26.11
+go 1.27.4
 
 require (
 	charm.land/bubbletea/v2 v2.1.1
