@@ -43,11 +43,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
           test "$DISPATCH_REF" = refs/heads/main
-          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           source_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
-          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
           test "$source_sha" = "$DISPATCH_SHA"
           tag_endpoint="repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG"
           tag_query=".[] | select(.ref == \"refs/tags/$RELEASE_TAG\") | .object.sha"
