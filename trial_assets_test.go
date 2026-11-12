@@ -158,7 +158,7 @@ func trialGoReleaserInstallError(body []byte) error {
 		if with["distribution"] != "goreleaser" || with["install-only"] != true {
 			return fmt.Errorf("trial GoReleaser action must only install the community distribution")
 		}
-		if !strings.Contains(string(body), "'goreleaser_version': '"+version+"'") {
+		if !strings.Contains(string(body), fmt.Sprintf("'goreleaser_version': '%s'", version)) {
 			return fmt.Errorf("trial manifest GoReleaser version must match the installer pin")
 		}
 	}
@@ -195,7 +195,7 @@ func TestTrialGoReleaserInstallContract(t *testing.T) {
 		{name: "leading zero", old: pin, new: "v2.020.1", wantErr: true},
 		{name: "publish action", old: "install-only: true", new: "install-only: false", wantErr: true},
 		{name: "pro distribution", old: "distribution: goreleaser", new: "distribution: goreleaser-pro", wantErr: true},
-		{name: "stale manifest", old: "'goreleaser_version': '"+pin+"'", new: "'goreleaser_version': 'mismatch'", wantErr: true},
+		{name: "stale manifest", old: fmt.Sprintf("'goreleaser_version': '%s'", pin), new: "'goreleaser_version': 'mismatch'", wantErr: true},
 		{name: "missing installer", old: "goreleaser/goreleaser-action@", new: "example/other-action@", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
