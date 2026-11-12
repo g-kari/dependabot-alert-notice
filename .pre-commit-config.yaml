@@ -28,3 +28,17 @@ repos:
         entry: bash -c 'eval "$(devbox shellenv --recompute 2>/dev/null)" && go test ./... -count=1 -race'
         pass_filenames: false
         types: [go]
+
+      - id: govulncheck
+        name: govulncheck
+        language: system
+        entry: bash -c 'eval "$(devbox shellenv --recompute 2>/dev/null)" && go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
+        pass_filenames: false
+        types: [go]
+
+      - id: go-licenses
+        name: go-licenses check
+        language: system
+        entry: bash -c 'eval "$(devbox shellenv --recompute 2>/dev/null)" && go run github.com/google/go-licenses@v1.6.0 check ./... --disallowed_types=forbidden,restricted --ignore modernc.org/mathutil'
+        pass_filenames: false
+        types: [go]
