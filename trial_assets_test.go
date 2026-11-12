@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -85,6 +87,9 @@ func TestTrialWorkflowIsTaglessReadOnlyAndPostMergeGated(t *testing.T) {
 	if err := yaml.Unmarshal(body, &workflow); err != nil {
 		t.Fatal(err)
 	}
+	if err := trialGoReleaserInstallError(body); err != nil {
+		t.Fatal(err)
+	}
 	permissions := workflow["permissions"].(map[string]any)
 	if len(permissions) != 1 || permissions["contents"] != "read" {
 		t.Fatal("trial workflow must request contents: read only")
@@ -122,9 +127,88 @@ func TestTrialWorkflowIsTaglessReadOnlyAndPostMergeGated(t *testing.T) {
 			t.Errorf("trial workflow contains forbidden operation %q", forbidden)
 		}
 	}
-	for _, required := range []string{"github.event.pull_request.head.sha || github.sha", "persist-credentials: false", "goreleaser release --snapshot --clean", "version: v2.20.0", "go test ./... -race -count=1", "go test ./internal/updater/... -count=1", "go run ./cmd/package-macos", "retention-days: 1", "retention-days: 7", "python3 scripts/test_trial_tools.py", "native_binary_smoke", "'ui_runtime_verified': False", "shell: powershell", "$PSVersionTable.PSVersion.Major -ne 5"} {
+	for _, required := range []string{"github.event.pull_request.head.sha || github.sha", "persist-credentials: false", "goreleaser release --snapshot --clean", "go test ./... -race -count=1", "go test ./internal/updater/... -count=1", "go run ./cmd/package-macos", "retention-days: 1", "retention-days: 7", "python3 scripts/test_trial_tools.py", "native_binary_smoke", "'ui_runtime_verified': False", "shell: powershell", "$PSVersionTable.PSVersion.Major -ne 5"} {
 		if !strings.Contains(text, required) {
 			t.Errorf("trial workflow missing %q", required)
 		}
+	}
+}
+
+func trialGoReleaserInstallError(body []byte) error {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		return err
+	}
+	jobs, _ := workflow["jobs"].(map[string]any)
+	build, _ := jobs["build"].(map[string]any)
+	steps, _ := build["steps"].([]any)
+	installs := 0
+	for _, raw := range steps {
+		step, _ := raw.(map[string]any)
+		uses, _ := step["uses"].(string)
+		if !strings.HasPrefix(uses, "goreleaser/goreleaser-action@") {
+			continue
+		}
+		installs++
+		with, _ := step["with"].(map[string]any)
+		version, _ := with["version"].(string)
+		if !regexp.MustCompile(`^v2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(version) {
+			return fmt.Errorf("trial GoReleaser must pin an exact stable v2 version")
+		}
+		if with["distribution"] != "goreleaser" || with["install-only"] != true {
+			return fmt.Errorf("trial GoReleaser action must only install the community distribution")
+		}
+		if !strings.Contains(string(body), "'goreleaser_version': '"+version+"'") {
+			return fmt.Errorf("trial manifest GoReleaser version must match the installer pin")
+		}
+	}
+	if installs != 1 {
+		return fmt.Errorf("trial must have exactly one GoReleaser installer")
+	}
+	return nil
+}
+
+func TestTrialGoReleaserInstallContract(t *testing.T) {
+	body, err := os.ReadFile(".github/workflows/trial.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	match := regexp.MustCompile(`(?m)^          version: (v2\.[0-9]+\.[0-9]+)$`).FindStringSubmatch(text)
+	if len(match) != 2 {
+		t.Fatal("missing exact installer pin for regression mutations")
+	}
+	pin := match[1]
+	for _, tc := range []struct {
+		name    string
+		old     string
+		new     string
+		wantErr bool
+	}{
+		{name: "current pin"},
+		{name: "next patch", old: pin, new: "v2.20.2"},
+		{name: "next minor", old: pin, new: "v2.21.0"},
+		{name: "floating", old: pin, new: "latest", wantErr: true},
+		{name: "major only", old: pin, new: "v2", wantErr: true},
+		{name: "prerelease", old: pin, new: "v2.21.0-rc.1", wantErr: true},
+		{name: "new major", old: pin, new: "v3.0.0", wantErr: true},
+		{name: "leading zero", old: pin, new: "v2.020.1", wantErr: true},
+		{name: "publish action", old: "install-only: true", new: "install-only: false", wantErr: true},
+		{name: "pro distribution", old: "distribution: goreleaser", new: "distribution: goreleaser-pro", wantErr: true},
+		{name: "stale manifest", old: "'goreleaser_version': '"+pin+"'", new: "'goreleaser_version': 'mismatch'", wantErr: true},
+		{name: "missing installer", old: "goreleaser/goreleaser-action@", new: "example/other-action@", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := text
+			if tc.old != "" {
+				if !strings.Contains(candidate, tc.old) {
+					t.Fatalf("regression mutation target %q not found", tc.old)
+				}
+				candidate = strings.ReplaceAll(candidate, tc.old, tc.new)
+			}
+			if err := trialGoReleaserInstallError([]byte(candidate)); (err != nil) != tc.wantErr {
+				t.Fatalf("contract error = %v, want error %v", err, tc.wantErr)
+			}
+		})
 	}
 }
