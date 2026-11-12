@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {classifyFailedUDPConnects} from './browser_udp_audit.mjs';
 const details={details_complete:true,overflow:false,failure_reasons:[],has_send_attempt:false,has_send_event:false};
-const constants={logEventTypes:{SOCKET_ALIVE:1,SOCKET_OPEN:2,UDP_CONNECT:3,SOCKET_CONNECT:4,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:5,UDP_BYTES_SENT:6,UDP_SEND_ERROR:7,DNS_TRANSACTION:8,UDP_BYTES_RECEIVED:9,NEW_EVENT:10},logSourceType:{UDP_SOCKET:1,UDP_CLIENT_SOCKET:2,HTTP_PROXY_CONNECT_JOB:3},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},netError:{OK:0,ADDRESS_UNREACHABLE:-109,FAILED:-2}};
+const constants={logEventTypes:{SOCKET_ALIVE:1,SOCKET_OPEN:2,UDP_CONNECT:3,SOCKET_CONNECT:4,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:5,UDP_BYTES_SENT:6,UDP_SEND_ERROR:7,DNS_TRANSACTION:8,UDP_BYTES_RECEIVED:9,NEW_EVENT:10},logSourceType:{UDP_SOCKET:1,UDP_CLIENT_SOCKET:2,HTTP_PROXY_CONNECT_JOB:3},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},netError:{'net::OK':0,ERR_ADDRESS_UNREACHABLE:-109,ERR_FAILED:-2}};
 const event=(type,phase,id,sourceType,params)=>({type,phase,source:{id,type:sourceType},...(params===undefined?{}:{params})});
 const endpoint='[2001:4860:4860::8888]:443';
 const fixture=()=>({constants:structuredClone(constants),events:[
@@ -39,7 +39,8 @@ for(const [label,edit]of [
  ['orphan client',f=>f.events.push(event(1,1,23,2,{source_dependency:{id:1,type:3}}))],
  ['ambiguous event constants',f=>f.constants.logEventTypes.ALIAS=3],
  ['ambiguous source constants',f=>f.constants.logSourceType.ALIAS=1],
- ['wrong error mapping',f=>f.constants.netError.ADDRESS_UNREACHABLE=-110],
+ ['unprefixed error key',f=>{f.constants.netError.ADDRESS_UNREACHABLE=f.constants.netError.ERR_ADDRESS_UNREACHABLE;delete f.constants.netError.ERR_ADDRESS_UNREACHABLE;}],
+ ['wrong error mapping',f=>f.constants.netError.ERR_ADDRESS_UNREACHABLE=-110],
  ['ambiguous phase constants',f=>f.constants.logEventPhase.ALIAS=1],
  ['bad dependency type',f=>f.events[0].params.source_dependency.type=3],
  ['bad dependency shape',f=>f.events[0].params.source_dependency=[]],

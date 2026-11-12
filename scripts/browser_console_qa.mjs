@@ -453,7 +453,7 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   for(const raw of ['https://user:secret@example.invalid/?token=secret','localhost:53','127.1:53','[fe80::1%eth0]:443','[::1]:65536','127.0.0.1','1.2.3.4:secret','127.0.0.1:443\n','[::1]:443\n'])assert.equal(literalEndpoint(raw),null);
   assert.equal(literalEndpoint('[2001:0DB8:0:0::1]:00443').endpoint,'[2001:db8::1]:443');
   assert.equal(literalEndpoint('127.0.0.1:0').scope,'loopback');
-  const constants={...structuredClone(baseLog.constants),logEventTypes:{...baseLog.constants.logEventTypes,SOCKET_ALIVE:6,SOCKET_OPEN:7,SOCKET_CONNECT:8,UDP_LOCAL_ADDRESS:9,UDP_BYTES_RECEIVED:10,UDP_SEND_ERROR:11,UDP_RECEIVE_ERROR:12,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:13,DNS_TRANSACTION_ATTEMPT:14,UDP_PRIVATE_SECRET:15},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},logSourceType:{HOST_RESOLVER_IMPL_JOB:20,UDP_CLIENT_SOCKET:21,UDP_SOCKET:22,DNS_TRANSACTION:23},netError:{OK:0,ADDRESS_UNREACHABLE:-109}};
+  const constants={...structuredClone(baseLog.constants),logEventTypes:{...baseLog.constants.logEventTypes,SOCKET_ALIVE:6,SOCKET_OPEN:7,SOCKET_CONNECT:8,UDP_LOCAL_ADDRESS:9,UDP_BYTES_RECEIVED:10,UDP_SEND_ERROR:11,UDP_RECEIVE_ERROR:12,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:13,DNS_TRANSACTION_ATTEMPT:14,UDP_PRIVATE_SECRET:15},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},logSourceType:{HOST_RESOLVER_IMPL_JOB:20,UDP_CLIENT_SOCKET:21,UDP_SOCKET:22,DNS_TRANSACTION:23},netError:{'net::OK':0,ERR_ADDRESS_UNREACHABLE:-109}};
   const event=(type,phase,id,sourceType,params={})=>({type,phase,source:{id,type:sourceType},params});
   const fixture={constants,events:[
     event(13,0,100,20,{ipv6_available:false,cached:false,secret:'do-not-persist'}),
@@ -565,7 +565,28 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   assert(byteBounded.failure_reasons.some(x=>x.reason==='diagnostic_byte_bound_exceeded'));
   assert(Buffer.byteLength(JSON.stringify(byteBounded))<=UDP_DETAIL_LIMITS.bytes);
 }
+// Runs in the real page; also tested with a minimal DOM fixture below.
+function focusLegacyDangerDisclosure(doc=document) {
+  const button=doc.querySelector('.btn-reject');
+  if(!button)throw new Error('legacy danger button missing');
+  const group=button.closest('details');
+  if(!group)throw new Error('legacy danger disclosure missing');
+  if(group.open)return false;
+  const summary=group.querySelector('summary');
+  if(!summary)throw new Error('legacy danger summary missing');
+  summary.focus();
+  return true;
+}
 async function selfTest() {
+  let summaryFocuses=0;
+  const group={open:false,querySelector:()=>({focus:()=>summaryFocuses++})};
+  const dangerDocument={querySelector:()=>({closest:()=>group})};
+  assert.equal(focusLegacyDangerDisclosure(dangerDocument),true);
+  assert.equal(summaryFocuses,1);
+  group.open=true;
+  assert.equal(focusLegacyDangerDisclosure(dangerDocument),false);
+  assert.equal(summaryFocuses,1,'restored open details must not be toggled closed');
+  assert.throws(()=>focusLegacyDangerDisclosure({querySelector:()=>null}));
   const input=new PassThrough(), output=new PassThrough(), client=new CDP(input, output);
   let sent='';
   input.on('data', b=>sent+=b.toString());
@@ -975,6 +996,12 @@ async function main() {
     await until(session, "document.querySelector('#stream-status')?.textContent.includes('ライブ')", 'legacy stream after reload');
     checks.flows.push({check:'actual legacy SSE navigation/history restoration/reload',viewport:viewport.name,passed:true});
     await navigate(session, base+'/');
+    // Dashboard action buttons live in initially closed native <details>.
+    // Reveal via the actual summary keyboard action, never click a POST button.
+    if(await ev(session, `(${focusLegacyDangerDisclosure.toString()})()`)) {
+      await key(session, 'Enter', 'Enter', 13);
+      await until(session, "document.querySelector('.btn-reject')?.closest('details')?.open===true", 'legacy action disclosure');
+    }
     await hoverContrast(session, '.btn-reject', 'legacy danger');
     checks.flows.push( {
       check:'actual keyboard/filter/paging/Back/Forward/reload/long-query/cleared-source', viewport:viewport.name, passed:true

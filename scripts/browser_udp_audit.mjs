@@ -14,7 +14,9 @@ export function classifyFailedUDPConnects(log,details) {
     if(!entries.length||entries.some(([,v])=>!Number.isSafeInteger(v)||(key==='netError'?v>0:v<0))||new Set(entries.map(([,v])=>v)).size!==entries.length)return rejected('ambiguous_constants');
     maps[key]=new Map(entries.map(([k,v])=>[v,k]));
   }
-  if(log.constants.netError.ADDRESS_UNREACHABLE!==-109)return rejected('unexpected_error_constant');
+  // NetLog keys use ErrorToShortString: ERR_ prefix, not enum-list labels.
+  // Chromium a21ce95: net/log/net_log_util.cc and net/base/net_errors.cc.
+  if(log.constants.netError.ERR_ADDRESS_UNREACHABLE!==-109)return rejected('unexpected_error_constant');
   const sources=new Map(),edges=[];
   for(let i=0;i<log.events.length;i++) {
     const event=log.events[i];
