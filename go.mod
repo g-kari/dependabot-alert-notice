@@ -7,7 +7,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/slack-go/slack v0.35.0
-	github.com/yuin/goldmark v1.8.7
 	github.com/yuin/goldmark/v2 v2.1.15
 	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
