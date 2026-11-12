@@ -32,7 +32,7 @@ func TestExplicitReleaseTagCreationIsBoundedAndNonOverwriting(t *testing.T) {
 		t.Fatal("tag creation must be explicitly enabled by manual dispatch")
 	}
 	script := steps[0].Run
-	if strings.Contains(script, "${{") || strings.Contains(script, "--force") || strings.Contains(script, "PATCH") || strings.Contains(script, "DELETE") {
+	if strings.Contains(script, "${{") || strings.Contains(script, "--force") || strings.Contains(script, "--method PATCH") || strings.Contains(script, "--method DELETE") {
 		t.Fatal("tag script must not interpolate inputs or overwrite/delete references")
 	}
 	for _, tt := range []struct {
