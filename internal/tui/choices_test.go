@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestChoiceModelNavigatesAndChoosesWithoutTypingValue(t *testing.T) {
 	m := newChoiceModel("モデル", []choice{{"one", "モデル1"}, {"two", "モデル2"}}, 0, "keep", nil)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(choiceModel)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(choiceModel)
 	if !m.done || m.value != "two" {
 		t.Fatalf("selection=%+v", m)
@@ -23,13 +23,13 @@ func TestChoiceModelNavigatesAndChoosesWithoutTypingValue(t *testing.T) {
 
 func TestChoiceModelCancellationAndShortcuts(t *testing.T) {
 	for _, tt := range []struct {
-		key         tea.KeyMsg
+		key         tea.KeyPressMsg
 		value       string
 		interrupted bool
 	}{
-		{tea.KeyMsg{Type: tea.KeyEsc}, "keep", false},
-		{tea.KeyMsg{Type: tea.KeyCtrlC}, "", true},
-		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}, "save", false},
+		{tea.KeyPressMsg{Code: tea.KeyEsc}, "keep", false},
+		{tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, "", true},
+		{tea.KeyPressMsg{Code: tea.KeyExtended, Text: "s"}, "save", false},
 	} {
 		m := newChoiceModel("設定", []choice{{"one", "項目"}}, 0, "keep", map[string]string{"s": "save"})
 		updated, _ := m.Update(tt.key)
@@ -49,7 +49,7 @@ func TestChoiceModelViewportKeepsSelectionVisibleAndSanitizesText(t *testing.T) 
 	m := newChoiceModel("title\x1b[2J", options, 49, "keep", nil)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 35, Height: 12})
 	m = updated.(choiceModel)
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "last") || strings.Contains(view, "\x1b[2J") || strings.Count(view, "item") >= 10 {
 		t.Fatalf("unsafe or unbounded view: %q", view)
 	}
@@ -118,15 +118,15 @@ func TestSequenceDeletionCanChooseItemFromList(t *testing.T) {
 
 func TestChoiceModelNumericSelectionAndCancelledConfirmation(t *testing.T) {
 	m := newChoiceModel("確認", []choice{{"n", "キャンセル"}, {"y", "実行"}}, 0, "n", nil)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(choiceModel)
 	if m.value != "n" {
 		t.Fatal("confirmation defaulted to execute")
 	}
 	m = newChoiceModel("設定", []choice{{"first", "first"}, {"second", "second"}}, 0, "keep", nil)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "2"})
 	m = updated.(choiceModel)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(choiceModel)
 	if m.value != "second" {
 		t.Fatal("numeric selection failed")
@@ -141,13 +141,29 @@ func TestChoiceModelAcceptsMultiDigitInputAndZeroInsideNumber(t *testing.T) {
 	for _, keys := range [][]string{{"10"}, {"1", "0"}, {"12"}} {
 		m := newChoiceModel("設定", options, 0, "0", map[string]string{"0": "0"})
 		for _, key := range keys {
-			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+			updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: key})
 			m = updated.(choiceModel)
 		}
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(choiceModel)
 		if m.value != strings.Join(keys, "") {
 			t.Fatalf("keys=%v selected=%q", keys, m.value)
+		}
+	}
+}
+
+func TestChoiceModelV2IgnoresReleaseAndPasteCommands(t *testing.T) {
+	for _, msg := range []tea.Msg{
+		tea.KeyReleaseMsg{Code: tea.KeyDown},
+		tea.KeyReleaseMsg{Code: tea.KeyEnter},
+		tea.PasteMsg{Content: "s"},
+		tea.PasteMsg{Content: "2\n"},
+	} {
+		model := newChoiceModel("選択", []choice{{"one", "1"}, {"two", "2"}}, 0, "keep", map[string]string{"s": "save"})
+		next, cmd := model.Update(msg)
+		model = next.(choiceModel)
+		if model.done || model.selected != 0 || model.digits != "" || cmd != nil {
+			t.Fatalf("non-press event changed selection: %T", msg)
 		}
 	}
 }
