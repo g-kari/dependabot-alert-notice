@@ -125,3 +125,68 @@ jobs:
         run: go build ./...
       - name: Updater regression tests
         run: go test ./internal/updater/... -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint (new issues on PRs)
+        if: github.event_name == 'pull_request'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          only-new-issues: true
+      - name: golangci-lint (full report on push)
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Test with coverage
+        run: go test -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage.out
+          retention-days: 7
+          if-no-files-found: error
+
+  licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go-licenses check
+        # modernc.org/mathutil ships a LICENSE file that go-licenses
+        # cannot classify, so it is excluded from the automated check.
+        run: go run github.com/google/go-licenses@v1.6.0 check ./... --disallowed_types=forbidden,restricted --ignore modernc.org/mathutil
