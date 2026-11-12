@@ -4,13 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{block "pageTitle" .}}Dependabot Alert Notice{{end}}</title>
+  <title>{{block "pageTitle" .}}DevSecOps Console{{end}}</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  {{block "fontResources" .}}
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  {{end}}
+  {{block "fontResources" .}}<!-- Local system fonts only. -->{{end}}
   <style>
     /* Material Design 3 color roles. Legacy aliases keep feature templates consistent. */
     :root {
@@ -38,7 +34,7 @@
       --color-surface: var(--md-sys-color-surface-container-low);
       --color-accent: var(--md-sys-color-primary);
       --color-danger: var(--md-sys-color-error);
-      --font: Roboto, "Noto Sans JP", system-ui, sans-serif;
+      --font: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, system-ui, sans-serif;
       --ease: cubic-bezier(0.2, 0, 0, 1);
       --transition: background-color 0.2s var(--ease), color 0.2s var(--ease), box-shadow 0.2s var(--ease);
       --max-w: 1200px;
@@ -241,7 +237,7 @@
 
     /* --- インタラクション --- */
     .interactive-scale { transition: var(--transition); }
-    .interactive-scale:hover { background: var(--md-sys-color-primary-container); }
+    .interactive-scale:not(.btn):hover { background: var(--md-sys-color-primary-container); }
 
     /* --- ダッシュボードヘッダー --- */
     .dashboard-header {
@@ -469,6 +465,7 @@
       .container { padding: 20px 16px; }
       .card { padding: 18px; }
       .section-heading { flex-wrap: wrap; }
+      .detail-header { flex-wrap: wrap; }
       .dashboard-header { flex-wrap: wrap; gap: 12px; }
       .search-bar { flex-wrap: wrap; }
     }
@@ -476,7 +473,7 @@
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
 
-    /* Native Findings: scoped palette and layout; legacy screens retain their tokens. */
+    /* Shared Findings Console palette and shell, including legacy workflows. */
     .findings-console {
       --md-sys-color-primary: #78ddc2;
       --md-sys-color-on-primary: #062b24;
@@ -492,6 +489,8 @@
       --md-sys-color-outline: #62768a;
       --md-sys-color-outline-variant: #2b3948;
       --md-sys-color-error: #ffb1ad;
+      --md-sys-color-on-error: #462021;
+      --console-danger-hover: #733746;
       --md-sys-color-error-container: #482c33;
       --md-sys-color-on-error-container: #ffc9c6;
       --color-bg: var(--md-sys-color-surface);
@@ -513,7 +512,7 @@
       color-scheme: dark;
     }
     .finding-skip { position: fixed; left: 16px; top: -100px; z-index: 200; padding: 12px; color: var(--color-text); background: var(--color-surface); }
-    .finding-skip:focus { top: 12px; }
+    .finding-skip:focus { top: 12px; outline: 3px solid var(--color-accent); outline-offset: 2px; }
     .finding-sidebar { position: fixed; inset: 0 auto 0 0; width: 236px; padding: 28px 16px 20px; display: flex; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--finding-sidebar); overflow-y: auto; }
     .finding-brand { display: flex; align-items: center; gap: 12px; margin: 0 10px 42px; color: var(--color-text); font-size: 1.15rem; font-weight: 700; line-height: 1.4; }
     .finding-brand:hover { text-decoration: none; }
@@ -551,11 +550,15 @@
     .finding-search-field { grid-column: span 2; }
     .finding-filter-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
     .findings-console .btn { border-radius: var(--radius-sm); min-height: 44px; }
+    .btn-primary.interactive-scale:hover,
     .findings-console .btn-primary:hover,
     .findings-console .btn-primary:focus-visible {
       background: var(--md-sys-color-primary);
       color: var(--md-sys-color-on-primary);
     }
+    .findings-console .btn-reject { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+    .findings-console .btn-reject:hover { background: var(--console-danger-hover); color: var(--md-sys-color-on-error-container); }
+    .findings-console :is(input,select,textarea):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
     .findings-console .btn-sm { min-height: 36px; }
     .findings-console .badge { border-radius: 4px; font-size: .73rem; }
     .findings-console .badge-high { background: var(--finding-high-bg); color: var(--finding-high-text); }
@@ -595,6 +598,23 @@
     .finding-preview p { margin: 14px 0; max-width: 90ch; color: var(--color-muted); }
     .finding-preview form { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
     .finding-preview .field { flex: 1 1 300px; }
+    .legacy-console .container { padding-top: 28px; }
+    .console-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; }
+    .console-metric strong { display: block; margin-top: 8px; font-size: 2rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
+    .console-sources { list-style: none; }
+    .console-sources li { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-border); padding: 10px 0; overflow-wrap: anywhere; }
+    .console-table table { min-width: 820px; }
+    .console-table td { vertical-align: top; overflow-wrap: anywhere; max-width: 320px; }
+    .console-record-list { list-style: none; }
+    .console-record-list > li { padding: 18px 0; border-bottom: 1px solid var(--color-border); }
+    .console-record-list h3 { font-size: 1rem; overflow-wrap: anywhere; }
+    .console-record-list .finding-facts { margin-top: 12px; }
+    .console-result-meta { margin: 12px 0; color: var(--color-muted); font-size: .85rem; }
+    .console-record-kind { margin-top: 10px; color: var(--color-muted); font-size: .8rem; }
+    .console-severe-item { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--color-border); }
+    .console-severe-item h3 { font-size: .95rem; overflow-wrap: anywhere; }
+    @media (max-width: 1000px) { .console-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 440px) { .console-metrics { grid-template-columns: 1fr; gap: 0; } }
     @media (min-width: 1800px) { .findings-console .container { margin-left: max(236px, calc((100vw - 1560px) / 2)); } }
     @media (max-width: 1150px) {
       .finding-sidebar { width: 210px; }
@@ -617,6 +637,13 @@
       .finding-item { grid-template-columns: 1fr; gap: 14px; }
       .finding-row-states { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .finding-page-heading { gap: 12px; }
+      .finding-page-heading > .badge { flex-shrink: 0; white-space: nowrap; }
+      .finding-source-mix li { grid-template-columns: minmax(0, 1fr) auto; }
+      .finding-source-mix li > span { grid-column: 1 / -1; overflow-wrap: anywhere; }
+      .cve-summary { flex-direction: column; align-items: stretch; }
+      .cve-summary-main { flex-wrap: wrap; }
+      .cve-summary-meta { align-self: flex-end; }
+      .cve-pkg, .cve-desc { white-space: normal; overflow-wrap: anywhere; }
     }
     @media (max-width: 440px) {
       .finding-filter-grid { grid-template-columns: 1fr; }
@@ -627,23 +654,24 @@
     }
   </style>
 </head>
-<body class="{{block "bodyClass" .}}{{end}}">
+<body class="{{block "bodyClass" .}}findings-console legacy-console{{end}}">
   {{block "navigation" .}}
-  <header id="site-header">
-    <div class="header-inner">
-      <a href="/" class="logo">
-        <span class="logo-mark" aria-hidden="true">D</span>
-        <span>Dependabot Notice</span>
-      </a>
-      <nav class="header-nav" aria-label="メインナビゲーション">
-        <a href="/" class="nav-link">ダッシュボード</a>
-        <a href="/findings" class="nav-link">Findings</a>
-        <a href="/logs" class="nav-link">ログ</a>
-        <a href="/reports/vulnerabilities" class="nav-link">脆弱性レポート</a>
-        <a href="/settings" class="nav-link">設定</a>
-      </nav>
-    </div>
-  </header>
+<a href="#main-content" class="finding-skip">本文へ移動</a>
+<aside class="finding-sidebar" aria-label="DevSecOps Console">
+  <a href="/security" class="finding-brand"><span class="finding-brand-mark" aria-hidden="true">▥</span><span>DevSecOps<span class="finding-brand-sub">Security workspace</span></span></a>
+  <nav class="finding-nav" aria-label="メインナビゲーション">
+    <a class="nav-link interactive-scale" href="/security" {{if consoleNavCurrent "/security"}}aria-current="page"{{end}}>Overview</a>
+    <a class="nav-link interactive-scale" href="/findings" {{if consoleNavCurrent "/findings"}}aria-current="page"{{end}}>Findings</a>
+    <a class="nav-link interactive-scale" href="/assets" {{if consoleNavCurrent "/assets"}}aria-current="page"{{end}}>Assets</a>
+    <a class="nav-link interactive-scale" href="/integrations" {{if consoleNavCurrent "/integrations"}}aria-current="page"{{end}}>Recorded Integrations</a>
+    <a class="nav-link interactive-scale" href="/" {{if consoleNavCurrent "/"}}aria-current="page"{{end}}>Alerts / 承認</a>
+    <a class="nav-link interactive-scale" href="/reports/vulnerabilities" {{if consoleNavCurrent "/reports/vulnerabilities"}}aria-current="page"{{end}}>脆弱性レポート</a>
+    <a class="nav-link interactive-scale" href="/logs" {{if consoleNavCurrent "/logs"}}aria-current="page"{{end}}>ログ</a>
+    <a class="nav-link interactive-scale" href="/settings" {{if consoleNavCurrent "/settings"}}aria-current="page"{{end}}>設定</a>
+  </nav>
+  <div class="card finding-sidebar-note"><h2>Source-native records</h2><p>検出元ごとの ID を保持。同じ CVE も別々の Finding として追跡します。</p></div>
+  <p class="finding-sidebar-footer">Findings と既存 Alerts は別の記録です。</p>
+</aside>
   {{end}}
   <main class="container" id="main-content">
     {{template "content" .}}
@@ -688,13 +716,28 @@
     window.__showToast = showToast;
 
     var ready = false;
-    var es = new EventSource('/api/logs-stream');
-    es.addEventListener('ready', function() { ready = true; });
-    es.onmessage = function(e) {
-      if (!ready) return;
-      var log = JSON.parse(e.data);
-      showToast(log.message, { err: log.level === 'error', reload: true });
-    };
+    var es = null;
+    function connectLogStream() {
+      if (es) return;
+      ready = false;
+      var source = new EventSource('/api/logs-stream');
+      es = source;
+      source.addEventListener('ready', function() { if (es === source) ready = true; });
+      source.onmessage = function(e) {
+        if (es !== source || !ready) return;
+        var log = JSON.parse(e.data);
+        showToast(log.message, { err: log.level === 'error', reload: true });
+      };
+    }
+    // A history-cached page must not retain an HTTP/1 connection. Reconnect on
+    // restoration, after registering handlers, and suppress replayed toast logs.
+    window.addEventListener('pagehide', function() {
+      if (es) es.close();
+      es = null;
+      ready = false;
+    });
+    window.addEventListener('pageshow', connectLogStream);
+    connectLogStream();
   })();
   </script>
   {{end}}

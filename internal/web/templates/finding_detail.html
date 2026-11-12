@@ -17,7 +17,7 @@
     {{if .Detail.Finding.FilePath}}<div><dt>Location</dt><dd>{{.Detail.Finding.FilePath}}{{if .Detail.Finding.StartLine}}:{{.Detail.Finding.StartLine}}{{end}}</dd></div>{{end}}
     {{if .Detail.Finding.SecretType}}<div><dt>Secret type / Resolution</dt><dd>{{.Detail.Finding.SecretType}} / {{findingOrUnknown .Detail.Finding.SecretResolution}}</dd></div>{{end}}
   </dl></section>
-  <section class="card" aria-labelledby="finding-asset-heading"><div class="section-heading"><h2 id="finding-asset-heading">Asset</h2><a href="/findings?asset_id={{.Detail.Asset.ID}}">この Asset の一覧</a></div><dl class="finding-facts">
+  <section class="card" aria-labelledby="finding-asset-heading"><div class="section-heading"><h2 id="finding-asset-heading">Asset</h2><a href="/assets/{{.Detail.Asset.ID}}">この Asset の詳細</a></div><dl class="finding-facts">
     <div><dt>Native ID</dt><dd>{{findingOrUnknown .Detail.Asset.NativeID}}</dd></div>
     <div><dt>Asset ID</dt><dd>{{.Detail.Asset.ID}}</dd></div>
     <div><dt>Type / Provider</dt><dd>{{.Detail.Asset.Type}} / {{.Detail.Asset.Provider}}</dd></div>
