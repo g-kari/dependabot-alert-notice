@@ -7,9 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'ビルドする既存のv*タグ（新規タグの自動作成なし）'
+        description: 'ビルドするv*タグ（新規作成は下の項目で明示）'
         required: true
         type: string
+      create_tag:
+        description: '新規の安定版タグを現在のmainから作成する（既存タグは変更しない）'
+        default: false
+        type: boolean
       publish:
         description: '検証後に安定版Releaseを公開する（プレリリースタグはdraftのまま）'
         default: false
@@ -23,7 +27,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create explicitly requested stable tag from main
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.create_tag }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$DISPATCH_REF" = refs/heads/main
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]]
+          source_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$source_sha" = "$DISPATCH_SHA"
+          tag_endpoint="repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG"
+          tag_query=".[] | select(.ref == \"refs/tags/$RELEASE_TAG\") | .object.sha"
+          existing_sha=$(gh api "$tag_endpoint" --jq "$tag_query")
+          if [ -n "$existing_sha" ]; then
+            test "$existing_sha" = "$source_sha"
+            echo 'The exact tag already points to current main; no write is needed.'
+            exit 0
+          fi
+          # Do not tag a main that changed while the initial reference was read.
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$source_sha"
+          # A lost write acknowledgement must be reconciled before any later retry.
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$source_sha"; then
+            echo 'Tag creation did not acknowledge success; checking the exact ref.'
+          fi
+          observed_sha=$(gh api "$tag_endpoint" --jq "$tag_query")
+          test "$observed_sha" = "$source_sha"
+
   mac-build:
+    needs: prepare-tag
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -144,9 +189,10 @@ jobs:
             echo 'Stable SemVer tagではないためdraftを維持します。'
             exit 0
           fi
-          args=(--repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest --title "Security Notice ${RELEASE_TAG}")
+          args=(--repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest --title "DevSecOps Console ${RELEASE_TAG}")
           notes_file="packaging/releases/${RELEASE_TAG}.md"
           if [ -f "$notes_file" ]; then
             args+=(--notes-file "$notes_file")
           fi
           gh release edit "$RELEASE_TAG" "${args[@]}"
+
