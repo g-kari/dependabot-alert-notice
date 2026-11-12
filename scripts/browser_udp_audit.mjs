@@ -1,5 +1,6 @@
 // Classify captured failed operations, never infer their Chromium call site.
 // This is not packet capture or proof about operations omitted from NetLog.
+export const NET_SOURCE_NAMES=new Set(('NONE URL_REQUEST PAC_FILE_DECIDER HTTP_PROXY_CONNECT_JOB SOCKS_CONNECT_JOB SSL_CONNECT_JOB TRANSPORT_CONNECT_JOB TCP_CONNECT_JOB TCP_STREAM_ATTEMPT TLS_STREAM_ATTEMPT SOCKET HTTP2_SESSION QUIC_CONNECTION_MIGRATION QUIC_SESSION HOST_RESOLVER_IMPL_JOB DISK_CACHE_ENTRY MEMORY_CACHE_ENTRY HTTP_STREAM_JOB HTTP_STREAM_POOL HTTP_STREAM_POOL_JOB HTTP_STREAM_POOL_GROUP HTTP_STREAM_POOL_ATTEMPT_MANAGER HTTP_STREAM_POOL_QUIC_ATTEMPT EXPONENTIAL_BACKOFF_THROTTLING UDP_SOCKET CERT_VERIFY_PROC_CREATED CERT_VERIFIER_JOB CERT_VERIFIER_2QWAC_JOB CERT_VERIFIER_TASK PROXY_CLIENT_SOCKET BIDIRECTIONAL_STREAM NETWORK_QUALITY_ESTIMATOR HTTP_STREAM_JOB_CONTROLLER CT_TREE_STATE_TRACKER QUIC_SESSION_POOL_ASYNC_DNS_JOB QUIC_SESSION_POOL_DIRECT_JOB QUIC_SESSION_POOL_PROXY_JOB HTTP_SERVER_PROPERTIES HOST_CACHE_PERSISTENCE_MANAGER COOKIE_STORE HTTP_AUTH_CONTROLLER HTTP3_SESSION WEB_TRANSPORT_CLIENT NETWORK_SERVICE_HOST_RESOLVER DNS_OVER_HTTPS DNS_TRANSACTION DNS_TRANSACTION_PLATFORM_ATTEMPT NETWORK_CHANGE_NOTIFIER QUIC_SESSION_POOL UDP_CLIENT_SOCKET QUIC_PROXY_DATAGRAM_CLIENT_SOCKET PROXY_OVERRIDE_HOST_RESOLUTION CANARY_DOMAIN_SERVICE WEBSOCKET_CHANNEL ENTERPRISE_PROXY_SERVICE').split(' '));
 const ENDPOINT='[2001:4860:4860::8888]:443';
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const exactKeys=(x,keys)=>object(x)&&Object.keys(x).every(k=>keys.includes(k));
@@ -26,6 +27,7 @@ export function classifyFailedUDPConnects(log,details) {
     const event=log.events[i];
     if(!object(event)||!id(event.source?.id)||!Number.isSafeInteger(event.source.type))return rejected('invalid_source_identity',{event_index:i,source_id:Number.isSafeInteger(event?.source?.id)?event.source.id:null,source_type:Number.isSafeInteger(event?.source?.type)?event.source.type:null});
     const type=maps.logSourceType.get(event.source.type),name=maps.logEventTypes.get(event.type),phase=maps.logEventPhase.get(event.phase);
+    if(!NET_SOURCE_NAMES.has(type))return rejected('unknown_source_type');
     if(!type||!name||!['PHASE_NONE','PHASE_BEGIN','PHASE_END'].includes(phase))return rejected('unknown_event_identity');
     const params=event.params===undefined?{}:event.params;
     if(!object(params))return rejected('invalid_event_params');
@@ -35,7 +37,7 @@ export function classifyFailedUDPConnects(log,details) {
     source.events.push({i,name,phase,params});
     if(params.source_dependency!==undefined) {
       const d=params.source_dependency;
-      if(!exactKeys(d,['id','type'])||!id(d.id)||!Number.isSafeInteger(d.type)||!maps.logSourceType.has(d.type)||d.id===event.source.id)return rejected('invalid_dependency');
+      if(!exactKeys(d,['id','type'])||!id(d.id)||!Number.isSafeInteger(d.type)||!maps.logSourceType.has(d.type)||!NET_SOURCE_NAMES.has(maps.logSourceType.get(d.type))||d.id===event.source.id)return rejected('invalid_dependency');
       edges.push({from:event.source.id,to:d.id,type:maps.logSourceType.get(d.type)});
     }
     if(/^UDP_/.test(name)&&name!=='UDP_CONNECT')return rejected('other_udp_operation');

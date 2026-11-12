@@ -1,7 +1,7 @@
 // Opt-in normal-runner QA only. Node 22/24 builtins; no package or browser install.
 // Screenshots are actual CDP responses. Visual review remains a separate gate.
 import assert from 'node:assert/strict';
-import { classifyFailedUDPConnects, validNetLogSourceID } from './browser_udp_audit.mjs';
+import { classifyFailedUDPConnects, validNetLogSourceID, NET_SOURCE_NAMES } from './browser_udp_audit.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -175,7 +175,6 @@ const UDP_DETAIL_LIMITS=Object.freeze({sources:64,events:256,edges:128,depth:8,b
 const UDP_TYPES=new Set(['UDP_SOCKET','UDP_CLIENT_SOCKET']);
 const UDP_EVENTS=new Set(['UDP_CONNECT','UDP_LOCAL_ADDRESS','UDP_BYTES_SENT','UDP_BYTES_RECEIVED','UDP_SEND_ERROR','UDP_RECEIVE_ERROR']);
 const UDP_CONTEXT_EVENTS=new Set(['SOCKET_ALIVE','SOCKET_OPEN','SOCKET_CONNECT','HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK']);
-const NET_SOURCE_NAMES=new Set(('NONE URL_REQUEST PAC_FILE_DECIDER HTTP_PROXY_CONNECT_JOB SOCKS_CONNECT_JOB SSL_CONNECT_JOB TRANSPORT_CONNECT_JOB TCP_CONNECT_JOB TCP_STREAM_ATTEMPT TLS_STREAM_ATTEMPT SOCKET HTTP2_SESSION QUIC_CONNECTION_MIGRATION QUIC_SESSION HOST_RESOLVER_IMPL_JOB DISK_CACHE_ENTRY MEMORY_CACHE_ENTRY HTTP_STREAM_JOB HTTP_STREAM_POOL HTTP_STREAM_POOL_JOB HTTP_STREAM_POOL_GROUP HTTP_STREAM_POOL_ATTEMPT_MANAGER HTTP_STREAM_POOL_QUIC_ATTEMPT EXPONENTIAL_BACKOFF_THROTTLING UDP_SOCKET CERT_VERIFY_PROC_CREATED CERT_VERIFIER_JOB CERT_VERIFIER_2QWAC_JOB CERT_VERIFIER_TASK PROXY_CLIENT_SOCKET BIDIRECTIONAL_STREAM NETWORK_QUALITY_ESTIMATOR HTTP_STREAM_JOB_CONTROLLER CT_TREE_STATE_TRACKER QUIC_SESSION_POOL_ASYNC_DNS_JOB QUIC_SESSION_POOL_DIRECT_JOB QUIC_SESSION_POOL_PROXY_JOB HTTP_SERVER_PROPERTIES HOST_CACHE_PERSISTENCE_MANAGER COOKIE_STORE HTTP_AUTH_CONTROLLER HTTP3_SESSION WEB_TRANSPORT_CLIENT NETWORK_SERVICE_HOST_RESOLVER DNS_OVER_HTTPS DNS_TRANSACTION DNS_TRANSACTION_PLATFORM_ATTEMPT NETWORK_CHANGE_NOTIFIER QUIC_SESSION_POOL UDP_CLIENT_SOCKET QUIC_PROXY_DATAGRAM_CLIENT_SOCKET PROXY_OVERRIDE_HOST_RESOLUTION CANARY_DOMAIN_SERVICE WEBSOCKET_CHANNEL ENTERPRISE_PROXY_SERVICE').split(' '));
 function literalEndpoint(raw) {
   if(typeof raw!=='string'||raw.length>128)return null;
   const match=raw.startsWith('[')?raw.match(/^\[([0-9a-fA-F:.]+)\]:([0-9]{1,5})$/):raw.match(/^([0-9.]+):([0-9]{1,5})$/);
@@ -231,27 +230,31 @@ function udpNetlogDetails(log) {
   const result={scope:'captured Chromium NetLog source chains only; not OS packet capture',probe_attribution:'unknown; endpoint/marker alone do not establish a call site',limitations:['AddressSorter can use a non-capturing null NetLog; absence of events is not global zero-egress proof'],limits,observed_udp_events:observedUDP,observed_send_events:observedSends,observed_send_errors:observedSendErrors,has_send_event:observedSends>0,has_send_attempt:observedSends+observedSendErrors>0,details_complete:false,sources:[],dependencies:[],events:[],components:[],failure_reasons:[],overflow:false};
   if(!seeds.size&&!observedUDP){result.details_complete=true;return result;}
   if(!Number.isInteger(log.constants?.logEventPhase?.PHASE_NONE)||!errors.size)fail('diagnostic_constants_missing');
-  const adjacent=new Map();
-  for(const edge of allEdges.values())for(const [a,b]of [[edge.from,edge.to],[edge.to,edge.from]]){
-    if(!adjacent.has(a))adjacent.set(a,new Set());adjacent.get(a).add(b);
-  }
-  const selected=new Set(),queue=[];
-  function select(id,depth) {
+  // Project every UDP source and its immediate ownership/anomaly endpoints.
+  // A non-UDP parent can share TCP sockets with arbitrarily many HTTP jobs;
+  // those siblings are outside this diagnostic projection, not exempt from
+  // the classifier's complete raw identity/dependency/UDP/DNS validation.
+  result.projection_scope='all UDP sources and immediate dependency endpoints; stop at non-UDP context';
+  result.raw_graph_validation='classification separately validates all raw identities and dependencies';
+  const selected=new Set();
+  function select(id,depth=0) {
     if(selected.has(id))return;
+    if(depth>limits.depth){result.overflow=true;fail('dependency_depth_exceeded');return;}
     if(selected.size>=limits.sources){result.overflow=true;fail('source_bound_exceeded');return;}
-    selected.add(id);queue.push([id,depth]);
+    selected.add(id);
   }
-  for(const id of seeds)select(id,0);
-  for(let i=0;i<queue.length;i++) {
-    const [id,depth]=queue[i];
-    for(const next of adjacent.get(id)??[])if(!selected.has(next)) {
-      if(depth>=limits.depth){result.overflow=true;fail('dependency_depth_exceeded');}
-      else select(next,depth+1);
-    }
+  for(const id of seeds)select(id);
+  for(const edge of allEdges.values())if(seeds.has(edge.from)||seeds.has(edge.to)) {
+    select(edge.from,seeds.has(edge.from)?0:1);select(edge.to,seeds.has(edge.to)?0:1);
   }
+  result.context_boundary_edges=[...allEdges.values()].filter(edge=>selected.has(edge.from)!==selected.has(edge.to)).length;
   for(const edge of allEdges.values())if(selected.has(edge.from)&&selected.has(edge.to)) {
     if(result.dependencies.length<limits.edges)result.dependencies.push(edge);
     else {result.overflow=true;fail('dependency_edge_bound_exceeded');}
+  }
+  const adjacent=new Map();
+  for(const edge of result.dependencies)for(const [a,b]of [[edge.from,edge.to],[edge.to,edge.from]]){
+    if(!adjacent.has(a))adjacent.set(a,new Set());adjacent.get(a).add(b);
   }
   const states=new Map(),connects=new Map(),connectedDestinations=new Map(),alive=new Map();
   for(const id of selected) {
@@ -514,6 +517,37 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
     assert.equal(rejected.failed_udp_connect_operations,0);
     assert(rejected.violations.length,'prohibited operation must still reject the complete audit');
   }
+  const siblings=structuredClone(failedFixture);
+  for(let i=200;i<400;i++)siblings.events.push(event(13,0,i,20,{source_dependency:{id:100,type:20},ipv6_available:false,cached:false}));
+  const siblingAudit=netlogAudit(siblings,origins,endpoints);
+  assert.equal(siblingAudit.failed_udp_connect_operations,1);
+  assert.deepEqual(siblingAudit.violations,[]);
+  assert(siblingAudit.udp_diagnostics.context_boundary_edges>=200);
+  for(const extra of [event(13,0,401,20,{source_dependency:{id:102,type:22}}),event(11,0,402,22,{net_error:-109}),event(14,0,403,20)]) {
+    const bad=netlogAudit({...siblings,events:[...siblings.events,extra]},origins,endpoints);
+    assert.equal(bad.failed_udp_connect_operations,0);
+    assert(bad.violations.length);
+  }
+  for(const mutate of [
+    f=>f.events.at(-1).params.source_dependency={id:0,type:20},
+    f=>f.events.at(-1).params.source_dependency={id:999999,type:20},
+    f=>f.events.at(-1).params.source_dependency={id:100,type:999999},
+    f=>f.events.at(-1).source.type=999999,
+    f=>{f.constants.logSourceType.NEW_UNRECOGNIZED_SOURCE=999;f.events.at(-1).source.type=999;},
+    f=>f.events.at(-1).type=999999,
+    f=>f.events.at(-1).phase=999999,
+    f=>f.events.at(-1).source={id:100,type:21}
+  ]) {
+    const f=structuredClone(siblings);mutate(f);
+    const bad=netlogAudit(f,origins,endpoints);
+    assert.equal(bad.failed_udp_connect_operations,0,'omitted context must still receive full raw validation');
+    assert(bad.violations.length);
+  }
+  const ownedOverflow=structuredClone(failedFixture);
+  for(let i=500;i<570;i++)ownedOverflow.events.push(event(4,1,i,22,{address:'[2001:4860:4860::8888]:443'}));
+  const overflowAudit=netlogAudit(ownedOverflow,origins,endpoints);
+  assert.equal(overflowAudit.failed_udp_connect_operations,0);
+  assert(overflowAudit.udp_diagnostics.failure_reasons.some(x=>x.reason==='source_bound_exceeded'));
   const failures=input=>udpNetlogDetails(input).failure_reasons.map(r=>r.reason);
   const change=fn=>{const f=structuredClone(fixture);fn(f);return f;};
   const zero=change(f=>f.events.splice(8,0,event(5,0,102,22,{byte_count:0,bytes:'secret-zero'})));
@@ -560,8 +594,8 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   assert(sourceBounded.overflow&&sourceBounded.sources.length<=UDP_DETAIL_LIMITS.sources);
   assert(failures(sourceOverflow).includes('source_bound_exceeded'));
   const depthOverflow=change(f=>{for(let i=0;i<12;i++)f.events.push(event(13,0,100+i*100,20,{source_dependency:{id:200+i*100,type:20},ipv6_available:false,cached:false}));});
-  assert(failures(depthOverflow).includes('dependency_depth_exceeded'));
-  const edgeOverflow=change(f=>{for(let a=100;a<114;a++)for(let b=100;b<114;b++)if(a!==b)f.events.push(event(13,0,a,20,{source_dependency:{id:b,type:20},ipv6_available:false,cached:false}));});
+  assert(!failures(depthOverflow).includes('dependency_depth_exceeded'),'unrelated parent ancestry is outside the ownership projection');
+  const edgeOverflow=change(f=>{for(let a=100;a<114;a++)for(let b=100;b<114;b++)if(a!==b)f.events.push(event(13,0,a,22,{source_dependency:{id:b,type:22},ipv6_available:false,cached:false}));});
   assert(failures(edgeOverflow).includes('dependency_edge_bound_exceeded'));
   assert(Buffer.byteLength(JSON.stringify(udpNetlogDetails(edgeOverflow)))<=UDP_DETAIL_LIMITS.bytes);
   const byteOverflow={constants,events:[event(13,0,100,20,{ipv6_available:false,cached:false})]};
@@ -586,6 +620,14 @@ function focusLegacyDangerDisclosure(doc=document) {
   summary.focus();
   return true;
 }
+function skipFocusState(doc=document,win=window) {
+  const el=doc.activeElement,s=win.getComputedStyle(el),r=el.getBoundingClientRect(),v=win.visualViewport;
+  return {style:s.outlineStyle,width:parseFloat(s.outlineWidth),visible:r.top>=0&&r.bottom<=win.innerHeight,
+    focus:el.matches(':focus'),focus_visible:el.matches(':focus-visible'),top:r.top,bottom:r.bottom,
+    computed_top:s.top,position:s.position,transform:s.transform,viewport_height:win.innerHeight,
+    scroll_x:win.scrollX,scroll_y:win.scrollY,client_height:doc.documentElement.clientHeight,
+    visual_viewport:v?{offset_top:v.offsetTop,page_top:v.pageTop,height:v.height,scale:v.scale}:null};
+}
 // Real-page checks for sibling content that may overlap without main overflow.
 function responsiveLayoutIssues(doc=document) {
   const issues=[];
@@ -608,6 +650,12 @@ function checkCaptureBudget(cases) {
   return count;
 }
 async function selfTest() {
+  const focusDoc={activeElement:{matches:()=>true,getBoundingClientRect:()=>({top:-100,bottom:-53})},documentElement:{clientHeight:844}};
+  const focusWindow={getComputedStyle:()=>({outlineStyle:'solid',outlineWidth:'3px',top:'12px',position:'fixed',transform:'none'}),innerHeight:844,scrollX:0,scrollY:0,visualViewport:{offsetTop:0,pageTop:0,height:844,scale:1}};
+  assert.equal(skipFocusState(focusDoc,focusWindow).visible,false);
+  focusDoc.activeElement.getBoundingClientRect=()=>({top:12,bottom:59});
+  assert.equal(skipFocusState(focusDoc,focusWindow).visible,true);
+
   const rect=(left,top,right,bottom)=>({getBoundingClientRect:()=>({left,top,right,bottom})});
   const layoutDoc=(a,b)=>({querySelectorAll:selector=>selector==='.finding-source-mix li'?[{querySelector:s=>s==='span'?a:b}]:[]});
   assert.deepEqual(responsiveLayoutIssues(layoutDoc(rect(0,0,100,20),rect(50,0,150,20))),['source-label-meter-overlap']);
@@ -984,8 +1032,13 @@ async function main() {
     await navigate(session, base+'/assets');
     await key(session, 'Tab', 'Tab', 9);
     assert(await ev(session, "document.activeElement.classList.contains('finding-skip')"), 'first Tab did not reach skip link');
-    const focus=await ev(session, "(()=>{const el=document.activeElement,s=getComputedStyle(el),r=el.getBoundingClientRect();return{style:s.outlineStyle,width:parseFloat(s.outlineWidth),visible:r.top>=0&&r.bottom<=innerHeight,focus:el.matches(':focus'),focus_visible:el.matches(':focus-visible'),top:r.top,bottom:r.bottom,viewport_height:innerHeight}})()");
-    checks.flows.push({check:'skip-link keyboard focus',viewport:viewport.name,...focus});
+    const initialFocus=await ev(session,`(${skipFocusState.toString()})()`);
+    // Observe rendering after input dispatch; this does not assume a cause.
+    // Observe two rendering frames without changing focus, styles or scroll.
+    await ev(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    assert(await ev(session, "document.activeElement.classList.contains('finding-skip')"), 'skip focus changed during rendering observation');
+    const focus=await ev(session,`(${skipFocusState.toString()})()`);
+    checks.flows.push({check:'skip-link keyboard focus',viewport:viewport.name,initial:initialFocus,...focus});
     assert(focus.style!=='none'&&focus.width>=2&&focus.visible, 'keyboard focus is not visible');
     await key(session, 'Tab', 'Tab', 9);
     await key(session, 'Tab', 'Tab', 9, 8);

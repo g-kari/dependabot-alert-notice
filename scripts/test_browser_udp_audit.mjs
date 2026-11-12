@@ -43,6 +43,8 @@ for(const [label,edit]of [
  ['duplicate connect',f=>f.events.splice(5,0,...structuredClone(f.events.slice(3,5)))],
  ['source collision',f=>f.events[4].source.type=2],
  ['source zero',f=>f.events[4].source.id=0],
+ ['defined unknown source',f=>{f.constants.logSourceType.NEW_UNKNOWN=999;f.events[8].source.type=999;}],
+ ['defined unknown dependency',f=>{f.constants.logSourceType.NEW_UNKNOWN=999;f.events[0].params.source_dependency.type=999;}],
  ['source too negative',f=>f.events[4].source.id=-2147483649],
  ['source unsigned alias',f=>f.events[4].source.id=4294967295],
  ['source too positive',f=>f.events[4].source.id=2147483648],
