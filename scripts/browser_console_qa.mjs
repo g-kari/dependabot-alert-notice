@@ -152,7 +152,10 @@ function networkPolicy(origins, proxyOrigin) {
   return {
     // Chrome's mapped resolver applies MAP to numeric literals too. EXCLUDE
     // prevents our own fixture/proxy IP from being rewritten to NOTFOUND.
-    resolver:'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+    // Chrome 156's mapped resolver recognizes ^NOTFOUND, not ~NOTFOUND:
+    // https://github.com/chromium/chromium/blob/a21ce95c24ce3964416f09ae1862f53f319eb4d0/net/dns/mapped_host_resolver.cc#L64-L80
+    // The excluded loopback resolver may still probe IPv6; the UDP gate stays strict.
+    resolver:'MAP * ^NOTFOUND, EXCLUDE 127.0.0.1',
     // Remove Chromium's implicit broad loopback bypass, then allow ONLY the
     // exact fixture scheme/host/port. Everything else reaches a deny-only proxy.
     bypass:['<-loopback>', ...origins].join(';'),
@@ -354,7 +357,7 @@ function netlogAudit(log, origins, endpoints) {
   assert(Number.isInteger(phases?.PHASE_BEGIN)&&Number.isInteger(phases?.PHASE_END), 'missing NetLog phases');
   const names=new Map(Object.entries(types).map(([k, v])=>[v, k])), sockets=new Set(), attempts=new Map();
   const report= {
-    url_attempt_count:0, non_fixture_url_attempt_count:0, non_fixture_url_attempts:[], tcp_endpoint_events:0, tcp_bytes_sent_events:0, udp_events:0, violations:[], scope:'Chromium NetLog socket events; not OS packet capture', url_attempts_are_not_transport_success:true
+    socket_pool_stalls:0, url_attempt_count:0, non_fixture_url_attempt_count:0, non_fixture_url_attempts:[], tcp_endpoint_events:0, tcp_bytes_sent_events:0, udp_events:0, violations:[], scope:'Chromium NetLog socket events; not OS packet capture', url_attempts_are_not_transport_success:true
   };
   const bad=x=> {
     if(report.violations.length<16)report.violations.push(x);
@@ -375,6 +378,7 @@ function netlogAudit(log, origins, endpoints) {
   for(const event of log.events) {
     visit(event.params);
     const name=names.get(event.type), params=event.params?? {}, id=event.source?.id;
+    if(name==='SOCKET_POOL_STALLED_MAX_SOCKETS_PER_GROUP'||name==='SOCKET_POOL_STALLED_MAX_SOCKETS')report.socket_pool_stalls++;
     if(['TCP_CONNECT', 'TCP_CONNECT_ATTEMPT', 'SOCKET_BYTES_SENT', 'UDP_CONNECT', 'UDP_BYTES_SENT'].includes(name)&&!Number.isInteger(id))bad('transport event source identity missing');
     if(name==='UDP_CONNECT'||name==='UDP_BYTES_SENT'||name?.startsWith('DNS_TRANSACTION')) {
       report.udp_events++;
@@ -546,7 +550,7 @@ async function selfTest() {
   for(const u of ['https://example.invalid', 'http://localhost:123', 'http://127.0.0.1:124', 'file:///tmp/x', 'data:text/html,x', 'http://user:secret@127.0.0.1:123'])assert(!allowedOrigin(u, new Set(['http://127.0.0.1:123'])));
   assert(contrast('rgb(6, 43, 36)', 'rgb(120, 221, 194)')>=4.5);
   const origins=new Set(['http://127.0.0.1:123', 'http://127.0.0.1:124', 'http://127.0.0.1:125']), policy=networkPolicy(origins, 'http://127.0.0.1:126');
-  assert.equal(policy.resolver, 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1');
+  assert.equal(policy.resolver, 'MAP * ^NOTFOUND, EXCLUDE 127.0.0.1');
   assert.equal(policy.bypass, '<-loopback>;http://127.0.0.1:123;http://127.0.0.1:124;http://127.0.0.1:125');
   assert(!policy.endpoints.has('127.0.0.1:127'));
   assert.equal(networkLabel('https://user:secret@example.invalid/path?token=secret#fragment'), 'https://example.invalid/path');
@@ -919,6 +923,24 @@ async function main() {
     await navigate(session, base+fixture.cleared_source_url);
     const cleared=await ev(session, `(()=>{const link=[...document.querySelectorAll('a')].find(a=>a.getAttribute('href')?.startsWith('/findings?asset_id='));return{all:link?!new URL(link.href).searchParams.has('source'):false,anchor:!!document.querySelector('a[href="/findings/${fixture.anchor_id}"]')}})()`);
     assert(cleared.all&&cleared.anchor, 'cleared source inherited return-list source');
+    // Leave both legacy log streams, then restore the page through real browser
+    // history. This covers history-cached documents as well as fresh reloads.
+    await navigate(session, base+'/logs');
+    await until(session, "document.querySelector('#stream-status')?.textContent.includes('ライブ')", 'legacy stream before history');
+    const logRequests=()=> (requests.get(session)??[]).filter(r=>new URL(r.url).pathname==='/api/logs-stream').length;
+    const beforeRestore=logRequests();
+    await navigate(session, base+'/assets');
+    const legacyHistory=await client.call('Page.getNavigationHistory', {}, session);
+    assert(legacyHistory.currentIndex>0);
+    await client.call('Page.navigateToHistoryEntry', {
+      entryId:legacyHistory.entries[legacyHistory.currentIndex-1].id
+    }, session);
+    await ready(session, base+'/logs');
+    await until(session, "document.querySelector('#stream-status')?.textContent.includes('ライブ')", 'legacy stream after history');
+    assert(logRequests()>beforeRestore, 'restored legacy page did not reconnect actual SSE');
+    await reload(session, base+'/logs');
+    await until(session, "document.querySelector('#stream-status')?.textContent.includes('ライブ')", 'legacy stream after reload');
+    checks.flows.push({check:'actual legacy SSE navigation/history restoration/reload',viewport:viewport.name,passed:true});
     await navigate(session, base+'/');
     await hoverContrast(session, '.btn-reject', 'legacy danger');
     checks.flows.push( {
@@ -1046,7 +1068,9 @@ async function main() {
         }
         : {
           requestId, errorReason:'BlockedByClient'
-        }, message.sessionId).catch(e=>violation(e.message));
+        }, message.sessionId).then(()=>{
+          if(message.params.resourceType==='Document')navigationDiagnostic(checks.navigation_events,safe?'document-continued':'document-blocked',{url:request.url});
+        }).catch(e=>violation(e.message));
       }else if(message.method==='Network.requestWillBeSent') {
         const request=message.params.request;
         if(request.url==='about:blank')return;

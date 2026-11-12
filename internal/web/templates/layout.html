@@ -708,13 +708,28 @@
     window.__showToast = showToast;
 
     var ready = false;
-    var es = new EventSource('/api/logs-stream');
-    es.addEventListener('ready', function() { ready = true; });
-    es.onmessage = function(e) {
-      if (!ready) return;
-      var log = JSON.parse(e.data);
-      showToast(log.message, { err: log.level === 'error', reload: true });
-    };
+    var es = null;
+    function connectLogStream() {
+      if (es) return;
+      ready = false;
+      var source = new EventSource('/api/logs-stream');
+      es = source;
+      source.addEventListener('ready', function() { if (es === source) ready = true; });
+      source.onmessage = function(e) {
+        if (es !== source || !ready) return;
+        var log = JSON.parse(e.data);
+        showToast(log.message, { err: log.level === 'error', reload: true });
+      };
+    }
+    // A history-cached page must not retain an HTTP/1 connection. Reconnect on
+    // restoration, after registering handlers, and suppress replayed toast logs.
+    window.addEventListener('pagehide', function() {
+      if (es) es.close();
+      es = null;
+      ready = false;
+    });
+    window.addEventListener('pageshow', connectLogStream);
+    connectLogStream();
   })();
   </script>
   {{end}}
