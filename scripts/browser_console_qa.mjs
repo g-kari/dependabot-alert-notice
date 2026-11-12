@@ -133,6 +133,18 @@ function networkLabel(raw) {
 function scrubNetworkText(text) {
   return String(text).replace(/(?:https?|wss?):\/\/[^\s\"'<>]+/g, networkLabel);
 }
+// Navigation diagnostics contain no headers, bodies, query strings or CDP IDs.
+// Keep the most recent events, including the last failed navigation, bounded.
+function navigationDiagnostic(events, kind, details={}) {
+  const entry={kind};
+  if(typeof details.url==='string')entry.url=networkLabel(details.url);
+  if(Number.isInteger(details.status))entry.status=details.status;
+  if(typeof details.error==='string')entry.error=scrubNetworkText(details.error).slice(0,512);
+  if(typeof details.type==='string')entry.type=details.type.slice(0,64);
+  if(typeof details.waiting==='boolean')entry.waiting=details.waiting;
+  if(events.length===64)events.shift();
+  events.push(entry);
+}
 function networkPolicy(origins, proxyOrigin) {
   assert(origins.size===3);
   for(const u of origins)assert(allowedOrigin(u, origins)&&new URL(u).pathname==='/');
@@ -539,6 +551,17 @@ async function selfTest() {
   assert(!policy.endpoints.has('127.0.0.1:127'));
   assert.equal(networkLabel('https://user:secret@example.invalid/path?token=secret#fragment'), 'https://example.invalid/path');
   assert.equal(networkLabel('invalid target?secret'), '[unparseable network target]');
+  const navigationEvents=[];
+  for(let i=0;i<70;i++)navigationDiagnostic(navigationEvents,'document-response',{
+    url:'http://127.0.0.1:123/assets/not-an-id?token=secret#fragment',status:404,
+    error:'failed http://127.0.0.1:123/path?token=secret',headers:{authorization:'secret'}
+  });
+  assert.equal(navigationEvents.length,64);
+  assert.equal(navigationEvents.at(-1).status,404);
+  assert.equal(navigationEvents.at(-1).url,'http://127.0.0.1:123/assets/not-an-id');
+  assert(!JSON.stringify(navigationEvents).includes('secret'));
+  assert(!JSON.stringify(navigationEvents).includes('headers'));
+  assert(Buffer.byteLength(JSON.stringify(navigationEvents))<64*1024);
   assert(internalTarget( {
     type:'browser_ui', url:'chrome://test'
   }));
@@ -686,7 +709,7 @@ async function main() {
     assert.equal(u.pathname, '/');
   }
   const checks= {
-    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], blocked_browser_activity: {
+    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], navigation_events:[], blocked_browser_activity: {
       proxy_requests:0, proxy_connects:0, targets:[], attempts:[]
     }, reduced_motion_scope:'media preference override verified only; CSS response not exhaustively measured', screenshot_scope:'28 viewport-only PNGs; below-fold content is not fully captured', metadata:fixture.metadata
   }, manifest= {
@@ -737,12 +760,15 @@ async function main() {
   }
   async function navigate(session, url, status=200) {
     assert(allowedOrigin(url, origins), 'navigation escaped loopback');
+    navigationDiagnostic(checks.navigation_events,'navigate-start',{url,status});
     const r=await client.call('Page.navigate', {
       url
     }, session);
+    navigationDiagnostic(checks.navigation_events,'navigate-result',{url,error:r.errorText});
     assert(!r.errorText, `navigation error ${r.errorText}`);
     await ready(session, url);
     assert.equal(documents.get(session)?.status, status, `actual HTTP status for ${new URL(url).pathname}`);
+    navigationDiagnostic(checks.navigation_events,'navigate-ready',{url,status});
   }
   async function key(session, key, code, number, modifiers=0) {
     for(const type of ['keyDown', 'keyUp'])await client.call('Input.dispatchKeyEvent', {
@@ -960,6 +986,9 @@ async function main() {
           sessionId, targetInfo
         }
         =message.params;
+        navigationDiagnostic(checks.navigation_events,'target-attached',{
+          url:targetInfo.url,type:targetInfo.type,waiting:message.params.waitingForDebugger===true
+        });
         const configure=(async()=> {
           assert(sessions.size<=8, 'unexpected browser target count');
           if(!['page', 'iframe'].includes(targetInfo.type)) {
@@ -998,12 +1027,18 @@ async function main() {
           return sessionId;
         })();
         sessions.set(targetInfo.targetId, configure);
-        configure.catch(e=>violation(e.message));
+        configure.catch(e=>{
+          navigationDiagnostic(checks.navigation_events,'target-configure-failed',{error:e.message});
+          violation(e.message);
+        });
       }else if(message.method==='Fetch.requestPaused') {
         const {
           requestId, request
         }
         =message.params;
+        if(message.params.resourceType==='Document')navigationDiagnostic(checks.navigation_events,'document-paused',{
+          url:request.url,status:message.params.responseStatusCode,error:message.params.responseErrorReason
+        });
         const safe=(request.url==='about:blank'||allowedOrigin(request.url, origins))&&['GET', 'HEAD'].includes(request.method);
         if(!safe)violation(`blocked off-origin/action page request ${request.method} ${networkLabel(request.url)}`);
         client.call(safe?'Fetch.continueRequest':'Fetch.failRequest', safe? {
@@ -1024,9 +1059,19 @@ async function main() {
         requests.set(message.sessionId, list);
         if(allRequests.length<1024)allRequests.push(request.url);
       }else if(message.method==='Network.responseReceived'&&message.params.type==='Document') {
+        navigationDiagnostic(checks.navigation_events,'document-response',{
+          url:message.params.response.url,status:message.params.response.status
+        });
         documents.set(message.sessionId, {
           url:message.params.response.url, status:message.params.response.status, loader:message.params.loaderId
         });
+      } else if(message.method==='Network.loadingFailed'&&message.params.type==='Document') {
+        navigationDiagnostic(checks.navigation_events,'document-failed',{error:message.params.errorText});
+      } else if(message.method==='Page.frameNavigated'&&!message.params.frame.parentId) {
+        navigationDiagnostic(checks.navigation_events,'frame-navigated',{url:message.params.frame.url});
+      } else if(message.method==='Page.javascriptDialogOpening') {
+        navigationDiagnostic(checks.navigation_events,'unexpected-dialog',{url:message.params.url,type:message.params.type});
+        violation('unexpected JavaScript dialog blocks browser acceptance');
       } else if(message.method==='Network.webSocketCreated') {
         violation('unexpected WebSocket');
       }
@@ -1090,6 +1135,10 @@ async function main() {
   }catch(e) {
     fatal=e;
     checks.error=scrubNetworkText(e.stack??e).slice(0, 16384);
+    // Preserve decisive bounded evidence in the job log even after artifacts expire.
+    console.error('FAIL browser navigation diagnostics',JSON.stringify({
+      error:checks.error,events:checks.navigation_events,violations:checks.violations
+    }));
   } finally {
     clearTimeout(watchdog);
     if(chrome&&!spawnError) {

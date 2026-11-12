@@ -20,6 +20,15 @@ var securitySchema string
 //go:embed migrations/003_security_enrichment.sql
 var securityEnrichmentSchema string
 
+//go:embed migrations/004_security_enrichment_journal.sql
+var securityEnrichmentJournalSchema string
+
+//go:embed migrations/005_security_enrichment_reservation.sql
+var securityEnrichmentReservationSchema string
+
+//go:embed migrations/006_security_enrichment_release.sql
+var securityEnrichmentReleaseSchema string
+
 func securityID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -106,6 +115,15 @@ func (s *Store) migrateSecurity() error {
 	if _, err := tx.ExecContext(ctx, securityEnrichmentSchema); err != nil {
 		return fmt.Errorf("security enrichment migration: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, securityEnrichmentJournalSchema); err != nil {
+		return fmt.Errorf("security operation journal migration: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, securityEnrichmentReservationSchema); err != nil {
+		return fmt.Errorf("security operation reservation migration: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, securityEnrichmentReleaseSchema); err != nil {
+		return fmt.Errorf("security operation release migration: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("security migration確定失敗: %w", err)
 	}
@@ -137,6 +155,9 @@ func (s *Store) StartIngestRun(ctx context.Context, connector, scope string, at 
 	if strings.TrimSpace(connector) == "" || strings.TrimSpace(scope) == "" || at.IsZero() {
 		return run, fmt.Errorf("ingest runのsource/scope/時刻が未設定です")
 	}
+	if connector == "epss_feed" || connector == "kev_feed" {
+		return startGuardedFeedIngestRun(ctx, s.db, connector, scope, at)
+	}
 	id, err := securityID()
 	if err != nil {
 		return run, err
@@ -167,8 +188,16 @@ func (s *Store) FinishIngestRun(ctx context.Context, id, result, coverage, error
 	if len(errorCode) > 64 || strings.IndexFunc(errorCode, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') }) >= 0 {
 		return fmt.Errorf("ingest error codeが不正です")
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ingest run終了開始失敗: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := guardLegacyIngestFinishTx(ctx, tx, id); err != nil {
+		return err
+	}
 	var body string
-	if err := s.db.QueryRowContext(ctx, `SELECT body_json FROM ingest_runs WHERE id=? AND result='running'`, id).Scan(&body); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT body_json FROM ingest_runs WHERE id=? AND result='running'`, id).Scan(&body); err != nil {
 		return fmt.Errorf("ingest run読込失敗: %w", err)
 	}
 	var run model.IngestRun
@@ -187,8 +216,11 @@ func (s *Store) FinishIngestRun(ctx context.Context, id, result, coverage, error
 	if err != nil {
 		return fmt.Errorf("ingest run変換失敗: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE ingest_runs SET finished_at=?,result=?,coverage=?,error=?,body_json=? WHERE id=? AND result='running'`, closed.Format(time.RFC3339Nano), result, coverage, errorCode, string(encoded), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE ingest_runs SET finished_at=?,result=?,coverage=?,error=?,body_json=? WHERE id=? AND result='running'`, closed.Format(time.RFC3339Nano), result, coverage, errorCode, string(encoded), id); err != nil {
 		return fmt.Errorf("ingest run終了失敗: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ingest run終了確定失敗: %w", err)
 	}
 	return nil
 }

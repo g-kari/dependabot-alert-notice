@@ -39,22 +39,7 @@ func normalizeSecurityEnrichmentImport(run model.IngestRun, feed model.SecurityE
 	if !securityUUID(run.ID) || run.Connector != feed.Source+"_offline" || run.Scope != scope || !securityTime(run.StartedAt) || run.FinishedAt == nil || !securityTime(*run.FinishedAt) || run.FinishedAt.Before(run.StartedAt) || !run.StartedAt.Equal(feed.ObservedAt) || run.Result != model.IngestResultSuccess || run.Coverage != model.IngestCoveragePartial || run.Error != "" || !strings.HasPrefix(run.Cursor, "sha256:") || !securityDigest(strings.TrimPrefix(run.Cursor, "sha256:")) {
 		return run, feed, "", errors.New("invalid enrichment run metadata")
 	}
-	feed.SelectedCVEs, err = threat.NormalizeOfflineCVEs(feed.SelectedCVEs)
-	if err != nil {
-		return run, feed, "", fmt.Errorf("normalize enrichment selection: %w", err)
-	}
-	feed.PublishedAt, feed.ObservedAt = feed.PublishedAt.UTC(), feed.ObservedAt.UTC()
-	feed.Entries = slices.Clone(feed.Entries)
-	if feed.Entries == nil {
-		feed.Entries = []model.SecurityEnrichmentEntry{}
-	}
-	for i := range feed.Entries {
-		if feed.Entries[i].KEVDateAdded != nil {
-			at := feed.Entries[i].KEVDateAdded.UTC()
-			feed.Entries[i].KEVDateAdded = &at
-		}
-	}
-	slices.SortFunc(feed.Entries, func(a, b model.SecurityEnrichmentEntry) int { return strings.Compare(a.CVEID, b.CVEID) })
+	feed = cloneSecurityEnrichmentFeed(feed)
 	run.StartedAt = run.StartedAt.UTC()
 	finished := run.FinishedAt.UTC()
 	run.FinishedAt = &finished
@@ -107,46 +92,78 @@ func (s *Store) ImportSecurityEnrichment(ctx context.Context, run model.IngestRu
 	if err := insertIngestRun(ctx, tx, run); err != nil {
 		return SecurityEnrichmentImportResult{}, err
 	}
-	selected, err := json.Marshal(feed.SelectedCVEs)
-	if err != nil {
-		return SecurityEnrichmentImportResult{}, fmt.Errorf("encode enrichment manifest: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_runs(ingest_run_id,source,version,published_at,observed_at,selected_cves_json,entries,original_digest) VALUES(?,?,?,?,?,?,?,?)`, run.ID, feed.Source, feed.Version, feed.PublishedAt.Format(time.RFC3339Nano), feed.ObservedAt.Format(time.RFC3339Nano), string(selected), len(feed.Entries), originalDigest); err != nil {
-		return SecurityEnrichmentImportResult{}, fmt.Errorf("insert enrichment manifest: %w", err)
-	}
-	for _, entry := range feed.Entries {
-		identity, err := json.Marshal(struct {
-			Version string
-			Entry   model.SecurityEnrichmentEntry
-		}{feed.Version, entry})
-		if err != nil {
-			return SecurityEnrichmentImportResult{}, fmt.Errorf("encode enrichment identity: %w", err)
-		}
-		var conflicts int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM security_enrichment_observations WHERE source=? AND cve_id=? AND published_at=? AND evidence_identity<>?`, feed.Source, entry.CVEID, feed.PublishedAt.Format(time.RFC3339Nano), string(identity)).Scan(&conflicts); err != nil {
-			return SecurityEnrichmentImportResult{}, fmt.Errorf("check enrichment publication: %w", err)
-		}
-		if conflicts > 0 {
-			return SecurityEnrichmentImportResult{}, fmt.Errorf("conflicting enrichment publication: %w", ErrIngestConflict)
-		}
-		ref := "https://www.first.org/epss/data"
-		if feed.Source == "kev" {
-			ref = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
-		}
-		evidence := model.SecurityEnrichmentEvidence{Source: feed.Source, Version: feed.Version, RunID: run.ID, RawRef: ref, PublishedAt: feed.PublishedAt, ObservedAt: feed.ObservedAt, EPSS: entry.EPSS, Percentile: entry.Percentile, KEV: entry.KEV, KEVDateAdded: entry.KEVDateAdded}
-		body, err := json.Marshal(evidence)
-		if err != nil {
-			return SecurityEnrichmentImportResult{}, fmt.Errorf("encode enrichment evidence: %w", err)
-		}
-		id := sha256.Sum256([]byte(run.ID + "\x00" + feed.Source + "\x00" + entry.CVEID))
-		if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_observations(id,ingest_run_id,source,cve_id,published_at,observed_at,evidence_identity,body_json) VALUES(?,?,?,?,?,?,?,?)`, hex.EncodeToString(id[:]), run.ID, feed.Source, entry.CVEID, feed.PublishedAt.Format(time.RFC3339Nano), feed.ObservedAt.Format(time.RFC3339Nano), string(identity), string(body)); err != nil {
-			return SecurityEnrichmentImportResult{}, fmt.Errorf("insert enrichment evidence: %w", err)
-		}
+	if err := appendSecurityEnrichment(ctx, tx, run, feed, originalDigest); err != nil {
+		return SecurityEnrichmentImportResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return SecurityEnrichmentImportResult{}, fmt.Errorf("commit enrichment import: %w", err)
 	}
 	return result, nil
+}
+
+func cloneSecurityEnrichmentFeed(feed model.SecurityEnrichmentFeed) model.SecurityEnrichmentFeed {
+	feed.SelectedCVEs = slices.Clone(feed.SelectedCVEs)
+	feed.PublishedAt, feed.ObservedAt = feed.PublishedAt.UTC(), feed.ObservedAt.UTC()
+	feed.Entries = slices.Clone(feed.Entries)
+	if feed.Entries == nil {
+		feed.Entries = []model.SecurityEnrichmentEntry{}
+	}
+	for i := range feed.Entries {
+		if feed.Entries[i].KEVDateAdded != nil {
+			at := feed.Entries[i].KEVDateAdded.UTC()
+			feed.Entries[i].KEVDateAdded = &at
+		}
+	}
+	slices.SortFunc(feed.Entries, func(a, b model.SecurityEnrichmentEntry) int { return strings.Compare(a.CVEID, b.CVEID) })
+	return feed
+}
+
+func appendSecurityEnrichment(ctx context.Context, tx *sql.Tx, run model.IngestRun, feed model.SecurityEnrichmentFeed, originalDigest string) error {
+	selected, err := json.Marshal(feed.SelectedCVEs)
+	if err != nil {
+		return fmt.Errorf("encode enrichment manifest: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_runs(ingest_run_id,source,version,published_at,observed_at,selected_cves_json,entries,original_digest) VALUES(?,?,?,?,?,?,?,?)`, run.ID, feed.Source, feed.Version, feed.PublishedAt.Format(time.RFC3339Nano), feed.ObservedAt.Format(time.RFC3339Nano), string(selected), len(feed.Entries), originalDigest); err != nil {
+		return fmt.Errorf("insert enrichment manifest: %w", err)
+	}
+	for _, entry := range feed.Entries {
+		identity, body, id, err := securityEnrichmentEvidenceJSON(run.ID, feed, entry)
+		if err != nil {
+			return err
+		}
+		var conflicts int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM security_enrichment_observations WHERE source=? AND cve_id=? AND published_at=? AND evidence_identity<>?`, feed.Source, entry.CVEID, feed.PublishedAt.Format(time.RFC3339Nano), identity).Scan(&conflicts); err != nil {
+			return fmt.Errorf("check enrichment publication: %w", err)
+		}
+		if conflicts > 0 {
+			return fmt.Errorf("conflicting enrichment publication: %w", ErrIngestConflict)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO security_enrichment_observations(id,ingest_run_id,source,cve_id,published_at,observed_at,evidence_identity,body_json) VALUES(?,?,?,?,?,?,?,?)`, id, run.ID, feed.Source, entry.CVEID, feed.PublishedAt.Format(time.RFC3339Nano), feed.ObservedAt.Format(time.RFC3339Nano), identity, body); err != nil {
+			return fmt.Errorf("insert enrichment evidence: %w", err)
+		}
+	}
+	return nil
+}
+
+func securityEnrichmentEvidenceJSON(runID string, feed model.SecurityEnrichmentFeed, entry model.SecurityEnrichmentEntry) (string, string, string, error) {
+	identity, err := json.Marshal(struct {
+		Version string
+		Entry   model.SecurityEnrichmentEntry
+	}{feed.Version, entry})
+	if err != nil {
+		return "", "", "", fmt.Errorf("encode enrichment identity: %w", err)
+	}
+	ref := "https://www.first.org/epss/data"
+	if feed.Source == "kev" {
+		ref = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+	}
+	evidence := model.SecurityEnrichmentEvidence{Source: feed.Source, Version: feed.Version, RunID: runID, RawRef: ref, PublishedAt: feed.PublishedAt, ObservedAt: feed.ObservedAt, EPSS: entry.EPSS, Percentile: entry.Percentile, KEV: entry.KEV, KEVDateAdded: entry.KEVDateAdded}
+	body, err := json.Marshal(evidence)
+	if err != nil {
+		return "", "", "", fmt.Errorf("encode enrichment evidence: %w", err)
+	}
+	id := sha256.Sum256([]byte(runID + "\x00" + feed.Source + "\x00" + entry.CVEID))
+	return string(identity), string(body), hex.EncodeToString(id[:]), nil
 }
 
 func readFindingEnrichments(ctx context.Context, tx *sql.Tx, findings []model.Finding, now time.Time) (map[string]model.FindingEnrichment, error) {

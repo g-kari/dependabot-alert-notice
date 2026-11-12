@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/enrichmentrefresh"
 	"github.com/g-kari/dependabot-alert-notice/internal/feed"
 	"github.com/g-kari/dependabot-alert-notice/internal/merger"
 	"github.com/g-kari/dependabot-alert-notice/internal/policy"
@@ -30,6 +31,8 @@ var templateFS embed.FS
 
 type Server struct {
 	consoleNow               func() time.Time // Fixed-clock injection for read-only snapshot rendering.
+	manualRefreshMu          sync.RWMutex
+	manualRefreshController  *enrichmentrefresh.ManualController
 	port                     int
 	address                  string
 	store                    *store.Store
@@ -201,6 +204,9 @@ func (s *Server) Handler() http.Handler {
 			if !validCSRF(w, r) {
 				return
 			}
+		}
+		if s.serveManualEnrichmentAPI(w, r) {
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})

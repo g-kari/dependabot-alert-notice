@@ -99,7 +99,7 @@ func TestAutomaticUpdatesRequireReleaseAndSupportedPlatform(t *testing.T) {
 		{"v1.0.0", "darwin", "arm64", true},
 		{"v1.0.0-preview.1", "linux", "amd64", true},
 		{"dev", "darwin", "arm64", false},
-		{"v1.0.0", "windows", "amd64", false},
+		{"v1.0.0", "windows", "amd64", true},
 		{"v1.0.0", "linux", "386", false},
 	} {
 		u := Updater{Current: tt.version, OS: tt.os, Arch: tt.arch}

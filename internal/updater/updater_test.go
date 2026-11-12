@@ -153,3 +153,42 @@ func TestApplyDoesNotDownloadWhenCurrentOrAssetsAreMissing(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseBinaryNameMatchesPlatformArchiveEntry(t *testing.T) {
+	for _, tt := range []struct{ goos, want string }{
+		{"linux", "dependabot-alert-notice"},
+		{"darwin", "dependabot-alert-notice"},
+		{"windows", "dependabot-alert-notice.exe"},
+	} {
+		if got := releaseBinaryName(tt.goos); got != tt.want {
+			t.Fatalf("goos=%s got=%q want=%q", tt.goos, got, tt.want)
+		}
+	}
+}
+
+func TestApplyWindowsUsesExecutableArchiveAssetAndEntry(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dependabot-alert-notice.exe")
+	if err := os.WriteFile(target, []byte("old executable"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	asset := "dependabot-alert-notice_1.10.0_windows_amd64.tar.gz"
+	archive := archiveFixture(t, "dependabot-alert-notice.exe")
+	checksum := fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), asset)
+	f := &fakeSource{release: Release{Tag: "v1.10.0", Assets: []Asset{{Name: asset}, {Name: "checksums.txt"}}}, archive: archive, checksum: checksum}
+	u := Updater{Source: f, Current: "v1.9.0", OS: "windows", Arch: "amd64", Executable: target, Verify: func(_ context.Context, path, tag string) error {
+		body, err := os.ReadFile(path)
+		if err != nil || string(body) != "new executable" || tag != "v1.10.0" {
+			t.Fatalf("candidate=%q tag=%s err=%v", body, tag, err)
+		}
+		return nil
+	}}
+	result, err := u.Apply(context.Background())
+	if err != nil || !result.Updated {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil || string(body) != "new executable" {
+		t.Fatalf("body=%q err=%v", body, err)
+	}
+}

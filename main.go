@@ -39,6 +39,7 @@ func main() {
 }
 
 func runApplication() string {
+	cleanupPreviousBinary()
 	configPath := flag.String("config", "config.yaml", "設定ファイルパス")
 	interactiveSetup := flag.Bool("setup", false, "ブラウザなしの対話型設定を実行して終了")
 	terminalUI := flag.Bool("tui", false, "稼働中アプリに接続し、状態・設定をターミナルで操作")
@@ -48,10 +49,10 @@ func runApplication() string {
 	showVersion := flag.Bool("version", false, "バージョン表示")
 	showWebURL := flag.Bool("web-url", false, "設定のWeb UI URLを表示して終了（通信・DB作成なし）")
 	checkUpdate := flag.Bool("check-update", false, "公開済み安定版Releaseの更新確認だけを行って終了")
-	applyUpdate := flag.Bool("update", false, "新しい安定版Releaseへ更新して終了（Mac/Linux、次回起動から適用）")
+	applyUpdate := flag.Bool("update", false, "新しい安定版Releaseへ更新して終了（Mac/Linux/Windows、次回起動から適用）")
 	updateRepo := flag.String("update-repo", "g-kari/dependabot-alert-notice", "更新元GitHubリポジトリ (owner/repo)")
 	updateGHPath := flag.String("update-gh-path", "", "Release取得用GitHub CLIパス（省略時: 設定のgh_path）")
-	autoUpdate := flag.Bool("auto-update", os.Getenv("SECURITY_NOTICE_AUTO_UPDATE") != "0", "常駐中にReleaseを定期確認し更新後に自動再起動（Mac/Linuxのリリース版）")
+	autoUpdate := flag.Bool("auto-update", os.Getenv("SECURITY_NOTICE_AUTO_UPDATE") != "0", "常駐中にReleaseを定期確認し更新後に自動再起動（Mac/Linux/Windowsのリリース版）")
 	updateInterval := flag.Duration("update-interval", 6*time.Hour, "常駐中のRelease更新確認間隔")
 	flag.Parse()
 
