@@ -1,7 +1,7 @@
 // Opt-in normal-runner QA only. Node 22/24 builtins; no package or browser install.
 // Screenshots are actual CDP responses. Visual review remains a separate gate.
 import assert from 'node:assert/strict';
-import { classifyFailedUDPConnects } from './browser_udp_audit.mjs';
+import { classifyFailedUDPConnects, validNetLogSourceID } from './browser_udp_audit.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -200,7 +200,7 @@ function udpNetlogDetails(log) {
   const errors=new Set(Object.values(log.constants?.netError??{}));
   const fail=reason=>reasons.set(reason,(reasons.get(reason)??0)+1);
   const sourceName=value=>NET_SOURCE_NAMES.has(sourceTypes.get(value))?sourceTypes.get(value):'UNKNOWN_SOURCE_TYPE';
-  const validID=id=>Number.isSafeInteger(id)&&id>0;
+  const validID=validNetLogSourceID;
   const dnsEvent=name=>typeof name==='string'&&(/^(DNS_TRANSACTION|MDNS_)/.test(name));
   const knownName=name=>UDP_EVENTS.has(name)||UDP_CONTEXT_EVENTS.has(name);
   let observedUDP=0,observedSends=0,observedSendErrors=0;
@@ -364,7 +364,7 @@ function netlogAudit(log, origins, endpoints) {
   const names=new Map(Object.entries(types).map(([k, v])=>[v, k])), sockets=new Set(), attempts=new Map();
   const udpDetails=udpNetlogDetails(log), failedUDP=classifyFailedUDPConnects(log,udpDetails);
   const report= {
-    failed_udp_connect_operations:failedUDP.operations, failed_udp_classification_reasons:failedUDP.reasons,
+    failed_udp_connect_operations:failedUDP.operations, failed_udp_classification_reasons:failedUDP.reasons, failed_udp_classification_diagnostic:failedUDP.diagnostic??null,
     socket_pool_stalls:0, url_attempt_count:0, non_fixture_url_attempt_count:0, non_fixture_url_attempts:[], tcp_endpoint_events:0, tcp_bytes_sent_events:0, udp_events:0, violations:[], scope:'Chromium NetLog socket events; not OS packet capture', url_attempts_are_not_transport_success:true
   };
   const bad=x=> {
@@ -500,6 +500,15 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   const acceptedFailure=netlogAudit(failedFixture,origins,endpoints);
   assert.equal(acceptedFailure.failed_udp_connect_operations,1);
   assert.deepEqual(acceptedFailure.violations,[]);
+  const partitioned=structuredClone(failedFixture);
+  for(const event of partitioned.events) {
+    event.source.id=-event.source.id;
+    if(event.params?.source_dependency)event.params.source_dependency.id=-event.params.source_dependency.id;
+  }
+  const partitionedAudit=netlogAudit(partitioned,origins,endpoints);
+  assert.equal(partitionedAudit.failed_udp_connect_operations,1);
+  assert.deepEqual(partitionedAudit.violations,[]);
+
   for(const extra of [event(5,0,102,22,{byte_count:0}),event(11,0,102,22,{net_error:-109}),event(14,0,100,20)]) {
     const rejected=netlogAudit({...failedFixture,events:[...failedFixture.events,extra]},origins,endpoints);
     assert.equal(rejected.failed_udp_connect_operations,0);
@@ -557,7 +566,7 @@ function udpDiagnosticSelfTest(baseLog,origins,endpoints) {
   assert(Buffer.byteLength(JSON.stringify(udpNetlogDetails(edgeOverflow)))<=UDP_DETAIL_LIMITS.bytes);
   const byteOverflow={constants,events:[event(13,0,100,20,{ipv6_available:false,cached:false})]};
   for(let i=0;i<63;i++) {
-    const id=9000000000000000+i;
+    const id=-2147483648+i;
     byteOverflow.events.push(event(6,1,id,22,{source_dependency:{id:100,type:20}}),event(4,1,id,22,{address:'[2001:db8:1234:5678:9abc:def0:1111:2222]:65535'}),event(4,2,id,22),event(6,2,id,22));
   }
   const byteBounded=udpNetlogDetails(byteOverflow);
@@ -577,7 +586,26 @@ function focusLegacyDangerDisclosure(doc=document) {
   summary.focus();
   return true;
 }
+function shouldCapture(info,viewport) {
+  return info.screenshot||(info.name==='legacy-reports'&&viewport.name==='mobile');
+}
+function checkCaptureBudget(cases) {
+  const count=['desktop','mobile'].reduce((n,name)=>n+cases.filter(info=>shouldCapture(info,{name})).length,0);
+  assert.equal(count,29,'required screenshot matrix changed');
+  assert(count+2<=31,'planned Node artifacts exceed file budget');
+  assert(count+3<=32,'planned artifacts including stability exceed Go file budget');
+  return count;
+}
 async function selfTest() {
+  const captureCases=Array.from({length:14},(_,i)=>({name:`original-${i}`,screenshot:true}));
+  captureCases.push({name:'legacy-reports',screenshot:false},{name:'empty-findings',screenshot:false});
+  assert.equal(checkCaptureBudget(captureCases),29);
+  for(const info of captureCases.slice(0,14))for(const name of ['desktop','mobile'])assert(shouldCapture(info,{name}));
+  assert.equal(shouldCapture(captureCases[14],{name:'desktop'}),false);
+  assert.equal(shouldCapture(captureCases[14],{name:'mobile'}),true);
+  assert.throws(()=>checkCaptureBudget(captureCases.map(info=>({...info,screenshot:true}))));
+  assert.throws(()=>checkCaptureBudget(captureCases.slice(1)));
+
   let summaryFocuses=0;
   const group={open:false,querySelector:()=>({focus:()=>summaryFocuses++})};
   const dangerDocument={querySelector:()=>({closest:()=>group})};
@@ -765,10 +793,11 @@ async function main() {
     assert(u.port);
     assert.equal(u.pathname, '/');
   }
+  checkCaptureBudget(fixture.cases);
   const checks= {
     synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], navigation_events:[], blocked_browser_activity: {
       proxy_requests:0, proxy_connects:0, targets:[], attempts:[]
-    }, reduced_motion_scope:'media preference override verified only; CSS response not exhaustively measured', screenshot_scope:'28 viewport-only PNGs; below-fold content is not fully captured', metadata:fixture.metadata
+    }, reduced_motion_scope:'media preference override verified only; CSS response not exhaustively measured', screenshot_scope:'29 viewport-only PNGs (original 28 plus mobile reports); below-fold content is not fully captured', metadata:fixture.metadata
   }, manifest= {
     synthetic:true, visual_review:'pending', metadata:fixture.metadata, as_of:fixture.as_of, images:[]
   };
@@ -891,7 +920,7 @@ async function main() {
     checks.cases.push( {
       name:info.name, viewport:viewport.name, status:documents.get(session)?.status, duplicate_ids:data.duplicateIds, unbound_labels:data.unboundLabels, missing_aria:data.missingRefs, main_overflow:data.overflow, sse, rich:data.rich, legacy_label_scope:info.native?'enforced':'reported; existing form migration is not declared complete'
     });
-    if(info.screenshot)await snapshot(session, info.name, viewport, info);
+    if(shouldCapture(info,viewport))await snapshot(session, info.name, viewport, info);
     assert(data.text.includes(info.want), `missing expected ${info.name} content`);
     assert.equal(data.injected, false, 'synthetic untrusted text executed');
     assert.deepEqual(data.duplicateIds, [], 'duplicate DOM IDs');
@@ -1291,7 +1320,7 @@ async function main() {
   }
   if(fatal)throw fatal;
   assert.equal(checks.cases.length, fixture.cases.length*2, 'incomplete desktop/mobile matrix');
-  assert.equal(manifest.images.length, 28, 'incomplete runtime screenshot matrix');
+  assert.equal(manifest.images.length, 29, 'incomplete runtime screenshot matrix');
   assert.equal(checks.violations.length, 0, `offline guard failed: ${checks.violations.join('; ')}`);
   assert.equal(checks.automated_status, 'passed');
   console.log(`PASS automated real Chrome checks; ${manifest.images.length} runtime PNGs saved. Download/materialization/visual review remain pending.`);

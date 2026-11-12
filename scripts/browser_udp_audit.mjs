@@ -3,9 +3,13 @@
 const ENDPOINT='[2001:4860:4860::8888]:443';
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const exactKeys=(x,keys)=>object(x)&&Object.keys(x).every(k=>keys.includes(k));
-const id=x=>Number.isSafeInteger(x)&&x>0;
+// Chromium a21ce95 net/log/net_log_entry.cc and net_log_source.cc serialize
+// uint32 source IDs with static_cast<int>; partitioned IDs are negative.
+// Zero is kInvalidId. Never coerce or wrap IDs: that would alias identities.
+export const validNetLogSourceID=x=>Number.isInteger(x)&&x!==0&&x>=-2147483648&&x<=2147483647;
+const id=validNetLogSourceID;
 export function classifyFailedUDPConnects(log,details) {
-  const rejected=reason=>({eventIndexes:new Set(),operations:0,reasons:[reason]});
+  const rejected=(reason,diagnostic=null)=>({eventIndexes:new Set(),operations:0,reasons:[reason],diagnostic});
   if(details?.details_complete!==true||details.overflow!==false||!Array.isArray(details.failure_reasons)||details.failure_reasons.length||details.has_send_attempt!==false||details.has_send_event!==false)return rejected('incomplete_or_prohibited_udp_details');
   if(!Array.isArray(log?.events)||log.events.length>100000)return rejected('invalid_event_bound');
   const maps={};
@@ -20,7 +24,7 @@ export function classifyFailedUDPConnects(log,details) {
   const sources=new Map(),edges=[];
   for(let i=0;i<log.events.length;i++) {
     const event=log.events[i];
-    if(!object(event)||!id(event.source?.id)||!Number.isSafeInteger(event.source.type))return rejected('invalid_source_identity');
+    if(!object(event)||!id(event.source?.id)||!Number.isSafeInteger(event.source.type))return rejected('invalid_source_identity',{event_index:i,source_id:Number.isSafeInteger(event?.source?.id)?event.source.id:null,source_type:Number.isSafeInteger(event?.source?.type)?event.source.type:null});
     const type=maps.logSourceType.get(event.source.type),name=maps.logEventTypes.get(event.type),phase=maps.logEventPhase.get(event.phase);
     if(!type||!name||!['PHASE_NONE','PHASE_BEGIN','PHASE_END'].includes(phase))return rejected('unknown_event_identity');
     const params=event.params===undefined?{}:event.params;

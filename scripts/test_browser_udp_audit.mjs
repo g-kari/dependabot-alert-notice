@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {classifyFailedUDPConnects} from './browser_udp_audit.mjs';
+import {classifyFailedUDPConnects,validNetLogSourceID} from './browser_udp_audit.mjs';
 const details={details_complete:true,overflow:false,failure_reasons:[],has_send_attempt:false,has_send_event:false};
 const constants={logEventTypes:{SOCKET_ALIVE:1,SOCKET_OPEN:2,UDP_CONNECT:3,SOCKET_CONNECT:4,HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK:5,UDP_BYTES_SENT:6,UDP_SEND_ERROR:7,DNS_TRANSACTION:8,UDP_BYTES_RECEIVED:9,NEW_EVENT:10},logSourceType:{UDP_SOCKET:1,UDP_CLIENT_SOCKET:2,HTTP_PROXY_CONNECT_JOB:3},logEventPhase:{PHASE_NONE:0,PHASE_BEGIN:1,PHASE_END:2},netError:{'net::OK':0,ERR_ADDRESS_UNREACHABLE:-109,ERR_FAILED:-2}};
 const event=(type,phase,id,sourceType,params)=>({type,phase,source:{id,type:sourceType},...(params===undefined?{}:{params})});
@@ -12,6 +12,13 @@ const fixture=()=>({constants:structuredClone(constants),events:[
  event(5,0,1,3,{ipv6_available:false,cached:false})]});
 const result=classifyFailedUDPConnects(fixture(),details);
 assert.equal(result.operations,1);assert.deepEqual([...result.eventIndexes],[3,4]);assert.deepEqual(result.reasons,[]);
+for(const value of [-2147483648,-1,1,2147483647])assert(validNetLogSourceID(value));
+for(const value of [0,-0,-2147483649,2147483648,4294967295,1.5,'-1',NaN,Infinity,null,undefined])assert(!validNetLogSourceID(value));
+for(const mapping of [x=>-x,x=>x===3?-2147483648:x===2?2147483647:-1]) {
+ const f=fixture();
+ for(const e of f.events){e.source.id=mapping(e.source.id);if(e.params?.source_dependency)e.params.source_dependency.id=mapping(e.params.source_dependency.id);}
+ assert.equal(classifyFailedUDPConnects(f,details).operations,1);
+}
 const negative=(label,edit)=>{const f=fixture();edit(f);const r=classifyFailedUDPConnects(f,details);assert.equal(r.operations,0,label);assert.equal(r.eventIndexes.size,0,label);assert(r.reasons.length,label);};
 for(const [label,edit]of [
  ['successful connect',f=>f.events[4].params.net_error=0],
@@ -36,6 +43,12 @@ for(const [label,edit]of [
  ['duplicate connect',f=>f.events.splice(5,0,...structuredClone(f.events.slice(3,5)))],
  ['source collision',f=>f.events[4].source.type=2],
  ['source zero',f=>f.events[4].source.id=0],
+ ['source too negative',f=>f.events[4].source.id=-2147483649],
+ ['source unsigned alias',f=>f.events[4].source.id=4294967295],
+ ['source too positive',f=>f.events[4].source.id=2147483648],
+ ['dependency unsigned alias',f=>f.events[0].params.source_dependency.id=4294967295],
+ ['dependency zero',f=>f.events[0].params.source_dependency.id=0],
+ ['negative source collision',f=>{f.events[4].source.id=-1;f.events.push(event(5,0,-1,3,{}));}],
  ['orphan client',f=>f.events.push(event(1,1,23,2,{source_dependency:{id:1,type:3}}))],
  ['ambiguous event constants',f=>f.constants.logEventTypes.ALIAS=3],
  ['ambiguous source constants',f=>f.constants.logSourceType.ALIAS=1],
@@ -54,6 +67,20 @@ for(const [label,edit]of [
  ['unknown event',f=>f.events[4].type=99],
  ['too many events',f=>f.events=Array(100001).fill(f.events[0])]
 ])negative(label,edit);
+const globalEvent=fixture();
+globalEvent.constants.logSourceType.NONE=4;
+globalEvent.events.unshift(event(10,0,-2147483647,4,{}));
+assert.equal(classifyFailedUDPConnects(globalEvent,details).operations,1);
+for(const invalid of [0,2147483648,4294967295,'-2147483647']) {
+ const f=structuredClone(globalEvent);f.events[0].source.id=invalid;
+ assert.equal(classifyFailedUDPConnects(f,details).operations,0);
+}
+const malformedIdentity=fixture();
+malformedIdentity.events[0].source={id:'secret-source',type:'secret-type'};
+const identityResult=classifyFailedUDPConnects(malformedIdentity,details);
+assert.deepEqual(identityResult.diagnostic,{event_index:0,source_id:null,source_type:null});
+assert(!JSON.stringify(identityResult).includes('secret'));
+assert.equal(identityResult.operations,0);
 // Every pairwise ordering mutation in the lifetime fails closed.
 for(let i=0;i<8;i++)for(let j=i+1;j<8;j++)negative(`reordered lifetime ${i}/${j}`,f=>{[f.events[i],f.events[j]]=[f.events[j],f.events[i]];});
 for(const bad of [{details_complete:false},{details_complete:'true'},{failure_reasons:null},{has_send_attempt:undefined},{overflow:true},{has_send_event:true},{has_send_attempt:true},{failure_reasons:[{reason:'unknown'}]}])assert.equal(classifyFailedUDPConnects(fixture(),{...details,...bad}).operations,0);
