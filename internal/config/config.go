@@ -105,10 +105,18 @@ type SandboxConfig struct {
 	Timeout          time.Duration `yaml:"timeout"`
 }
 
+// HermesProxyDefaultURL is the loopback-only endpoint used by `hermes proxy start`.
+const HermesProxyDefaultURL = "http://127.0.0.1:8645/v1"
+
+// HermesProxyDefaultModel is the default Nous Portal model for Hermes proxy evaluations.
+const HermesProxyDefaultModel = "Hermes-4-70B"
+
 type EvaluatorConfig struct {
-	Provider       string        `yaml:"provider"`     // claude または codex
+	Provider       string        `yaml:"provider"`     // claude, codex, または hermes
 	ClaudeModel    string        `yaml:"claude_model"` // 空欄ならClaude CLIの既定値
 	CodexModel     string        `yaml:"codex_model"`  // 空欄ならCodex CLIの既定値
+	HermesModel    string        `yaml:"hermes_model"`
+	HermesBaseURL  string        `yaml:"hermes_base_url"`
 	AutoEval       bool          `yaml:"auto_eval"`
 	MinSeverity    string        `yaml:"min_severity"` // AI評価対象の最低重要度 (low/medium/high/critical)、デフォルト: high
 	Sandbox        SandboxConfig `yaml:"sandbox"`
@@ -239,6 +247,8 @@ func Defaults() *Config {
 		Web:                  WebConfig{Port: 8999},
 		Evaluator: EvaluatorConfig{
 			Provider:       "claude",
+			HermesModel:    HermesProxyDefaultModel,
+			HermesBaseURL:  HermesProxyDefaultURL,
 			MaxEvalPerPoll: 10,
 			Sandbox: SandboxConfig{
 				Runtime:          "auto",

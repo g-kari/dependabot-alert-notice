@@ -18,7 +18,7 @@ func TestRunCreatesHeadlessConfig(t *testing.T) {
 	var out bytes.Buffer
 	// targets, poll, paths x3, data, host, port, Slack channel/users,
 	// notification severity, provider, automatic evaluation, RSS, confirmation.
-	input := "acme/api,acme/*\n1h\n\n\n\n\n\n9000\nC123\nU123,U456\nhigh\ncodex\ny\ny\ny\n"
+	input := "acme/api,acme/*\n1h\n\n\n\n\n\n9000\nC123\nU123,U456\nhigh\nhermes\ny\ny\ny\n"
 	if err := Run(path, strings.NewReader(input), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestRunCreatesHeadlessConfig(t *testing.T) {
 	if len(cfg.Targets) != 2 || cfg.Targets[1].Repo != "" || cfg.PollInterval != time.Hour || cfg.Web.Host != "127.0.0.1" || cfg.Web.Port != 9000 {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.Slack.ChannelID != "C123" || len(cfg.Slack.AllowedUserIDs) != 2 || cfg.NotifyMinSeverity != "high" || cfg.Evaluator.Provider != "codex" || !cfg.Evaluator.AutoEval || !cfg.Evaluator.Sandbox.Enabled || len(cfg.RSS.Feeds) != 6 {
+	if cfg.Slack.ChannelID != "C123" || len(cfg.Slack.AllowedUserIDs) != 2 || cfg.NotifyMinSeverity != "high" || cfg.Evaluator.Provider != "hermes" || !cfg.Evaluator.AutoEval || !cfg.Evaluator.Sandbox.Enabled || len(cfg.RSS.Feeds) != 6 {
 		t.Fatalf("unexpected settings: %+v", cfg)
 	}
 	info, err := os.Stat(path)

@@ -1,11 +1,20 @@
 package evaluator
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/model"
 )
 
 func TestClaudeModelCommandArgs(t *testing.T) {
@@ -216,5 +225,259 @@ func TestParseEvaluation_ArrayFormat_ErrorResult(t *testing.T) {
 	_, err := parseEvaluation([]byte(input))
 	if err == nil {
 		t.Fatal("parseEvaluation() should return error for is_error=true result")
+	}
+}
+
+func TestNew_HermesProxyDoesNotSelectCLIOrSandbox(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	got := reflect.TypeOf(newEvaluator(cfg, "windows", "amd64")).String()
+	if got != "*evaluator.HermesEvaluator" {
+		t.Fatalf("provider=hermes selected %s, want HermesEvaluator", got)
+	}
+}
+
+func TestHermesEvaluator_UsesChatCompletionsWithoutTools(t *testing.T) {
+	var method, path, authorization string
+	var payload map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path, authorization = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		content := `{"impact":"impact sample","recommendation":"manual-review","reasoning":"reason sample","aws_risk":"not applicable"}`
+		response, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": content}}}})
+		if err != nil {
+			t.Errorf("marshal response: %v", err)
+			return
+		}
+		if _, err := w.Write(response); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+	cfg.Evaluator.HermesModel = "Hermes-Test-Model"
+	cfg.Evaluator.Sandbox.Enabled = false
+	cfg.Evaluator.Sandbox.Runtime = "podman"
+	got, err := newEvaluator(cfg, "windows", "amd64").Evaluate(context.Background(), model.Alert{PackageName: "sentinel-package"})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if got.Recommendation != "manual-review" {
+		t.Fatalf("recommendation = %q", got.Recommendation)
+	}
+	if method != http.MethodPost || path != "/v1/chat/completions" || authorization != "Bearer hermes-proxy" {
+		t.Fatalf("request = %s %s authorization=%q", method, path, authorization)
+	}
+	var request struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := json.Unmarshal(rawPayload, &request); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if request.Model != "Hermes-Test-Model" || len(request.Messages) != 1 || request.Messages[0].Role != "user" || !strings.Contains(request.Messages[0].Content, "sentinel-package") {
+		t.Fatalf("request model/messages = %q / %+v", request.Model, request.Messages)
+	}
+	if _, hasTools := payload["tools"]; hasTools {
+		t.Fatal("Hermes subscription proxy requests must not enable tools")
+	}
+}
+
+func TestHermesEvaluator_RejectsIncompleteOrInvalidEvaluation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+	}{
+		{name: "empty object", content: `{}`},
+		{name: "missing impact", content: `{"recommendation":"approve","reasoning":"reason","aws_risk":"risk"}`},
+		{name: "missing recommendation", content: `{"impact":"impact","reasoning":"reason","aws_risk":"risk"}`},
+		{name: "invalid recommendation", content: `{"impact":"impact","recommendation":"maybe","reasoning":"reason","aws_risk":"risk"}`},
+		{name: "missing reasoning", content: `{"impact":"impact","recommendation":"approve","aws_risk":"risk"}`},
+		{name: "missing AWS risk", content: `{"impact":"impact","recommendation":"approve","reasoning":"reason"}`},
+		{name: "whitespace-only impact", content: `{"impact":"  ","recommendation":"approve","reasoning":"reason","aws_risk":"risk"}`},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				response, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": test.content}}}})
+				if err != nil {
+					t.Errorf("marshal response: %v", err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write(response); err != nil {
+					t.Errorf("write response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			cfg := config.Defaults()
+			cfg.Evaluator.Provider = "hermes"
+			cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+			cfg.Evaluator.Sandbox.Enabled = false
+			cfg.Evaluator.Sandbox.Runtime = "podman"
+			if evaluation, err := newEvaluator(cfg, "windows", "amd64").Evaluate(context.Background(), model.Alert{}); err == nil {
+				t.Fatalf("Evaluate() accepted incomplete result %+v", evaluation)
+			}
+		})
+	}
+}
+
+func TestHermesEvaluator_CheckUsesModelsEndpointWithoutInference(t *testing.T) {
+	var method, path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"data":[{"id":"Hermes-4-70B"}]}`)); err != nil {
+			t.Errorf("write models response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+	checker, ok := newEvaluator(cfg, "windows", "amd64").(interface{ Check(context.Context) error })
+	if !ok {
+		t.Fatal("Hermes evaluator does not expose a connectivity check")
+	}
+	if err := checker.Check(context.Background()); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if method != http.MethodGet || path != "/v1/models" {
+		t.Fatalf("check request = %s %s, want GET /v1/models", method, path)
+	}
+}
+
+func TestHermesEvaluator_CheckRejectsMissingOrUnavailableModel(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing data", body: `{}`},
+		{name: "empty models", body: `{"data":[]}`},
+		{name: "configured model absent", body: `{"data":[{"id":"Other-Model"}]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(test.body)); err != nil {
+					t.Errorf("write model response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			cfg := config.Defaults()
+			cfg.Evaluator.HermesModel = "Hermes-4-70B"
+			cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+			checker := newHermesEvaluator(cfg.Evaluator)
+			if err := checker.Check(context.Background()); err == nil {
+				t.Fatal("Check() accepted a model list without the configured model")
+			}
+		})
+	}
+}
+
+func TestHermesEvaluator_CheckRejectsTrailingOrOversizedModelList(t *testing.T) {
+	valid := `{"data":[{"id":"Hermes-4-70B"}]}`
+	for _, test := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "valid with trailing whitespace", body: valid + "\n \t"},
+		{name: "trailing garbage", body: valid + "junk", wantErr: true},
+		{name: "second JSON value", body: valid + ` {"data":[]}`, wantErr: true},
+		{name: "oversized body", body: valid + strings.Repeat(" ", 1<<20), wantErr: true},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(test.body)); err != nil {
+					t.Errorf("write model response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			cfg := config.Defaults()
+			cfg.Evaluator.HermesModel = "Hermes-4-70B"
+			cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+			err := newHermesEvaluator(cfg.Evaluator).Check(context.Background())
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Check() error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestHermesEvaluator_DoesNotFollowRedirects(t *testing.T) {
+	var destinationCalls atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		destinationCalls.Add(1)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer destination.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL+"/v1/chat/completions", http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	cfg := config.Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	cfg.Evaluator.HermesBaseURL = redirect.URL + "/v1"
+	cfg.Evaluator.Sandbox.Enabled = false
+	cfg.Evaluator.Sandbox.Runtime = "podman"
+	_, err := newEvaluator(cfg, "windows", "amd64").Evaluate(context.Background(), model.Alert{})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 302") {
+		t.Fatalf("Evaluate() error = %v, want HTTP 302", err)
+	}
+	if destinationCalls.Load() != 0 {
+		t.Fatalf("redirect destination calls = %d, want 0", destinationCalls.Load())
+	}
+}
+
+func TestHermesEvaluator_ParseErrorsDoNotLogModelPayload(t *testing.T) {
+	marker := "private-alert-sentinel"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		content := marker
+		response, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": content}}}})
+		if err != nil {
+			t.Errorf("marshal response: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(response); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	cfg := config.Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	cfg.Evaluator.HermesBaseURL = server.URL + "/v1"
+	cfg.Evaluator.Sandbox.Enabled = false
+	cfg.Evaluator.Sandbox.Runtime = "podman"
+	_, err := newEvaluator(cfg, "windows", "amd64").Evaluate(context.Background(), model.Alert{})
+	if err == nil || strings.Contains(err.Error(), marker) || strings.Contains(logs.String(), marker) {
+		t.Fatalf("invalid model output leaked: err=%v logs=%s", err, logs.String())
 	}
 }

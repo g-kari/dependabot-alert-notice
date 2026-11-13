@@ -1,6 +1,5 @@
 {{define "content"}}
-<div class="finding-topline"><span>Security / Recorded Integrations</span>{{if .HasEvaluation}}<a href="{{.APIURL}}" class="btn btn-ghost btn-sm interactive-scale">この評価の JSON</a>{{else}}<span class="badge badge-pending">評価時点を指定</span>{{end}}</div>
-<header class="finding-page-heading"><div><h1>Recorded Integrations</h1><p>保存されている収集の試行と、最後の成功 receipt を分けて確認する。</p></div><span class="badge badge-info">Read-only</span></header>
+<header class="finding-page-heading"><h1>Recorded Integrations</h1><div class="page-actions">{{if .HasEvaluation}}<a href="{{.APIURL}}" class="btn btn-ghost btn-sm interactive-scale">JSON</a>{{else}}<span class="badge badge-pending">評価時点未指定</span>{{end}}<span class="badge badge-info">Read-only</span></div></header>
 <p class="finding-notice">接続や収集は実行しません。未記録 scope は表示されず、設定済み対象・未スキャン対象・資産の母数と試行履歴の完全性はすべて不明です。coverage 百分率は算出できません。</p>
 <section class="card" aria-labelledby="collection-filters"><h2 id="collection-filters">記録を絞り込む</h2><form method="get" action="/integrations"><div class="finding-filter-grid">
 <div class="field finding-search-field"><label for="collection-as-of">評価時点 as_of (タイムゾーン付き RFC3339)</label><input id="collection-as-of" type="text" name="as_of" required maxlength="35" placeholder="2026-11-09T12:00:00Z" value="{{if .HasEvaluation}}{{findingTime .Query.AsOf}}{{end}}" aria-describedby="collection-clock-note"><p id="collection-clock-note" class="field-hint">現在の保存済み snapshot をこの時計で評価します。過去の DB の復元や自動的な稼働判定ではありません。</p></div>

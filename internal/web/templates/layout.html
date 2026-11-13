@@ -47,7 +47,7 @@
     html { scroll-behavior: smooth; }
     body {
       font-family: var(--font);
-      font-size: 14px;
+      font-size: 0.875rem;
       color: var(--color-text);
       background: var(--color-bg);
       line-height: 1.65;
@@ -89,7 +89,7 @@
       transition: var(--transition);
     }
     .logo:hover { color: var(--color-accent); text-decoration: none; }
-    .logo-mark { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: 10px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font-size: 16px; }
+    .logo-mark { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: 10px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font-size: 1rem; }
     .header-nav { display: flex; align-items: center; gap: 4px; }
     .nav-link {
       padding: 10px 16px;
@@ -560,7 +560,7 @@
     .findings-console .btn-reject:hover { background: var(--console-danger-hover); color: var(--md-sys-color-on-error-container); }
     .findings-console :is(input,select,textarea):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
     .findings-console .btn-sm { min-height: 36px; }
-    .findings-console .badge { border-radius: 4px; font-size: .73rem; }
+    .findings-console .badge { border-radius: 4px; font-size: 0.75rem; }
     .findings-console .badge-high { background: var(--finding-high-bg); color: var(--finding-high-text); }
     .findings-console .badge-medium { background: var(--finding-medium-bg); color: var(--finding-medium-text); }
     .findings-console .badge-low { background: var(--finding-low-bg); color: var(--finding-low-text); }
@@ -577,7 +577,7 @@
     .finding-source span { min-width: 0; }
     .finding-source-label { color: var(--color-accent); }
     .finding-row-states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-content: start; }
-    .finding-row-states dt { font-size: .73rem; color: var(--color-muted); }
+    .finding-row-states dt { font-size: 0.75rem; color: var(--color-muted); }
     .finding-row-states dd { font-size: .85rem; overflow-wrap: anywhere; }
     .finding-empty { padding: 32px 16px; text-align: center; }
     .finding-empty p { color: var(--color-muted); margin: 10px auto 20px; max-width: 60ch; }
@@ -650,7 +650,196 @@
       .finding-search-field { grid-column: auto; }
       .finding-facts > div { grid-template-columns: 1fr; gap: 3px; }
       .finding-summary { padding: 14px; }
-      .finding-summary .finding-caption { font-size: .7rem; }
+      .finding-summary .finding-caption { font-size: .75rem; }
+    }
+    /* Compact, flat console system: data first, one accent, no decorative tiles. */
+    :root {
+      --md-sys-color-primary: #0f62fe;
+      --md-sys-color-on-primary: #ffffff;
+      --md-sys-color-primary-container: #edf5ff;
+      --md-sys-color-on-primary-container: #001d44;
+      --md-sys-color-secondary-container: #e0e0e0;
+      --md-sys-color-on-secondary-container: #161616;
+      --md-sys-color-surface: #ffffff;
+      --md-sys-color-surface-container-low: #f4f4f4;
+      --md-sys-color-surface-container: #e0e0e0;
+      --md-sys-color-on-surface: #161616;
+      --md-sys-color-on-surface-variant: #525252;
+      --md-sys-color-outline: #8d8d8d;
+      --md-sys-color-outline-variant: #c6c6c6;
+      --md-sys-color-error: #da1e28;
+      --md-sys-color-on-error: #ffffff;
+      --md-sys-color-error-container: #fff1f1;
+      --md-sys-color-on-error-container: #8a1c22;
+      --color-bg: var(--md-sys-color-surface);
+      --color-text: var(--md-sys-color-on-surface);
+      --color-muted: var(--md-sys-color-on-surface-variant);
+      --color-border: var(--md-sys-color-outline-variant);
+      --color-surface: var(--md-sys-color-surface-container-low);
+      --color-accent: var(--md-sys-color-primary);
+      --color-danger: var(--md-sys-color-error);
+      --font: "Segoe UI", "Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+      --max-w: 1600px;
+      --radius: 2px;
+      --radius-sm: 2px;
+    }
+    body { font-family: var(--font); font-size: 0.875rem; line-height: 1.5; }
+    small { font-size: 0.75rem; }
+    .findings-console {
+      --md-sys-color-primary: #0f62fe;
+      --md-sys-color-on-primary: #ffffff;
+      --md-sys-color-primary-container: #edf5ff;
+      --md-sys-color-on-primary-container: #001d44;
+      --md-sys-color-secondary-container: #e0e0e0;
+      --md-sys-color-on-secondary-container: #161616;
+      --md-sys-color-surface: #ffffff;
+      --md-sys-color-surface-container-low: #f4f4f4;
+      --md-sys-color-surface-container: #e0e0e0;
+      --md-sys-color-on-surface: #161616;
+      --md-sys-color-on-surface-variant: #525252;
+      --md-sys-color-outline: #8d8d8d;
+      --md-sys-color-outline-variant: #c6c6c6;
+      --md-sys-color-error: #da1e28;
+      --md-sys-color-on-error: #ffffff;
+      --md-sys-color-error-container: #fff1f1;
+      --md-sys-color-on-error-container: #8a1c22;
+      --console-danger-hover: #b81921;
+      --color-bg: var(--md-sys-color-surface);
+      --color-text: var(--md-sys-color-on-surface);
+      --color-muted: var(--md-sys-color-on-surface-variant);
+      --color-border: var(--md-sys-color-outline-variant);
+      --color-surface: var(--md-sys-color-surface-container-low);
+      --color-accent: var(--md-sys-color-primary);
+      --color-danger: var(--md-sys-color-error);
+      --finding-sidebar: #161616;
+      --finding-high-bg: #fff1f1;
+      --finding-high-text: #a2191f;
+      --finding-medium-bg: #fcf4d6;
+      --finding-medium-text: #694e00;
+      --finding-low-bg: #defbe6;
+      --finding-low-text: #0e6027;
+      --radius: 2px;
+      --radius-sm: 2px;
+      color-scheme: light;
+    }
+    .container { max-width: var(--max-w); padding: 1rem 1.25rem; }
+    .findings-console .container { max-width: 1600px; margin: 0 0 0 200px; padding: 0 20px 32px; }
+    .card { background: transparent; border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; padding: 1rem 0; margin: 0 0 0.75rem; }
+    .card h2 { margin-bottom: 0.5rem; }
+    .finding-sidebar { width: 200px; padding: 16px 12px; background: var(--finding-sidebar); border-right: 1px solid #393939; color: #f4f4f4; }
+    .finding-brand { margin: 0 8px 20px; gap: 8px; color: #f4f4f4; font-size: 1.125rem; font-weight: 600; }
+    .finding-brand-mark { width: 28px; height: 28px; border-radius: 2px; color: #78a9ff; }
+    .finding-brand-sub, .finding-sidebar-note, .finding-sidebar-footer { display: none; }
+    .finding-nav { gap: 0; }
+    .finding-nav .nav-link { min-height: 40px; padding: 8px 10px; border-radius: 0; border-bottom: 1px solid #262626; color: #c6c6c6; font-size: 0.875rem; }
+    .finding-nav .nav-link:hover { background: #262626; color: #ffffff; }
+    .finding-nav .nav-link[aria-current] { background: #262626; border-left: 3px solid #78a9ff; color: #ffffff; }
+    .findings-console .btn, .btn { border-radius: 2px; min-height: 36px; padding: 6px 12px; }
+    .btn-sm, .findings-console .btn-sm { min-height: 32px; padding: 4px 8px; font-size: 0.75rem; }
+    .badge, .findings-console .badge { border-radius: 2px; padding: 2px 6px; font-size: 0.75rem; }
+    .finding-topline { min-height: 0; margin: 0 0 0.5rem; border: 0; font-size: 0.75rem; }
+    .finding-page-heading { gap: 12px; margin-bottom: 12px; }
+    .page-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .finding-page-heading h1 { margin: 0; font-size: clamp(1.5rem, 1.25rem + 1vw, 1.75rem); font-weight: 600; line-height: 1.3; }
+    .finding-notice { background: #edf5ff; border: 1px solid #c6c6c6; border-left: 3px solid #0f62fe; border-radius: 0; padding: 8px 12px; margin-bottom: 12px; font-size: 0.875rem; }
+    .finding-overview { gap: 12px; }
+    .finding-section-note { max-width: 80ch; margin: 8px 0 12px; font-size: 0.75rem; }
+    .finding-summary strong { font-size: 1.5rem; }
+    .finding-summary small, .finding-caption { font-size: 0.75rem; }
+    .finding-source-mix li { gap: 8px; margin-top: 4px; font-size: 0.75rem; }
+    .finding-item { gap: 12px; padding: 12px 0; }
+    .finding-row-states { gap: 8px; }
+    .finding-facts > div { gap: 10px; padding: 7px 0; }
+    .finding-detail-grid { gap: 12px; }
+    .finding-evidence { max-height: 480px; scrollbar-gutter: stable; }
+    .finding-evidence td { font-size: 0.75rem; }
+    .finding-empty { padding: 20px 12px; }
+    .finding-filter-grid { gap: 10px; }
+    .finding-filter-actions { gap: 8px; margin-top: 12px; }
+    .console-metrics { gap: 0; margin: 4px 0 12px; border-block: 1px solid var(--color-border); }
+    .console-metric { margin: 0; padding: 12px 16px; border: 0; }
+    .console-metric + .console-metric { border-left: 1px solid var(--color-border); }
+    .console-metric:first-child { padding-left: 0; }
+    .console-metric:last-child { padding-right: 0; }
+    .console-metric h2 { font-size: 0.875rem; }
+    .console-metric strong { margin-top: 4px; font-size: 1.5rem; }
+    .cve-list { gap: 0; }
+    .cve-group { background: transparent; border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; overflow: visible; }
+    .cve-summary { gap: 8px; padding: 10px 2px; }
+    .cve-summary:hover { background: #f4f4f4; }
+    .cve-group[open] > .cve-summary { border-bottom: 1px solid var(--color-border); }
+    .cve-summary-meta { gap: 4px; }
+    .cve-repos th, .cve-repos td { padding: 8px 10px; }
+    .cve-repos th { text-transform: none; letter-spacing: 0; font-size: 0.75rem; }
+    .cve-id { font-size: 0.75rem; }
+    .view-tab { border-radius: 0; padding: 8px 12px; }
+    .finding-api-link { margin-top: 8px; }
+    .toast { border-radius: 2px; }
+    @media (max-width: 900px) {
+      .finding-sidebar { position: static; width: auto; padding: 12px 16px; border-right: 0; border-bottom: 1px solid var(--color-border); overflow: visible; }
+      .finding-brand { margin: 0 0 8px; font-size: 1rem; }
+      .finding-nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+      .finding-nav .nav-link { min-height: 36px; padding: 6px 9px; font-size: 0.75rem; border: 0; }
+      .findings-console .container { margin: 0; padding: 0 16px 24px; }
+      .finding-topline { margin-bottom: 8px; }
+      .finding-overview { grid-template-columns: 1fr; gap: 0; }
+      .finding-detail-grid { grid-template-columns: 1fr; gap: 0; }
+      .console-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .console-metric:nth-child(2) { border-right: 0; }
+      .console-metric:nth-child(3) { border-left: 0; border-top: 1px solid var(--color-border); }
+      .console-metric:nth-child(4) { border-top: 1px solid var(--color-border); }
+    }
+    @media (max-width: 520px) {
+      .finding-filter-grid { grid-template-columns: 1fr; }
+      .finding-search-field { grid-column: auto; }
+      .finding-summary { gap: 8px; }
+      .finding-summary > div + div { padding-left: 8px; }
+    .findings-console input[type=text], .findings-console input[type=password], .findings-console input[type=url], .findings-console input[type=number], .findings-console select, .findings-console textarea { max-width: 100%; box-sizing: border-box; }
+    .finding-summary strong { font-size: 1.25rem; }
+      .findings-console .card .table-wrap table tbody tr:has(> th) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 8px 0; }
+      .findings-console .card .table-wrap table tbody tr:has(> th) > th,
+      .findings-console .card .table-wrap table tbody tr:has(> th) > td { display: block; width: auto !important; min-width: 0; border: 0; text-align: left; }
+      .findings-console .card .table-wrap table tbody tr:has(> th) > th { padding: 4px 8px 0; background: transparent; color: var(--color-muted); font-size: 0.75rem; white-space: normal; }
+      .findings-console .card .table-wrap table tbody tr:has(> th) > td { padding: 4px 8px 8px; }
+    }
+    @media (prefers-color-scheme: dark) {
+      .findings-console {
+        --md-sys-color-primary: #78a9ff;
+        --md-sys-color-on-primary: #161616;
+        --md-sys-color-primary-container: #002d9c;
+        --md-sys-color-on-primary-container: #d0e2ff;
+        --md-sys-color-secondary-container: #393939;
+        --md-sys-color-on-secondary-container: #f4f4f4;
+        --md-sys-color-surface: #161616;
+        --md-sys-color-surface-container-low: #262626;
+        --md-sys-color-surface-container: #393939;
+        --md-sys-color-on-surface: #f4f4f4;
+        --md-sys-color-on-surface-variant: #c6c6c6;
+        --md-sys-color-outline: #8d8d8d;
+        --md-sys-color-outline-variant: #525252;
+        --md-sys-color-error: #ffb3b8;
+        --md-sys-color-on-error: #690005;
+        --md-sys-color-error-container: #93000a;
+        --md-sys-color-on-error-container: #ffdad6;
+        --console-danger-hover: #ffdad6;
+        --color-bg: #161616;
+        --color-text: #f4f4f4;
+        --color-muted: #c6c6c6;
+        --color-border: #525252;
+        --color-surface: #262626;
+        --color-accent: #78a9ff;
+        --color-danger: #ffb3b8;
+        --finding-high-bg: #491217;
+        --finding-high-text: #ffb3b8;
+        --finding-medium-bg: #3a2f00;
+        --finding-medium-text: #f1c21b;
+        --finding-low-bg: #0e2f17;
+        --finding-low-text: #42be65;
+        color-scheme: dark;
+      }
+      .finding-notice { background: #1c2b40; border-color: #525252; border-left-color: #78a9ff; }
+      .cve-summary:hover { background: #262626; }
+      .findings-console .btn-reject:hover { background: #ffdad6; color: #690005; }
     }
   </style>
 </head>
@@ -658,7 +847,7 @@
   {{block "navigation" .}}
 <a href="#main-content" class="finding-skip">本文へ移動</a>
 <aside class="finding-sidebar" aria-label="DevSecOps Console">
-  <a href="/security" class="finding-brand"><span class="finding-brand-mark" aria-hidden="true">▥</span><span>DevSecOps<span class="finding-brand-sub">Security workspace</span></span></a>
+  <a href="/security" class="finding-brand"><span class="finding-brand-mark" aria-hidden="true">▥</span><span>DevSecOps</span></a>
   <nav class="finding-nav" aria-label="メインナビゲーション">
     <a class="nav-link interactive-scale" href="/security" {{if consoleNavCurrent "/security"}}aria-current="page"{{end}}>Overview</a>
     <a class="nav-link interactive-scale" href="/findings" {{if consoleNavCurrent "/findings"}}aria-current="page"{{end}}>Findings</a>
@@ -669,8 +858,6 @@
     <a class="nav-link interactive-scale" href="/logs" {{if consoleNavCurrent "/logs"}}aria-current="page"{{end}}>ログ</a>
     <a class="nav-link interactive-scale" href="/settings" {{if consoleNavCurrent "/settings"}}aria-current="page"{{end}}>設定</a>
   </nav>
-  <div class="card finding-sidebar-note"><h2>Source-native records</h2><p>検出元ごとの ID を保持。同じ CVE も別々の Finding として追跡します。</p></div>
-  <p class="finding-sidebar-footer">Findings と既存 Alerts は別の記録です。</p>
 </aside>
   {{end}}
   <main class="container" id="main-content">

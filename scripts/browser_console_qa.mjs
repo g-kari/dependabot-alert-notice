@@ -110,15 +110,40 @@ class CDP {
   }
 }
 // Track only CDP interception decisions, never the lifetime of an SSE response.
-// A drain settles decisions already observed (including arrivals while draining),
-// not a promise that the page cannot start a later request. All errors stay fatal.
+// Drain settles decisions already observed (including arrivals while draining).
+// Only a stale ID for an already-safe GET/HEAD request is a benign cancellation;
+// every other decision error stays fatal.
+function isBenignSafeFetchCancellation(error, metadata) {
+  const prefix='CDP Fetch.continueRequest: ';
+  const message=String(error?.message??error);
+  if(!message.startsWith(prefix))return false;
+  let details;
+  try {
+    details=JSON.parse(message.slice(prefix.length));
+  }catch {
+    return false;
+  }
+  return metadata?.safe===true&&metadata.fixture_origin===true&&['GET','HEAD'].includes(metadata.method)
+    &&metadata.response_stage===false&&details?.code===-32602&&details?.message==='Invalid InterceptionId.';
+}
+function isFetchResponseStage(params) {
+  if(!params||typeof params!=='object')return false;
+  return ['responseStatusCode','responseStatusText','responseHeaders','responseErrorReason'].some(key=>Object.hasOwn(params,key));
+}
 class FetchDecisions {
-  constructor(onError) {
+  constructor(onError,onBenignCancellation=()=>{}) {
     this.pending=new Set();
     this.onError=onError;
+    this.onBenignCancellation=onBenignCancellation;
   }
   track(operation, metadata) {
-    const pending=Promise.resolve().then(operation).catch(error=>this.onError(error,metadata)).finally(()=>this.pending.delete(pending));
+    const pending=Promise.resolve().then(operation).catch(error=>{
+      if(isBenignSafeFetchCancellation(error,metadata)) {
+        this.onBenignCancellation(metadata);
+        return;
+      }
+      this.onError(error,metadata);
+    }).finally(()=>this.pending.delete(pending));
     this.pending.add(pending);
   }
   async drain(timeout=10000) {
@@ -675,7 +700,7 @@ function checkCaptureBudget(cases) {
 }
 async function selfTest() {
   const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
-  const failures=[],decisions=new FetchDecisions((error,metadata)=>failures.push({error:error.message,...metadata}));
+  const failures=[],cancellations=[],decisions=new FetchDecisions((error,metadata)=>failures.push({error:error.message,...metadata}),metadata=>cancellations.push(metadata));
   const first=deferred(),second=deferred();
   decisions.track(()=>first.promise,{safe:true});
   let closed=false;
@@ -689,9 +714,29 @@ async function selfTest() {
   second.reject(new Error('unsafe request blocking failed'));
   await teardown;
   assert.deepEqual(failures,[{error:'unsafe request blocking failed',safe:false}]);
-  decisions.track(()=>Promise.reject(new Error('Invalid InterceptionId.')),{safe:true});
+  const staleSafeError=new Error('CDP Fetch.continueRequest: {"code":-32602,"message":"Invalid InterceptionId."}');
+  assert.equal(isBenignSafeFetchCancellation(staleSafeError,{safe:true,fixture_origin:true,method:'GET',response_stage:false}),true);
+  assert.equal(isBenignSafeFetchCancellation(staleSafeError,{safe:true,fixture_origin:false,method:'GET',response_stage:false}),false,'about:blank must not qualify as an allowlisted fixture origin');
+  assert.equal(isFetchResponseStage({}),false);
+  assert.equal(isFetchResponseStage({responseStatusCode:200}),true);
+  assert.equal(isFetchResponseStage({responseErrorReason:'Aborted'}),true,'responseErrorReason alone identifies response stage');
+  decisions.track(()=>Promise.reject(staleSafeError),{safe:true,fixture_origin:true,method:'GET',response_stage:false});
   await decisions.drain();
-  assert.equal(failures.at(-1).error,'Invalid InterceptionId.','safe continuation errors must not be waived');
+  assert.equal(cancellations.length,1,'stale safe requests should be recorded as benign cancellations');
+  assert.equal(failures.length,1,'benign safe cancellation should not be a violation');
+  decisions.track(()=>Promise.reject(new Error('CDP Fetch.continueRequest: {"code":-32602,"message":"Invalid InterceptionId."}')),{safe:false,fixture_origin:false,method:'POST',response_stage:false});
+  await decisions.drain();
+  assert.equal(failures.length,2,'unsafe request cancellation must remain fatal');
+  decisions.track(()=>Promise.reject(new Error('CDP Fetch.continueRequest: {"code":-32602,"message":"Invalid InterceptionId."}')),{safe:true,fixture_origin:true,method:'GET',response_stage:true});
+  await decisions.drain();
+  assert.equal(failures.length,3,'response-stage cancellation must remain fatal');
+  decisions.track(()=>Promise.reject(new Error('connection reset')),{safe:true,fixture_origin:true,method:'GET',response_stage:false});
+  await decisions.drain();
+  assert.equal(failures.length,4,'other safe request errors must remain fatal');
+  decisions.track(()=>Promise.reject(new Error('CDP Fetch.continueRequest: {"code":-32602,"message":"Invalid InterceptionId. unrelated detail"}')),{safe:true,fixture_origin:true,method:'GET',response_stage:false});
+  await decisions.drain();
+  assert.equal(failures.length,5,'a non-exact CDP error must remain fatal');
+  assert.equal(cancellations.length,1,'only exact stale-interception errors may be recorded as benign');
   const hung=deferred();
   decisions.track(()=>hung.promise,{safe:true});
   await assert.rejects(decisions.drain(5),/deadline/);
@@ -908,7 +953,7 @@ async function main() {
   }
   checkCaptureBudget(fixture.cases);
   const checks= {
-    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], navigation_events:[], blocked_browser_activity: {
+    synthetic:true, automated_status:'running', visual_review:'pending', cases:[], flows:[], violations:[], fonts:[], navigation_events:[], fetch_decision_cancellations:[], blocked_browser_activity: {
       proxy_requests:0, proxy_connects:0, targets:[], attempts:[]
     }, reduced_motion_scope:'media preference override verified only; CSS response not exhaustively measured', screenshot_scope:'29 viewport-only PNGs (original 28 plus mobile reports); below-fold content is not fully captured', metadata:fixture.metadata
   }, manifest= {
@@ -929,6 +974,10 @@ async function main() {
     checks.fetch_decision_failures??=[];
     if(checks.fetch_decision_failures.length<16)checks.fetch_decision_failures.push({
       ...metadata,error:scrubNetworkText(error.message).slice(0,512)
+    });
+  },metadata=>{
+    if(checks.fetch_decision_cancellations.length<16)checks.fetch_decision_cancellations.push({
+      ...metadata,reason:'stale_safe_interception'
     });
   });
   async function writeJSON(name, value) {
@@ -1289,7 +1338,8 @@ async function main() {
         if(message.params.resourceType==='Document')navigationDiagnostic(checks.navigation_events,'document-paused',{
           url:request.url,status:message.params.responseStatusCode,error:message.params.responseErrorReason
         });
-        const safe=(request.url==='about:blank'||allowedOrigin(request.url, origins))&&['GET', 'HEAD'].includes(request.method);
+        const fixtureOrigin=allowedOrigin(request.url, origins);
+        const safe=(request.url==='about:blank'||fixtureOrigin)&&['GET', 'HEAD'].includes(request.method);
         if(!safe)violation(`blocked off-origin/action page request ${request.method} ${networkLabel(request.url)}`);
         fetchDecisions.track(()=>client.call(safe?'Fetch.continueRequest':'Fetch.failRequest', safe? {
           requestId
@@ -1299,13 +1349,13 @@ async function main() {
         }, message.sessionId).then(()=>{
           if(message.params.resourceType==='Document')navigationDiagnostic(checks.navigation_events,safe?'document-continued':'document-blocked',{url:request.url});
         }),{
-          safe,method:['GET','HEAD'].includes(request.method)?request.method:'other',
+          safe,fixture_origin:fixtureOrigin,method:['GET','HEAD'].includes(request.method)?request.method:'other',
           resource_type:['Document','Stylesheet','Image','Media','Font','Script','TextTrack','XHR','Fetch','Prefetch','EventSource','WebSocket','Manifest','SignedExchange','Ping','CSPViolationReport','Preflight','Other'].includes(message.params.resourceType)?message.params.resourceType:'unknown',
           session:sha256(String(message.sessionId)).slice(0,16),
           interception:sha256(String(requestId)).slice(0,16),
           network_request:message.params.networkId?sha256(String(message.params.networkId)).slice(0,16):null,
           url:networkLabel(request.url).slice(0,256),
-          response_stage:Number.isInteger(message.params.responseStatusCode)
+          response_stage:isFetchResponseStage(message.params)
         });
       }else if(message.method==='Network.requestWillBeSent') {
         const request=message.params.request;

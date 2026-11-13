@@ -1,6 +1,5 @@
 {{define "content"}}
-<div class="finding-topline"><span>Security / Overview</span><span class="badge badge-info">Read-only</span></div>
-<header class="finding-page-heading"><div><h1>記録された状況から、次の確認へ。</h1><p>保存されている Findings、Assets、収集記録を横断して確認します。</p></div><a class="btn btn-ghost interactive-scale" href="/findings">Findings を見る</a></header>
+<header class="finding-page-heading"><h1>Overview</h1><div class="page-actions"><span class="badge badge-info">Read-only</span><a class="btn btn-ghost interactive-scale" href="/findings">Findings を見る</a></div></header>
 <p class="finding-notice">集計範囲: すべての保存済み共通 Findings / Assets。読取時点 (UTC): {{findingTime .Overview.AsOf}}。未取得の対象を含む実環境全体の集計ではありません。</p>
 <div class="console-metrics">
  <section class="card console-metric"><h2>Active Findings</h2><strong>{{.Overview.Active}}</strong><p class="finding-caption">検出元が active と記録</p></section>

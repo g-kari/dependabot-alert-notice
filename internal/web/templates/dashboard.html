@@ -96,11 +96,11 @@ window.__copyGroupCSV = function(btn) {
   <h1>Dependabot アラート一覧</h1>
   <div class="dashboard-actions">
     {{if .IsPolling}}
-    <span class="badge badge-pending polling-badge">⏳ 取得中...</span>
+    <span class="badge badge-pending polling-badge">取得中…</span>
     <span class="btn btn-ghost btn-disabled">更新</span>
     {{else}}
     <form method="POST" action="/api/poll" class="inline-form">
-      <button type="submit" class="btn btn-primary">⬇️ 今すぐ取得</button>
+      <button type="submit" class="btn btn-primary">今すぐ取得</button>
     </form>
     <a href="javascript:window.__reloadWithState()" class="btn btn-ghost">更新</a>
     {{end}}
@@ -174,7 +174,7 @@ window.__copyGroupCSV = function(btn) {
               {{if .Evaluation}}
               <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
               {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
-              <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
+              <span class="badge badge-pending eval-spinning">評価中…</span>
               {{else if eq (printf "%s" .EvalStatus) "failed"}}
               <span class="badge badge-error">評価失敗</span>
               {{else}}
@@ -239,7 +239,7 @@ window.__copyGroupCSV = function(btn) {
         <form method="POST" action="/api/poll/repo" class="inline-form" onclick="event.stopPropagation()">
           <input type="hidden" name="owner" value="{{.Owner}}">
           <input type="hidden" name="repo" value="{{.Repo}}">
-          <button type="submit" class="btn btn-ghost btn-sm">⬇️ 今すぐ取得</button>
+          <button type="submit" class="btn btn-ghost btn-sm">今すぐ取得</button>
         </form>
       </div>
     </summary>
@@ -283,7 +283,7 @@ window.__copyGroupCSV = function(btn) {
               {{if .Evaluation}}
               <span class="badge badge-{{.Alert.Severity}}">{{.Evaluation.Recommendation}}</span>
               {{else if eq (printf "%s" .EvalStatus) "evaluating"}}
-              <span class="badge badge-pending eval-spinning">⏳ 評価中...</span>
+              <span class="badge badge-pending eval-spinning">評価中…</span>
               {{else if eq (printf "%s" .EvalStatus) "failed"}}
               <span class="badge badge-error">評価失敗</span>
               {{else}}

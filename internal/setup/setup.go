@@ -113,14 +113,20 @@ func Run(path string, in io.Reader, out io.Writer) error {
 		}
 		return errors.New("low/medium/high/criticalを指定してください")
 	})
-	p.ask("AI評価プロバイダー (claude/codex)", cfg.Evaluator.Provider, func(v string) error {
-		if v != "claude" && v != "codex" {
-			return errors.New("claudeまたはcodexを指定してください")
+	p.ask("AI評価プロバイダー (claude/codex/hermes)", cfg.Evaluator.Provider, func(v string) error {
+		switch v {
+		case "claude", "codex", "hermes":
+			cfg.Evaluator.Provider = v
+			return nil
+		default:
+			return errors.New("claude/codex/hermesを指定してください")
 		}
-		cfg.Evaluator.Provider = v
-		return nil
 	})
-	p.boolean("AI自動評価を有効にする (隔離用イメージ・CLI認証の準備が必要)", &cfg.Evaluator.AutoEval)
+	autoEvalPrompt := "AI自動評価を有効にする (隔離用イメージ・CLI認証の準備が必要)"
+	if cfg.Evaluator.Provider == "hermes" {
+		autoEvalPrompt = "AI自動評価を有効にする (Hermes Proxyを起動してください)"
+	}
+	p.boolean(autoEvalPrompt, &cfg.Evaluator.AutoEval)
 	p.boolean("RSS収集を有効にする", &cfg.RSS.Enabled)
 	p.print("\n認証情報は環境変数で設定します（値は表示・保存しません）。\n既存YAML内の認証情報も保存しません。必要な値は環境変数へ移してください。\n")
 	for _, key := range []string{"SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "DISCORD_WEBHOOK_URL"} {

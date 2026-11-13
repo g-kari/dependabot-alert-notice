@@ -14,11 +14,12 @@ import (
 	slackgo "github.com/slack-go/slack"
 
 	"github.com/g-kari/dependabot-alert-notice/internal/config"
+	"github.com/g-kari/dependabot-alert-notice/internal/evaluator"
 	"github.com/g-kari/dependabot-alert-notice/internal/ghcommand"
 )
 
 type streamEvent struct {
-	Type    string `json:"type"` // "gh" | "claude" | "codex" | "slack" | "sandbox" | "target" | "done"
+	Type    string `json:"type"` // "gh" | "claude" | "codex" | "hermes" | "slack" | "sandbox" | "target" | "done"
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 	Owner   string `json:"owner,omitempty"`
@@ -43,6 +44,7 @@ type connectivityResult struct {
 	GH      toolResult     `json:"gh"`
 	Claude  toolResult     `json:"claude"`
 	Codex   toolResult     `json:"codex"`
+	Hermes  toolResult     `json:"hermes"`
 	Slack   toolResult     `json:"slack"`
 	Sandbox toolResult     `json:"sandbox"`
 	Targets []targetResult `json:"targets"`
@@ -92,7 +94,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		res := testClaude(ctx, cfg.ClaudePath)
+		res := s.claudeStatus(ctx, cfg)
 		send(streamEvent{Type: "claude", OK: res.OK, Message: res.Message})
 	}()
 
@@ -106,6 +108,13 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		res := testHermesProxy(ctx, cfg)
+		send(streamEvent{Type: "hermes", OK: res.OK, Message: res.Message})
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		res := testSlack(ctx, cfg.Slack)
 		send(streamEvent{Type: "slack", OK: res.OK, Message: res.Message})
 	}()
@@ -113,7 +122,7 @@ func (s *Server) handleConnectivityStream(w http.ResponseWriter, r *http.Request
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		res := testSandbox(ctx, selectedSandbox(cfg))
+		res := testEvaluatorSandbox(ctx, cfg)
 		send(streamEvent{Type: "sandbox", OK: res.OK, Message: res.Message})
 	}()
 
@@ -153,7 +162,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 		wg  sync.WaitGroup
 	)
 
-	wg.Add(5)
+	wg.Add(6)
 
 	go func() {
 		defer wg.Done()
@@ -165,7 +174,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
-		r := testClaude(ctx, cfg.ClaudePath)
+		r := s.claudeStatus(ctx, cfg)
 		mu.Lock()
 		res.Claude = r
 		mu.Unlock()
@@ -181,6 +190,14 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
+		r := testHermesProxy(ctx, cfg)
+		mu.Lock()
+		res.Hermes = r
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
 		r := testSlack(ctx, cfg.Slack)
 		mu.Lock()
 		res.Slack = r
@@ -189,7 +206,7 @@ func (s *Server) handleConnectivityTest(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer wg.Done()
-		r := testSandbox(ctx, selectedSandbox(cfg))
+		r := testEvaluatorSandbox(ctx, cfg)
 		mu.Lock()
 		res.Sandbox = r
 		mu.Unlock()
@@ -245,11 +262,39 @@ func testClaude(ctx context.Context, claudePath string) toolResult {
 	return toolResult{OK: true, Message: strings.TrimSpace(string(out))}
 }
 
+func (s *Server) claudeStatus(ctx context.Context, cfg config.Config) toolResult {
+	if cfg.Evaluator.Provider != "" && cfg.Evaluator.Provider != "claude" {
+		return toolResult{OK: true, Message: "Claude CLIは未選択"}
+	}
+	return testClaude(ctx, cfg.ClaudePath)
+}
+
 func (s *Server) codexStatus(ctx context.Context, cfg config.Config) toolResult {
 	if cfg.Evaluator.Provider != "codex" {
-		return toolResult{OK: true, Message: "Claudeを選択中（Codexは未使用）"}
+		return toolResult{OK: true, Message: "Codex CLIは未選択"}
 	}
 	return s.codexAuth.Status(ctx, cfg.CodexPath)
+}
+
+func testHermesProxy(ctx context.Context, cfg config.Config) toolResult {
+	if cfg.Evaluator.Provider != "hermes" {
+		return toolResult{OK: true, Message: "Hermes Proxyは未選択"}
+	}
+	checkable, ok := evaluator.New(&cfg).(interface{ Check(context.Context) error })
+	if !ok {
+		return toolResult{OK: false, Message: "Hermes Proxyの接続確認を利用できません"}
+	}
+	if err := checkable.Check(ctx); err != nil {
+		return toolResult{OK: false, Message: err.Error()}
+	}
+	return toolResult{OK: true, Message: "Hermes Proxyのモデル一覧に接続しました (推論なし)"}
+}
+
+func testEvaluatorSandbox(ctx context.Context, cfg config.Config) toolResult {
+	if cfg.Evaluator.Provider == "hermes" {
+		return toolResult{OK: true, Message: "Hermes Proxy APIを使用 (CLI・コンテナ不要)"}
+	}
+	return testSandbox(ctx, selectedSandbox(cfg))
 }
 
 func selectedSandbox(cfg config.Config) config.SandboxConfig {

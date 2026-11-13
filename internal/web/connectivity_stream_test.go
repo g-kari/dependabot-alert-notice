@@ -60,7 +60,7 @@ func TestConnectivityStream_ContainsToolEvents(t *testing.T) {
 	srv.handleConnectivityStream(w, req)
 
 	body := w.Body.String()
-	for _, tool := range []string{"gh", "claude", "slack"} {
+	for _, tool := range []string{"gh", "claude", "codex", "hermes", "slack"} {
 		if !strings.Contains(body, `"type":"`+tool+`"`) {
 			t.Errorf("レスポンスに %q イベントが含まれていない", tool)
 		}

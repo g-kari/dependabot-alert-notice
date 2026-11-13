@@ -24,6 +24,9 @@ func New(cfg *config.Config) Evaluator {
 }
 
 func newEvaluator(cfg *config.Config, osName, arch string) Evaluator {
+	if cfg.Evaluator.Provider == "hermes" {
+		return newHermesEvaluator(cfg.Evaluator)
+	}
 	backend := cfg.Evaluator.Sandbox.Runtime
 	if backend == "apple" || (backend == "auto" && osName == "darwin" && arch == "arm64") {
 		return &AppleEvaluator{cfg: cfg.Evaluator}

@@ -4,7 +4,7 @@
 <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
   <p style="color:var(--color-muted);font-size:0.9rem;flex:1">gh CLI・AI評価エンジン・Slack API・監視ターゲットへの接続を確認します。</p>
   <div style="display:flex;align-items:center;gap:10px">
-    <button id="runBtn" class="btn btn-approve interactive-scale" onclick="runTests()">▶ テスト実行</button>
+    <button id="runBtn" class="btn btn-approve interactive-scale" onclick="runTests()">テスト実行</button>
     <span id="spinner" style="display:none;color:var(--color-muted);font-size:0.88rem">実行中...</span>
   </div>
 </div>
@@ -16,6 +16,7 @@ const TOOLS = [
   { type: 'gh',      label: 'gh CLI' },
   { type: 'claude',  label: 'Claude CLI' },
   { type: 'codex',   label: 'Codex CLI / 認証' },
+  { type: 'hermes',  label: 'Hermes Proxy (models)' },
   { type: 'slack',   label: 'Slack API' },
   { type: 'sandbox', label: 'Evaluator Sandbox' },
 ];
@@ -27,7 +28,7 @@ function escHtml(s) {
 }
 
 function badge(ok, pending) {
-  if (pending) return '<span style="color:var(--color-muted);font-size:0.82rem">⏳ 確認中...</span>';
+  if (pending) return '<span style="color:var(--color-muted);font-size:0.82rem">確認中…</span>';
   return ok
     ? '<span class="badge badge-approved">OK</span>'
     : '<span class="badge badge-rejected">NG</span>';

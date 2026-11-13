@@ -177,7 +177,7 @@ func scalarChoices(n *yaml.Node, path string) ([]choice, bool) {
 	case "notification_interval":
 		return []choice{{"1h0m0s", "1時間ごと"}, {"30m0s", "30分ごと"}, {"5m0s", "5分ごと"}, {"0s", "都度通知"}}, true
 	case "evaluator.provider":
-		return []choice{{"claude", "Claude"}, {"codex", "Codex"}}, false
+		return []choice{{"claude", "Claude CLI"}, {"codex", "Codex CLI"}, {"hermes", "Hermes Proxy"}}, false
 	case "evaluator.sandbox.runtime":
 		return []choice{{"auto", "自動 (auto)"}, {"apple", "Apple container"}, {"docker", "Docker"}, {"podman", "Podman (rootless)"}}, false
 	case "log_level":
@@ -188,6 +188,8 @@ func scalarChoices(n *yaml.Node, path string) ([]choice, bool) {
 		return []choice{{"", "CLIの既定モデル"}, {"gpt-6-luna", "GPT-6 Luna (gpt-6-luna)"}, {"gpt-6.1-sol", "GPT-6.1 Sol (gpt-6.1-sol)"}, {"gpt-6-astra", "GPT-6 Astra (gpt-6-astra)"}}, true
 	case "evaluator.claude_model":
 		return []choice{{"", "CLIの既定モデル"}, {"sonnet", "Sonnet (sonnet)"}, {"opus", "Opus (opus)"}, {"haiku", "Haiku (haiku)"}}, true
+	case "evaluator.hermes_model":
+		return []choice{{"Hermes-4-70B", "Hermes-4-70B"}, {"Hermes-4.3-36B", "Hermes-4.3-36B"}, {"Hermes-4-405B", "Hermes-4-405B"}}, true
 	}
 	return nil, false
 }
