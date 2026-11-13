@@ -1,55 +1,63 @@
 {
   "schemaVersion": 1,
   "project": "DevSecOps Console",
-  "checkedAt": "2026-11-13T20:28:00Z",
+  "checkedAt": "2026-11-13T21:39:34Z",
   "publishedSnapshotAt": "2026-11-13T20:28:00Z",
-  "lastSubstantiveProgressAt": "2026-11-13T20:27:28Z",
-  "lastSubstantiveProgressLabel": "K275 最小認可契約のPR #89作成（未マージ）",
+  "lastSubstantiveProgressAt": "2026-11-13T21:28:55Z",
+  "lastSubstantiveProgressLabel": "PR #90統合後のTrial成功。公開JSON取得経路は接続済み、main Checkはブラウザー起動失敗",
   "lastCodeMergeAt": "2026-11-13T04:50:11Z",
-  "mainSha": "5b4a577d15cf1b4be5105719e3947111c1e7d58c",
+  "mainSha": "39ee8d033c13c9987407a997ea05ab271d63ddf9",
   "repository": "https://github.com/g-kari/devsecops-console",
-  "scopeNote": "コードの統合、当該変更の検証、正式版収録、本番稼働は別に扱う。",
-  "currentFocus": "K275: 0g0-idのWebログインとGitHub情報取得接続を分離する認可契約",
+  "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHAとPR一覧は確認時点の観測値。公開進捗データ自身の更新commitとは別。",
+  "currentFocus": "K275: Web認可契約は未マージ・CI失敗。既存担当の継続確認と公開進捗の同期",
   "openPullRequests": [
     {
       "number": 88,
       "title": "GoReleaser v2.20.2",
       "url": "https://github.com/g-kari/devsecops-console/pull/88",
       "status": "open",
-      "scope": "依存保守。K275とは独立。"
+      "scope": "依存保守。最新headのCheckとTrial失敗。K275とは独立。"
     },
     {
       "number": 89,
       "title": "Web role/scope認可ポリシー",
       "url": "https://github.com/g-kari/devsecops-console/pull/89",
       "status": "open",
-      "scope": "K275の最小コード工程。Webログイン・session・HTTP接続は未実装。"
+      "scope": "K275の最小コード工程。CheckとTrial失敗、未マージ。Webログイン・session・HTTP接続は未実装。"
     }
   ],
   "ci": {
     "status": "failure",
-    "label": "mainのCheckでブラウザー起動検証が未完",
-    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43383926963",
-    "checkedAt": "2026-11-13T20:25:00Z"
+    "label": "main 39ee8d0のCheckはブラウザー起動で失敗、同SHAのTrialは成功",
+    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419",
+    "checkedAt": "2026-11-13T21:39:34Z"
   },
   "rows": [
     {
       "id": "K275",
       "title": "Webログイン・役割制御",
       "phase": "共通認可",
-      "status": "active",
-      "owner": "一姫（実装）",
-      "lastCheckedAt": "2026-11-13T20:28:00Z",
-      "lastProgressAt": "2026-11-13T20:27:28Z",
+      "status": "blocked",
+      "owner": "一姫（既存担当の現在稼働は未確認）",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": "2026-11-13T20:34:00Z",
       "activityAt": "2026-11-13T20:22:00Z",
-      "latestAchievement": "role/scopeのpure認可ポリシーと合成テストを通常PR #89へ公開。独立静的レビュー済み。テスト実行結果は確認中。",
-      "waitReason": "PR CIの検証待ち。Webログインの実接続と本番有効化は未実装。",
-      "nextAction": "PR #89の最終head CIを確認。合格後に統合し、HTTP/session/0g0-id接続の次工程へ。",
+      "latestAchievement": "PR #89の認可packageは合成テスト・race・coverage 100%を確認。Checkはブラウザー起動、TrialはIntel Mac試験で失敗し、未マージ。",
+      "waitReason": "最終headの全CI未合格。既存担当の継続状況は未確認。Webログイン・session・HTTP実接続も未実装。",
+      "nextAction": "既存担当の継続を確認し、失敗CIの原因を切り分ける。修正・再検証後に統合条件を確認。",
       "dependencies": [],
       "evidence": [
         {
           "label": "PR #89（未マージ）",
           "url": "https://github.com/g-kari/devsecops-console/pull/89"
+        },
+        {
+          "label": "Check失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501736123"
+        },
+        {
+          "label": "Trial失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501736182"
         },
         {
           "label": "全体仕様",
@@ -158,18 +166,26 @@
       "title": "ブラウザーCIの起動診断",
       "phase": "品質",
       "status": "blocked",
-      "owner": "未割当",
-      "lastCheckedAt": "2026-11-13T20:25:00Z",
-      "lastProgressAt": "2026-11-13T07:17:50Z",
+      "owner": "修正担当の現在稼働は未確認",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": "2026-11-13T10:48:15Z",
       "activityAt": null,
-      "latestAchievement": "現mainのCheckがBrowser.getVersion待ちで失敗。UIケースは未開始。",
-      "waitReason": "根因未確定。該当headのブラウザーQA未合格。",
-      "nextAction": "Chrome起動・CDP通信の限定再現条件を確定し、修正後に同一headで再検証。",
+      "latestAchievement": "既存診断で同じtracked sourceの実CI成功・失敗を比較済み。最新main 39ee8d0でもBrowser.getVersionの10秒待ち・受信0で失敗。",
+      "waitReason": "根因未確定。PR #90のCheck成功と、統合後mainのCheck失敗を区別する。",
+      "nextAction": "修正担当を一本化してから、上限と通信制約を保った起動診断・回帰試験を追加し、正確なSHAで再検証。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "main Check（失敗）",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43383926963"
+          "label": "最新mainの失敗job",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419/job/132172876662"
+        },
+        {
+          "label": "PR #90のCheck成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501989692"
+        },
+        {
+          "label": "同一source比較の成功run",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43381469467"
         }
       ],
       "plannedStart": null,
@@ -703,6 +719,189 @@
       ],
       "plannedStart": null,
       "plannedEnd": null
+    },
+    {
+      "id": "K307",
+      "title": "GoReleaser v2.20.2更新",
+      "phase": "依存保守",
+      "status": "blocked",
+      "owner": "一姫（既存診断担当の現在稼働は未確認）",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "PR #88は未マージ。main更新後のhead 8b43228でもCheck・Trial失敗。",
+      "waitReason": "既存診断担当の現在稼働は未確認。更新修復・統合は未完。",
+      "nextAction": "担当と修正範囲を照合し、manifest・installer pinの整合と最終CIを検証。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #88",
+          "url": "https://github.com/g-kari/devsecops-console/pull/88"
+        },
+        {
+          "label": "最新Check",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508751217"
+        },
+        {
+          "label": "最新Trial",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508751251"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K309",
+      "title": "公開ロードマップ更新経路",
+      "phase": "公開資料",
+      "status": "complete",
+      "owner": "更新経路の限定工程完了 / 進捗同期は継続",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": "2026-11-13T21:28:55Z",
+      "activityAt": null,
+      "latestAchievement": "PR #90をmainへ統合し、公開SiteでGitHub JSON取得成功を確認。統合後Trial成功。",
+      "waitReason": "限定完了はデータ読取経路。main Checkの失敗や製品の未実装工程は残る。",
+      "nextAction": "既存の毎時確認で公開JSONを更新し、通常PRの検証・main読戻し・Site取得を確認。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #90（統合済み）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/90"
+        },
+        {
+          "label": "統合後Trial成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671295"
+        },
+        {
+          "label": "更新手順",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/site-roadmap-update.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-A",
+      "title": "AI監査基盤 A: 調査・設計",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": "2026-11-13T20:55:04Z",
+      "activityAt": null,
+      "latestAchievement": "OWASPを監査基準、Cloudflareを監査手順とする初期設計とA–E計画をIssue #91に登録。Phase A全体は未完。",
+      "waitReason": "今回は設計整理のみ。既存の開発優先順位は変更せず、実装・監査実行・CI変更・配備は行わない。",
+      "nextAction": "基準版・ライセンス・隔離能力・予算・Finding identity・状態変換・証拠保持の残契約をレビュー。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-B",
+      "title": "AI監査基盤 B: 隔離PoC",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。PoC・実監査は未実施。",
+      "waitReason": "Phase Aの契約、隔離環境の受入と別途の着手判断が必要。",
+      "nextAction": "固定source refの合成・公開対象で、再現性、誤検知、独立検証、費用・時間上限を評価する計画。",
+      "dependencies": [
+        "K310-A"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-C",
+      "title": "AI監査基盤 C: Finding統合",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。Dependabot・Trivyとはsource-native identityと観測履歴を分離し、承認状態と解消状態を別管理する設計。",
+      "waitReason": "Phase Bの証拠と既存ingestion/ID/transaction契約に依存。adapterは未実装。",
+      "nextAction": "bounded offline importと読取から検討し、replay・衝突・scope越境・partial結果を検証する計画。",
+      "dependencies": [
+        "K310-B",
+        "K275（変更操作の場合）"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-D",
+      "title": "AI監査基盤 D: CI/CD連携",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。PR差分・手動・定期監査と監査履歴を将来検討。",
+      "waitReason": "Phase C、K272の来歴契約、対象・権限・費用の導入判断に依存。CI変更なし。",
+      "nextAction": "artifact/source refの結合と未信頼PRの分離を設計し、opt-in・advisoryから評価する計画。",
+      "dependencies": [
+        "K310-C",
+        "K272"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-E",
+      "title": "AI監査基盤 E: OWASP Dashboard",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。OWASP/ASVS分類、監査履歴・差分、検証状態・証跡を表示する将来工程。",
+      "waitReason": "Phase C/Dと既存UI・Web認可・scope契約に依存。Dashboardは未実装。",
+      "nextAction": "未実施・失敗・partial・unknownと正常ゼロ件を分け、既存Findings/Overviewへ接続する計画。",
+      "dependencies": [
+        "K310-C",
+        "K310-D",
+        "K275",
+        "K274"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
     }
   ],
   "milestones": [
@@ -832,6 +1031,24 @@
     }
   ],
   "updates": [
+    {
+      "at": "2026-11-13T21:28:55Z",
+      "type": "検証",
+      "text": "PR #90統合後のmain 39ee8d0でTrial成功。Checkはブラウザー起動失敗のため全CI合格ではない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671295"
+    },
+    {
+      "at": "2026-11-13T21:12:54Z",
+      "type": "資料統合",
+      "text": "公開ロードマップJSONをPR #90でmainへ統合。公開SiteでGitHub JSON取得成功を確認。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/90"
+    },
+    {
+      "at": "2026-11-13T20:55:04Z",
+      "type": "計画登録",
+      "text": "OWASP × Cloudflare AI監査基盤の設計Issue #91とA–E計画を登録。実装・CI変更・配備は未実施。",
+      "url": "https://github.com/g-kari/devsecops-console/issues/91"
+    },
     {
       "at": "2026-11-13T20:27:28Z",
       "type": "PR作成",
