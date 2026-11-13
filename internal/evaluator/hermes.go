@@ -127,21 +127,21 @@ func (e *HermesEvaluator) Evaluate(parent context.Context, alert model.Alert) (*
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Hermes proxyがHTTP %dを返しました", response.StatusCode)
+		return nil, fmt.Errorf("hermes proxyがHTTP %dを返しました", response.StatusCode)
 	}
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxHermesResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("Hermes評価レスポンスの読み込み: %w", err)
+		return nil, fmt.Errorf("hermes評価レスポンスの読み込み: %w", err)
 	}
 	if len(responseBody) > maxHermesResponseBytes {
-		return nil, fmt.Errorf("Hermes評価レスポンスが上限を超えました")
+		return nil, fmt.Errorf("hermes評価レスポンスが上限を超えました")
 	}
 	var result hermesChatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return nil, fmt.Errorf("Hermes proxyのレスポンス形式が不正です: %w", err)
+		return nil, fmt.Errorf("hermes proxyのレスポンス形式が不正です: %w", err)
 	}
 	if len(result.Choices) == 0 || strings.TrimSpace(result.Choices[0].Message.Content) == "" {
-		return nil, fmt.Errorf("Hermes proxyから評価テキストが返りませんでした")
+		return nil, fmt.Errorf("hermes proxyから評価テキストが返りませんでした")
 	}
 	return parseHermesEvaluation([]byte(result.Choices[0].Message.Content))
 }
@@ -149,26 +149,26 @@ func (e *HermesEvaluator) Evaluate(parent context.Context, alert model.Alert) (*
 func parseHermesEvaluation(data []byte) (*model.Evaluation, error) {
 	extracted, found := extractJSON(data)
 	if !found {
-		return nil, fmt.Errorf("Hermes評価結果にJSONが含まれていません")
+		return nil, fmt.Errorf("hermes評価結果にJSONが含まれていません")
 	}
 	var result model.Evaluation
 	if err := json.Unmarshal(extracted, &result); err != nil {
-		return nil, fmt.Errorf("Hermes評価結果JSONの解析に失敗しました: %w", err)
+		return nil, fmt.Errorf("hermes評価結果JSONの解析に失敗しました: %w", err)
 	}
 	if strings.TrimSpace(result.Impact) == "" {
-		return nil, fmt.Errorf("Hermes評価結果のimpactが空です")
+		return nil, fmt.Errorf("hermes評価結果のimpactが空です")
 	}
 	result.Recommendation = strings.TrimSpace(result.Recommendation)
 	switch result.Recommendation {
 	case "approve", "reject", "manual-review":
 	default:
-		return nil, fmt.Errorf("Hermes評価結果のrecommendationが無効です")
+		return nil, fmt.Errorf("hermes評価結果のrecommendationが無効です")
 	}
 	if strings.TrimSpace(result.Reasoning) == "" {
-		return nil, fmt.Errorf("Hermes評価結果のreasoningが空です")
+		return nil, fmt.Errorf("hermes評価結果のreasoningが空です")
 	}
 	if strings.TrimSpace(result.AWSRisk) == "" {
-		return nil, fmt.Errorf("Hermes評価結果のaws_riskが空です")
+		return nil, fmt.Errorf("hermes評価結果のaws_riskが空です")
 	}
 	return &result, nil
 }
@@ -180,17 +180,17 @@ func (e *HermesEvaluator) Check(ctx context.Context) error {
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, e.baseURL()+"/models", nil)
 	if err != nil {
-		return fmt.Errorf("Hermes proxy確認リクエストの作成: %w", err)
+		return fmt.Errorf("hermes proxy確認リクエストの作成: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+hermesProxyPlaceholder)
 	request.Header.Set("Accept", "application/json")
 	response, err := e.httpClient().Do(request)
 	if err != nil {
-		return fmt.Errorf("Hermes proxyへの接続失敗: %w", err)
+		return fmt.Errorf("hermes proxyへの接続失敗: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Hermes proxyがHTTP %dを返しました", response.StatusCode)
+		return fmt.Errorf("hermes proxyがHTTP %dを返しました", response.StatusCode)
 	}
 	var result struct {
 		Data []struct {
@@ -199,27 +199,27 @@ func (e *HermesEvaluator) Check(ctx context.Context) error {
 	}
 	modelListBody, err := io.ReadAll(io.LimitReader(response.Body, maxHermesModelsResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("Hermes proxyのモデル一覧の読み込みに失敗しました: %w", err)
+		return fmt.Errorf("hermes proxyのモデル一覧の読み込みに失敗しました: %w", err)
 	}
 	if len(modelListBody) > maxHermesModelsResponseBytes {
-		return fmt.Errorf("Hermes proxyのモデル一覧が上限を超えました")
+		return fmt.Errorf("hermes proxyのモデル一覧が上限を超えました")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(modelListBody))
 	if err := decoder.Decode(&result); err != nil {
-		return fmt.Errorf("Hermes proxyのモデル一覧形式が不正です: %w", err)
+		return fmt.Errorf("hermes proxyのモデル一覧形式が不正です: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return fmt.Errorf("Hermes proxyのモデル一覧に余分なデータがあります")
+		return fmt.Errorf("hermes proxyのモデル一覧に余分なデータがあります")
 	}
 	if len(result.Data) == 0 {
-		return fmt.Errorf("Hermes proxyのモデル一覧が空です")
+		return fmt.Errorf("hermes proxyのモデル一覧が空です")
 	}
 	for _, available := range result.Data {
 		if available.ID == e.modelName() {
 			return nil
 		}
 	}
-	return fmt.Errorf("Hermes proxyのモデル一覧に設定モデルがありません")
+	return fmt.Errorf("hermes proxyのモデル一覧に設定モデルがありません")
 }
 
 // Identity identifies the selected Hermes proxy endpoint and model for cache use.
