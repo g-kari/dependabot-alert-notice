@@ -26,7 +26,7 @@ go run ./cmd/import-trivy --input report.json --scope example-project \
 
 ### Retry after an uncertain import result
 
-A nonzero exit does not prove that the batch was rolled back. The CLI can return exit code 1 after a committed import if closing the database or writing the JSON summary fails. In particular, `import committed, but database close failed; verify the run ID before retrying` and `cannot write result summary; verify the run ID before retrying an import` require checking the run before another import attempt.
+For a non-dry-run import, a nonzero exit does not prove that the batch was rolled back. The CLI can return exit code 1 after a committed import if closing the database or writing the JSON summary fails. In that mode, `import committed, but database close failed; verify the run ID before retrying` and `cannot write result summary; verify the run ID before retrying an import` require checking the run before another import attempt. A summary-output failure in `--dry-run` does not imply any database write; dry-run never opens the database.
 
 1. Preserve the run ID, scope, `--observed-at`, original JSON bytes, selected database, and any summary/error output.
 2. If the outcome is uncertain, do not resend until the destination's run ledger and receipt have been checked through an existing authorized read-only method. This CLI has no status-lookup flag. If inspection is unavailable, pause and request verification.
@@ -38,7 +38,7 @@ Source: [post-import CLI error paths](https://github.com/g-kari/devsecops-consol
 
 ## Preservation and lifecycle
 
-- Every imported batch commits its run, assets, findings, observations and audit events atomically. A failure rolls back the complete batch.
+- Every imported batch commits its run, assets, findings, observations and audit events atomically. A failure within the import transaction rolls back the complete batch.
 - Assets and source-native findings use stable scoped identities. Same-CVE findings from different sources, artifacts, packages, versions or targets remain distinct. Canonical advisory/ecosystem/package/path keys are correlation hints, not merge keys.
 - Each new run retains its observation. Older observations cannot overwrite the latest finding. Local triage and first-seen values survive updates.
 - Every offline import has partial coverage, including an empty report. It cannot resolve findings that are absent. Trivy's `Status: fixed` denotes availability of a fix, not evidence that the detected installation was fixed; detected findings stay active.
