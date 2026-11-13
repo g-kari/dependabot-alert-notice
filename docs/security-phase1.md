@@ -24,9 +24,21 @@ go run ./cmd/import-trivy --input report.json --scope example-project \
 
 `--input -` reads stdin. `--observed-at` is required and is the explicit trusted observation time, not an untrusted report timestamp. The default run UUID binds the scope and original report bytes. Optional `--run-id UUID` lets callers select their own identity. Preserve the original timestamp when replaying a run. The receipt binds the raw SHA-256 digest, normalized entities, scope and timestamps. Changed bytes (even ignored fields/whitespace), metadata, or times under an existing ID are conflicts. Changing timestamps requires a new run ID. Exact replays write no duplicate history; complete input validation occurs before opening the selected DB.
 
+### Retry after an uncertain import result
+
+For a non-dry-run import, a nonzero exit does not prove that the batch was rolled back. The CLI can return exit code 1 after a committed import if closing the database or writing the JSON summary fails. In that mode, `import committed, but database close failed; verify the run ID before retrying` and `cannot write result summary; verify the run ID before retrying an import` require checking the run before another import attempt. A summary-output failure in `--dry-run` does not imply any database write; dry-run never opens the database.
+
+1. Preserve the run ID, scope, `--observed-at`, original JSON bytes, selected database, and any summary/error output.
+2. If the outcome is uncertain, do not resend until the destination's run ledger and receipt have been checked through an existing authorized read-only method. This CLI has no status-lookup flag. If inspection is unavailable, pause and request verification.
+3. When replay is appropriate after checking the recorded state, keep the same run ID, scope, observation time, original bytes and destination database. A successful exact replay returns `replay: true` without duplicate history. Do not generate a new UUID to bypass an uncertain result or a conflict.
+
+A fresh scan is a separate observation, not a retry. The default run ID excludes the observation time, so a fresh scan with identical report bytes and scope needs a new explicit `--run-id UUID` when its observation time changes. A successful `--dry-run` neither reserves a run ID nor verifies a database import.
+
+Source: [post-import CLI error paths](https://github.com/g-kari/devsecops-console/blob/bddeaf68747a974fdd932cc0fa8a56f7f27ce42b/cmd/import-trivy/main.go#L113-L135), [receipt/replay checks](https://github.com/g-kari/devsecops-console/blob/bddeaf68747a974fdd932cc0fa8a56f7f27ce42b/internal/store/security_import.go#L45-L148), and [default run ID](https://github.com/g-kari/devsecops-console/blob/bddeaf68747a974fdd932cc0fa8a56f7f27ce42b/cmd/import-trivy/main.go#L278-L290).
+
 ## Preservation and lifecycle
 
-- Every imported batch commits its run, assets, findings, observations and audit events atomically. A failure rolls back the complete batch.
+- Every imported batch commits its run, assets, findings, observations and audit events atomically. A failure within the import transaction rolls back the complete batch.
 - Assets and source-native findings use stable scoped identities. Same-CVE findings from different sources, artifacts, packages, versions or targets remain distinct. Canonical advisory/ecosystem/package/path keys are correlation hints, not merge keys.
 - Each new run retains its observation. Older observations cannot overwrite the latest finding. Local triage and first-seen values survive updates.
 - Every offline import has partial coverage, including an empty report. It cannot resolve findings that are absent. Trivy's `Status: fixed` denotes availability of a fix, not evidence that the detected installation was fixed; detected findings stay active.
