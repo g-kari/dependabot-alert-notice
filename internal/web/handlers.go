@@ -918,8 +918,18 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if v := r.FormValue("eval_provider"); v != "" {
 		s.cfg.Evaluator.Provider = v
 	}
-	s.cfg.Evaluator.CodexModel = strings.TrimSpace(r.FormValue("eval_codex_model"))
-	s.cfg.Evaluator.ClaudeModel = strings.TrimSpace(r.FormValue("eval_claude_model"))
+	if r.Form.Has("eval_codex_model") {
+		s.cfg.Evaluator.CodexModel = strings.TrimSpace(r.FormValue("eval_codex_model"))
+	}
+	if r.Form.Has("eval_claude_model") {
+		s.cfg.Evaluator.ClaudeModel = strings.TrimSpace(r.FormValue("eval_claude_model"))
+	}
+	if r.Form.Has("eval_hermes_model") {
+		s.cfg.Evaluator.HermesModel = strings.TrimSpace(r.FormValue("eval_hermes_model"))
+	}
+	if r.Form.Has("eval_hermes_base_url") {
+		s.cfg.Evaluator.HermesBaseURL = strings.TrimSpace(r.FormValue("eval_hermes_base_url"))
+	}
 
 	// AI評価最低重要度
 	if v := r.FormValue("eval_min_severity"); v == "critical" || v == "high" || v == "medium" || v == "low" {
@@ -927,7 +937,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// evaluator sandbox
-	s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
+	if r.Form.Has("sandbox_enabled") {
+		s.cfg.Evaluator.Sandbox.Enabled = r.FormValue("sandbox_enabled") == "true"
+	}
 	if v := r.FormValue("sandbox_runtime"); v != "" {
 		s.cfg.Evaluator.Sandbox.Runtime = v
 	}

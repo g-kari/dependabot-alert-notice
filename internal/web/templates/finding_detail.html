@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="finding-topline"><a href="/findings">Security / Findings</a><a href="/api/v1/findings/{{.Detail.Finding.ID}}" class="btn btn-ghost btn-sm interactive-scale">この Finding の JSON</a></div>
+<div class="finding-topline"><a href="/findings">← Findings</a><a href="/api/v1/findings/{{.Detail.Finding.ID}}" class="btn btn-ghost btn-sm interactive-scale">この Finding の JSON</a></div>
 <header class="finding-page-heading"><div><p class="finding-caption">{{.Detail.Finding.Source}} / {{.Detail.Finding.SourceFindingID}}</p><h1>{{if .Detail.Finding.Title}}{{.Detail.Finding.Title}}{{else if .Detail.Finding.VulnerabilityID}}{{.Detail.Finding.VulnerabilityID}}{{else}}Finding 詳細{{end}}</h1><p class="finding-caption">Finding ID: {{.Detail.Finding.ID}}</p></div><span class="badge {{findingSeverityClass .Detail.Finding.Severity}}">{{if .Detail.Finding.Severity}}{{.Detail.Finding.Severity}}{{else}}unknown{{end}}</span></header>
 <p class="finding-notice">この画面は読み取り専用です。同じ CVE の Finding も検出元ごとの記録を保持し、承認状態には変換しません。</p>
 <div class="finding-detail-grid">

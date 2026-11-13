@@ -1,6 +1,5 @@
 {{define "content"}}
-<div class="finding-topline"><span>Security / Assets</span><a href="/api/v1/assets" class="btn btn-ghost btn-sm interactive-scale">Assets API (絞り込みなし)</a></div>
-<header class="finding-page-heading"><div><h1>Assets</h1><p>保存済みの資産と、関連する共通 Findings を調べる。</p></div><span class="badge badge-info">Read-only</span></header>
+<header class="finding-page-heading"><h1>Assets</h1><div class="page-actions"><a href="/api/v1/assets" class="btn btn-ghost btn-sm interactive-scale">JSON</a><span class="badge badge-info">Read-only</span></div></header>
 <p class="finding-notice">属性は保存された事実です。空欄は不明として表示し、環境や重要性を推測しません。未管理・未検査の inventory と coverage の母数は不明です。</p>
 <section class="card" aria-labelledby="asset-filters"><div class="section-heading"><h2 id="asset-filters">Assets を絞り込む</h2><a href="/assets">条件をリセット</a></div>
 <form action="/assets" method="get"><div class="finding-filter-grid">

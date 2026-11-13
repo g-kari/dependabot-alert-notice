@@ -26,7 +26,7 @@
 
 <section class="card" id="rss-feeds">
   <div class="section-heading">
-    <div><h2>脆弱性RSS / Atom</h2><p class="field-hint">登録すると定期取得と脆弱性レポートに反映されます。</p></div>
+    <div><h2>脆弱性RSS / Atom</h2></div>
     <a class="btn btn-ghost" href="/reports/vulnerabilities">レポートを見る</a>
   </div>
   <div class="table-wrap"><table>
@@ -78,7 +78,7 @@
             <span style="display:inline-flex;align-items:center;gap:4px;margin:2px">
               <span class="badge badge-pending">{{$ex}}</span>
               <form method="POST" action="/settings/targets/{{$i}}/excludes/{{$j}}/delete" style="display:inline">
-                <button type="submit" class="btn btn-reject" style="padding:1px 6px;font-size:0.72rem;line-height:1.4">×</button>
+                <button type="submit" class="btn btn-reject" style="padding:1px 6px;font-size:0.75rem;line-height:1.4">×</button>
               </form>
             </span>
             {{end}}
@@ -119,6 +119,7 @@
 </div>
 
 {{/* メイン設定フォーム */}}
+{{if eq .Config.Evaluator.Provider "codex"}}
 <section class="card" id="codex-auth">
   <div class="section-heading"><div><h2>Codex 認証</h2><p class="field-hint">Codex CLIのログイン情報を使用します。認証情報はこのアプリに保存しません。</p></div><span id="codex-auth-status" class="badge badge-pending">確認中</span></div>
   <div class="form-row">
@@ -127,6 +128,7 @@
     <span class="field-hint">このPCのブラウザでログイン画面が開きます。</span>
   </div>
 </section>
+{{end}}
 <form method="POST" action="/settings">
 
 <div class="card">
@@ -268,14 +270,18 @@
   <div class="table-wrap">
     <table>
       <tbody>
+        {{if or (eq .Config.Evaluator.Provider "") (eq .Config.Evaluator.Provider "claude")}}
         <tr>
           <th style="width:200px">claude パス</th>
           <td><input type="text" name="claude_path" value="{{.Config.ClaudePath}}" style="width:280px"></td>
         </tr>
+        {{end}}
+        {{if eq .Config.Evaluator.Provider "codex"}}
         <tr>
           <th>codex パス</th>
           <td><input type="text" name="codex_path" value="{{.Config.CodexPath}}" style="width:280px"></td>
         </tr>
+        {{end}}
         <tr>
           <th>gh パス</th>
           <td><input type="text" name="gh_path" value="{{.Config.GhPath}}" style="width:280px"></td>
@@ -318,9 +324,17 @@
   <div class="table-wrap">
     <table>
       <tbody>
-        <tr><th style="width:200px">評価エンジン</th><td><select name="eval_provider"><option value="claude" {{if or (eq .Config.Evaluator.Provider "") (eq .Config.Evaluator.Provider "claude")}}selected{{end}}>Claude Code</option><option value="codex" {{if eq .Config.Evaluator.Provider "codex"}}selected{{end}}>Codex</option></select><span class="field-hint"> Codexを選ぶ場合は上の認証状態を確認してください。</span></td></tr>
-        <tr><th>Codex Model</th><td><div class="input-row"><input type="text" name="eval_codex_model" value="{{.Config.Evaluator.CodexModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Codex選択時に使用。空欄ならCodex CLIの既定値。</span></div></td></tr>
-        <tr><th>Claude Model</th><td><div class="input-row"><input type="text" name="eval_claude_model" value="{{.Config.Evaluator.ClaudeModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Claude Code選択時に使用。空欄ならClaude CLIの既定値。</span></div></td></tr>
+        <tr><th style="width:200px"><label for="eval_provider">評価エンジン</label></th><td><select id="eval_provider" name="eval_provider" aria-describedby="eval-provider-help"><option value="claude" {{if or (eq .Config.Evaluator.Provider "") (eq .Config.Evaluator.Provider "claude")}}selected{{end}}>Claude CLI</option><option value="codex" {{if eq .Config.Evaluator.Provider "codex"}}selected{{end}}>Codex CLI</option><option value="hermes" {{if eq .Config.Evaluator.Provider "hermes"}}selected{{end}}>Hermes Proxy</option></select><p id="eval-provider-help" class="field-hint">Hermes Proxyを選ぶと、評価対象のアラート情報は選択モデルへ送信されます。Hermes Agentのツールは実行されず、CLIや隔離コンテナも不要です。</p></td></tr>
+        {{if eq .Config.Evaluator.Provider "codex"}}
+        <tr><th>Codex Model</th><td><div class="input-row"><input type="text" name="eval_codex_model" value="{{.Config.Evaluator.CodexModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Codex CLIで使用。</span></div></td></tr>
+        {{end}}
+        {{if or (eq .Config.Evaluator.Provider "") (eq .Config.Evaluator.Provider "claude")}}
+        <tr><th>Claude Model</th><td><div class="input-row"><input type="text" name="eval_claude_model" value="{{.Config.Evaluator.ClaudeModel}}" placeholder="CLIの既定値" maxlength="128" style="width:280px"><span class="field-hint">Claude CLIで使用。</span></div></td></tr>
+        {{end}}
+        {{if eq .Config.Evaluator.Provider "hermes"}}
+        <tr><th><label for="eval_hermes_model">Hermes model</label></th><td><input id="eval_hermes_model" type="text" name="eval_hermes_model" value="{{.Config.Evaluator.HermesModel}}" placeholder="Hermes-4-70B" maxlength="128" style="width:280px"></td></tr>
+        <tr><th><label for="eval_hermes_base_url">Proxy endpoint</label></th><td><input id="eval_hermes_base_url" type="url" name="eval_hermes_base_url" value="{{.Config.Evaluator.HermesBaseURL}}" style="width:320px" aria-describedby="hermes-endpoint-help"><p id="hermes-endpoint-help" class="field-hint">ローカル Hermes Proxy のみ許可。別プロセスで <code>hermes proxy start</code> を起動してください。Codex / Claude CLI と隔離コンテナは不要です。</p></td></tr>
+        {{end}}
         <tr>
           <th style="width:200px">AI自動評価</th>
           <td>
@@ -352,6 +366,7 @@
   </div>
 </div>
 
+{{if ne .Config.Evaluator.Provider "hermes"}}
 <div class="card">
   <h2 style="margin-bottom:16px">Evaluator サンドボックス</h2>
   <div class="table-wrap">
@@ -398,6 +413,7 @@
     </table>
   </div>
 </div>
+{{end}}
 
 <div class="input-row" style="flex-wrap:wrap">
   <button type="submit" class="btn btn-approve">保存</button>
@@ -405,6 +421,7 @@
   <span class="field-hint">※ 変更は次のポーリングから反映されます</span>
 </div>
 </form>
+{{if eq .Config.Evaluator.Provider "codex"}}
 <script>
 (function() {
   const badge = document.getElementById('codex-auth-status');
@@ -425,4 +442,5 @@
   refresh();
 })();
 </script>
+{{end}}
 {{end}}

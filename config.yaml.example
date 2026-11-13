@@ -20,9 +20,12 @@ data_path: store.db
 web:
     port: 8999
 evaluator:
+    # claude / codex / hermes
     provider: claude
     claude_model: claude-sonnet-5-5
     codex_model: ""
+    hermes_model: Hermes-4-70B
+    hermes_base_url: http://127.0.0.1:8645/v1
     auto_eval: true
     min_severity: high
     sandbox:

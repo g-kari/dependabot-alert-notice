@@ -400,3 +400,53 @@ func TestLoad_RejectsUnknownEvaluatorProvider(t *testing.T) {
 		t.Fatal("unknown evaluator provider should be rejected")
 	}
 }
+
+func TestValidate_AllowsHermesProxyProvider(t *testing.T) {
+	cfg := Defaults()
+	cfg.Evaluator.Provider = "hermes"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Hermes provider should be valid: %v", err)
+	}
+}
+
+func TestLoad_RejectsNonLoopbackHermesEndpoint(t *testing.T) {
+	path := writeTemp(t, "evaluator:\n  provider: hermes\n  hermes_base_url: http://example.com/v1\n")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("non-loopback Hermes endpoint error = %v, want loopback restriction", err)
+	}
+}
+
+func TestValidateHermesBaseURLLoopbackAndMalformedCases(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://127.0.0.1:8645/v1",
+		"http://localhost:8645/v1/",
+		"http://[::1]:8645/v1",
+	} {
+		t.Run("accept/"+endpoint, func(t *testing.T) {
+			if err := validateHermesBaseURL(endpoint); err != nil {
+				t.Errorf("valid loopback endpoint %q rejected: %v", endpoint, err)
+			}
+		})
+	}
+	for _, endpoint := range []string{
+		"https://127.0.0.1:8645/v1",
+		"http://user:pass@127.0.0.1:8645/v1",
+		"http://127.0.0.1:8645/v2",
+		"http://127.0.0.1:8645/v1%2F",
+		"http://127.0.0.1:8645/%76%31",
+		"http://127.0.0.1:8646/v1",
+		"http://127.0.0.1:8645/v1?token=x",
+		"http://127.0.0.1:8645/v1?",
+		"http://127.0.0.1:8645/v1#fragment",
+		"http://127.0.0.1:8645/v1#",
+		"http://127.0.0.1/v1",
+		"http://0.0.0.0:8645/v1",
+		"http://localhost.evil:8645/v1",
+	} {
+		t.Run("reject/"+endpoint, func(t *testing.T) {
+			if err := validateHermesBaseURL(endpoint); err == nil {
+				t.Errorf("unsafe or malformed endpoint %q accepted", endpoint)
+			}
+		})
+	}
+}

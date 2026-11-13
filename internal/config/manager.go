@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -156,8 +157,16 @@ func (c *Config) Validate() error {
 	if err := c.Web.validate(); err != nil {
 		return err
 	}
-	if c.Evaluator.Provider != "" && c.Evaluator.Provider != "claude" && c.Evaluator.Provider != "codex" {
+	if c.Evaluator.Provider != "" && c.Evaluator.Provider != "claude" && c.Evaluator.Provider != "codex" && c.Evaluator.Provider != "hermes" {
 		return fmt.Errorf("unknown evaluator provider: %s", c.Evaluator.Provider)
+	}
+	if len(c.Evaluator.HermesModel) > 128 || strings.ContainsAny(c.Evaluator.HermesModel, "\r\n") {
+		return errors.New("evaluator.hermes_model must be at most 128 characters without newlines")
+	}
+	if c.Evaluator.Provider == "hermes" && c.Evaluator.HermesBaseURL != "" {
+		if err := validateHermesBaseURL(c.Evaluator.HermesBaseURL); err != nil {
+			return err
+		}
 	}
 	switch c.Evaluator.Sandbox.Runtime {
 	case "", "auto", "docker", "apple", "podman":
@@ -253,6 +262,22 @@ func (c *Config) Validate() error {
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
 			return fmt.Errorf("%s must use an https URL", name)
 		}
+	}
+	return nil
+}
+
+func validateHermesBaseURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") || (u.EscapedPath() != "/v1" && u.EscapedPath() != "/v1/") {
+		return errors.New("evaluator.hermes_base_url must be a local HTTP /v1 endpoint")
+	}
+	host := strings.ToLower(u.Hostname())
+	ip := net.ParseIP(host)
+	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return errors.New("evaluator.hermes_base_url must use a loopback host")
+	}
+	if u.Port() != "8645" {
+		return errors.New("evaluator.hermes_base_url must use the Hermes proxy port 8645")
 	}
 	return nil
 }

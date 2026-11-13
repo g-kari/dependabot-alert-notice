@@ -58,6 +58,7 @@ func TestChoiceModelViewportKeepsSelectionVisibleAndSanitizesText(t *testing.T) 
 func TestScalarSettingsCanSelectFromCandidates(t *testing.T) {
 	for _, tt := range []struct{ path, yaml, input, want string }{
 		{"evaluator.provider", "claude", "2\n", "codex"},
+		{"evaluator.provider", "claude", "3\n", "hermes"},
 		{"notification_interval", "30m0s", "1\n", "1h0m0s"},
 		{"notification_interval", "30m0s", "m\n45m\n", "45m"},
 		{"evaluator.codex_model", "''", "2\n", "gpt-6-luna"},

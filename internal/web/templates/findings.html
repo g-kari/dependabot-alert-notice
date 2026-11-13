@@ -1,6 +1,5 @@
 {{define "content"}}
-<div class="finding-topline"><span>Security / Findings</span><a href="{{.APIURL}}" class="btn btn-ghost btn-sm interactive-scale">この検索の JSON</a></div>
-<header class="finding-page-heading"><div><h1>Findings</h1><p>検出元を横断して検索し、根拠と対応状況を確認する。</p></div><span class="badge badge-info">Read-only</span></header>
+<header class="finding-page-heading"><h1>Findings</h1><div class="page-actions"><a href="{{.APIURL}}" class="btn btn-ghost btn-sm interactive-scale">JSON</a><span class="badge badge-info">Read-only</span></div></header>
 <p class="finding-notice">検出元の状態とローカルトリアージは別の指標です。承認・マージは <a href="/">Alerts</a> で扱います。</p>
 <div class="finding-overview">
   <section class="card finding-summary" aria-label="検索結果の概要">

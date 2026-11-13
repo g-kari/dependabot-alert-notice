@@ -1,6 +1,6 @@
 # DevSecOps Console
 
-GitHub Dependabotアラートと脆弱性RSSを収集し、対応緊急度評価、Codex/ClaudeによるAI評価、Slack/Discord通知、承認後のPRマージを提供するGoアプリケーション。
+GitHub Dependabotアラートと脆弱性RSSを収集し、対応緊急度評価、Claude/Codex CLIまたはHermes ProxyによるAI評価、Slack/Discord通知、承認後のPRマージを提供するGoアプリケーション。
 
 普段の確認にはWeb UI/TUIを使います。Slack/Discordは既定で1時間ごとのリポジトリ別サマリーとし、件数とAI評価状況だけを知らせます。アラートの詳細やAI評価の全文は画面で確認してください。
 
@@ -62,6 +62,8 @@ bash "$app_dir/Build.command"
 `Build.command` は本アプリの2つのDockerfileだけを一時ビルドコンテキストにコピーし、Apple containerでClaude/Codexイメージを作成します。ホーム、設定、認証情報はビルドへ送りません。初回はカーネル、ベースイメージ、CLIパッケージの取得が必要です。既存イメージはパッケージ更新だけでは再ビルドされないため、CLIも更新する場合は再実行してください。
 
 AI認証はAPIキー、またはCLIのファイル認証を使います。ホストにClaude/Codex CLIをインストールしなくても、APIキー方式を利用できます。
+
+Hermes Proxyを使う場合は、AI評価先に `hermes` を選び、ローカルの `hermes proxy start` を利用できます。Codex/Claude CLI・評価コンテナは不要です。データ送信範囲と接続手順は [Hermes Proxy評価](docs/hermes-proxy-evaluator.md) を参照してください。
 
 ```bash
 # Claudeを使う場合
