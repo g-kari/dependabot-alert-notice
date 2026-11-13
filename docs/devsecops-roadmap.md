@@ -297,7 +297,9 @@ Phase 3 の終了条件: 合成の複数領域 Finding から調査案件を作�
 
 ### 8.1 Web 認証・RBAC は GitHub 認証と別
 
-GitHub credential context は collector/updater/action がどの GitHub principal を使うかの問題であり、ブラウザー利用者を認証・認可しない。Web の全体仕様では、認証方式と trust boundary を選定し、Viewer/Analyst/Admin と scope を server-side で適用する。
+Web ログインの provider は **0g0-id** とし、GitHub 等の情報取得用連携はそれぞれ独立して接続・権限・状態・失効を管理する。ログイン成功を外部 API の利用権限に変換せず、コネクタの未接続・失効を Web ログイン失敗と混同しない。0g0-id の実 protocol、issuer、audience、subject と session 検証方式は未確認であり、値を推測して有効化しない。
+
+GitHub credential context は collector/updater/action がどの GitHub principal を使うかの問題であり、ブラウザー利用者を認証・認可しない。Viewer/Analyst/Admin と scope は server-side の local binding で適用する。最初の [pure な認可契約](web-auth-contract.md) は検証済み session の入力を前提とし、実 IdP 検証・session 発行・HTTP route への接続は含めない。既存画面を保護済みと扱わない。
 
 - 既定 loopback を維持する。認証・TLS を確認する前に非 loopback 公開や CORS 緩和を行わない。
 - 採用する reverse proxy/IdP/session 方式で principal を検証し、任意 client header による impersonation を防ぐ。session expiry/revocation、cookie の Secure/HttpOnly/SameSite、CSRF、origin 検査を設計する。
