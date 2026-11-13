@@ -111,11 +111,11 @@ func (e *HermesEvaluator) Evaluate(parent context.Context, alert model.Alert) (*
 		Stream:   false,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Hermes評価リクエストの作成: %w", err)
+		return nil, fmt.Errorf("hermes評価リクエストの作成: %w", err)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL()+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("Hermes評価リクエストの作成: %w", err)
+		return nil, fmt.Errorf("hermes評価リクエストの作成: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+hermesProxyPlaceholder)
 	request.Header.Set("Content-Type", "application/json")
@@ -123,7 +123,7 @@ func (e *HermesEvaluator) Evaluate(parent context.Context, alert model.Alert) (*
 
 	response, err := e.httpClient().Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("Hermes proxyへの接続失敗: %w", err)
+		return nil, fmt.Errorf("hermes proxyへの接続失敗: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {

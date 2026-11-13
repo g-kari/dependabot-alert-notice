@@ -262,8 +262,31 @@ func TestNativeConsoleBrowserQA(t *testing.T) {
 	}
 }
 
+func TestBrowserQAConfigureRendersSyntheticCodexStatus(t *testing.T) {
+	srv, _ := newFindingsAPITestServer(t)
+	browserQAConfigure(srv, time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC))
+
+	page := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/settings", nil))
+	if !strings.Contains(page.Body.String(), `id="codex-auth-status"`) {
+		t.Fatal("synthetic Codex status control is absent from the configured browser-QA settings page")
+	}
+
+	status := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/settings/codex/status", nil))
+	var result toolResult
+	if err := json.NewDecoder(status.Body).Decode(&result); err != nil || result.OK || result.Message != "Synthetic offline browser QA; no CLI invoked" {
+		t.Fatalf("synthetic Codex status = %+v, err=%v", result, err)
+	}
+	if auth, ok := srv.codexAuth.(*fakeCodexAuth); !ok || auth.started {
+		t.Fatal("browser QA Codex status unexpectedly invoked a real login")
+	}
+}
+
 func browserQAConfigure(s *Server, at time.Time) *browserQABoundary {
 	boundary := &browserQABoundary{}
+	// Select Codex explicitly so the settings page renders its synthetic auth status; the fake provider below never invokes a CLI.
+	s.cfg.Evaluator.Provider = "codex"
 	s.consoleNow = func() time.Time { return at }
 	s.cfg.RSS.Enabled = false
 	s.jobQueue = nil
