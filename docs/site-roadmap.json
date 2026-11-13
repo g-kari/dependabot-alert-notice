@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "project": "DevSecOps Console",
-  "checkedAt": "2026-11-13T21:39:34Z",
+  "checkedAt": "2026-11-13T22:42:53Z",
   "publishedSnapshotAt": "2026-11-13T20:28:00Z",
-  "lastSubstantiveProgressAt": "2026-11-13T21:28:55Z",
-  "lastSubstantiveProgressLabel": "PR #90統合後のTrial成功。公開JSON取得経路は接続済み、main Checkはブラウザー起動失敗",
+  "lastSubstantiveProgressAt": "2026-11-13T22:34:05Z",
+  "lastSubstantiveProgressLabel": "PR #92の公開資料更新を統合。main ff2e0266のCheckとTrialが成功。認可・依存更新のPRは未マージ",
   "lastCodeMergeAt": "2026-11-13T04:50:11Z",
-  "mainSha": "39ee8d033c13c9987407a997ea05ab271d63ddf9",
+  "mainSha": "ff2e0266ea365c31f2e6fc244ccdfca7733d0edb",
   "repository": "https://github.com/g-kari/devsecops-console",
   "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHAとPR一覧は確認時点の観測値。公開進捗データ自身の更新commitとは別。",
   "currentFocus": "K275: Web認可契約は未マージ・CI失敗。既存担当の継続確認と公開進捗の同期",
@@ -16,7 +16,7 @@
       "title": "GoReleaser v2.20.2",
       "url": "https://github.com/g-kari/devsecops-console/pull/88",
       "status": "open",
-      "scope": "依存保守。最新headのCheckとTrial失敗。K275とは独立。"
+      "scope": "依存保守。最新head 72dce95のCheck・Trialがmanifestとinstaller pinの不一致で失敗。既存担当の稼働は未確認。"
     },
     {
       "number": 89,
@@ -27,10 +27,10 @@
     }
   ],
   "ci": {
-    "status": "failure",
-    "label": "main 39ee8d0のCheckはブラウザー起動で失敗、同SHAのTrialは成功",
-    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419",
-    "checkedAt": "2026-11-13T21:39:34Z"
+    "status": "success",
+    "label": "main ff2e0266のCheck・Trialが成功。過去のブラウザー起動失敗の根因解消やPR #88/#89の合格を意味しない",
+    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643",
+    "checkedAt": "2026-11-13T22:42:53Z"
   },
   "rows": [
     {
@@ -39,7 +39,7 @@
       "phase": "共通認可",
       "status": "blocked",
       "owner": "一姫（既存担当の現在稼働は未確認）",
-      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
       "lastProgressAt": "2026-11-13T20:34:00Z",
       "activityAt": "2026-11-13T20:22:00Z",
       "latestAchievement": "PR #89の認可packageは合成テスト・race・coverage 100%を確認。Checkはブラウザー起動、TrialはIntel Mac試験で失敗し、未マージ。",
@@ -167,21 +167,21 @@
       "phase": "品質",
       "status": "blocked",
       "owner": "修正担当の現在稼働は未確認",
-      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
       "lastProgressAt": "2026-11-13T10:48:15Z",
       "activityAt": null,
-      "latestAchievement": "既存診断で同じtracked sourceの実CI成功・失敗を比較済み。最新main 39ee8d0でもBrowser.getVersionの10秒待ち・受信0で失敗。",
-      "waitReason": "根因未確定。PR #90のCheck成功と、統合後mainのCheck失敗を区別する。",
+      "latestAchievement": "main ff2e0266のCheckではNative browser acceptance成功。旧main 39ee8d0のBrowser.getVersion timeoutとは結果を区別し、根因解消とは断定しない。",
+      "waitReason": "過去の起動失敗の根因と修正担当は未確定。最新mainの成功だけで診断工程を完了にしない。",
       "nextAction": "修正担当を一本化してから、上限と通信制約を保った起動診断・回帰試験を追加し、正確なSHAで再検証。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "最新mainの失敗job",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419/job/132172876662"
+          "label": "最新mainのCheck成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643"
         },
         {
-          "label": "PR #90のCheck成功",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501989692"
+          "label": "旧mainの起動失敗job",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419/job/132172876662"
         },
         {
           "label": "同一source比較の成功run",
@@ -726,11 +726,11 @@
       "phase": "依存保守",
       "status": "blocked",
       "owner": "一姫（既存診断担当の現在稼働は未確認）",
-      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
       "lastProgressAt": null,
       "activityAt": null,
-      "latestAchievement": "PR #88は未マージ。main更新後のhead 8b43228でもCheck・Trial失敗。",
-      "waitReason": "既存診断担当の現在稼働は未確認。更新修復・統合は未完。",
+      "latestAchievement": "PR #88は未マージ。head 72dce95のCheck・Trialでmanifestとinstaller pinの不一致を再確認。ブラウザー受入とartifact生成は開始前に停止。",
+      "waitReason": "manifest・installer pinの整合修正と同一head検証が未完。既存診断担当の現在稼働は未確認。",
       "nextAction": "担当と修正範囲を照合し、manifest・installer pinの整合と最終CIを検証。",
       "dependencies": [],
       "evidence": [
@@ -740,11 +740,11 @@
         },
         {
           "label": "最新Check",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508751217"
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517661319"
         },
         {
           "label": "最新Trial",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508751251"
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517661312"
         }
       ],
       "plannedStart": null,
@@ -756,21 +756,25 @@
       "phase": "公開資料",
       "status": "complete",
       "owner": "更新経路の限定工程完了 / 進捗同期は継続",
-      "lastCheckedAt": "2026-11-13T21:39:34Z",
-      "lastProgressAt": "2026-11-13T21:28:55Z",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
+      "lastProgressAt": "2026-11-13T22:34:05Z",
       "activityAt": null,
-      "latestAchievement": "PR #90をmainへ統合し、公開SiteでGitHub JSON取得成功を確認。統合後Trial成功。",
-      "waitReason": "限定完了はデータ読取経路。main Checkの失敗や製品の未実装工程は残る。",
+      "latestAchievement": "PR #92の公開資料をmainへ統合。正本JSON・rawの全文一致とSiteの33工程取得を確認。統合後mainのCheck・Trial成功。",
+      "waitReason": "限定完了は公開データ読取・更新経路。認可・依存更新の未統合や製品の未実装工程は残る。",
       "nextAction": "既存の毎時確認で公開JSONを更新し、通常PRの検証・main読戻し・Site取得を確認。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "PR #90（統合済み）",
-          "url": "https://github.com/g-kari/devsecops-console/pull/90"
+          "label": "PR #92（統合済み）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/92"
+        },
+        {
+          "label": "統合後Check成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643"
         },
         {
           "label": "統合後Trial成功",
-          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671295"
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528634"
         },
         {
           "label": "更新手順",
@@ -1031,6 +1035,18 @@
     }
   ],
   "updates": [
+    {
+      "at": "2026-11-13T22:34:05Z",
+      "type": "検証",
+      "text": "PR #92統合後のmain ff2e0266でCheck・Trialが成功。PR #88/#89の失敗や過去のブラウザー起動原因の解消とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528634"
+    },
+    {
+      "at": "2026-11-13T22:13:40Z",
+      "type": "資料統合",
+      "text": "PR #92で公開進捗を33工程へ更新し、AI監査基盤A–Eの設計のみの計画を掲載。製品コード・CI設定・監査実行・配備の変更なし。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/92"
+    },
     {
       "at": "2026-11-13T21:28:55Z",
       "type": "検証",
