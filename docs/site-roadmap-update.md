@@ -4,7 +4,7 @@
 
 ## 正本と読取
 
-公開状態データの正本は `docs/site-roadmap.json`。Siteは `https://raw.githubusercontent.com/g-kari/devsecops-console/main/docs/site-roadmap.json` を認証なしで読み取る。通常の状態更新ではSiteの再デプロイは不要。取得失敗時はSiteに同梱した公開時のスナップショットに戻るため、画面の取得状態と確認日時を見る。
+公開状態データの正本は `docs/site-roadmap.json`。Siteは `https://raw.githubusercontent.com/g-kari/devsecops-console/main/docs/site-roadmap.json` を認証なしで読み取る。通常の状態更新ではSiteの再デプロイは不要。初回はSiteに同梱した公開時のスナップショットを表示し、取得成功後は新しいデータへ切り替える。取得失敗時は、そのページで直前に取得成功したスナップショットを保持する。画面の取得状態と確認日時を見る。
 
 ## 更新手順
 
