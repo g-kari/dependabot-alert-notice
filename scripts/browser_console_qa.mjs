@@ -408,6 +408,120 @@ function udpNetlogDetails(log) {
   }
   return result;
 }
+// Observations only: never use this projection to accept or reject transport.
+const TCP_DETAIL_LIMITS=Object.freeze({pending_records:16,same_id_events_per_record:4,bytes:16384,relative_time_ms:300000});
+const TCP_DETAIL_SCOPE='pending keys from the existing TCP audit; not packet capture';
+const TCP_DETAIL_REASONS=['identity_invalid','relative_time_unknown','pending_record_limit','same_id_event_limit','diagnostic_byte_bound','artifact_byte_bound','projection_unavailable'];
+function tcpDiagnosticSummary(count,status,reasons=[]) {
+  return {schema_version:1,scope:TCP_DETAIL_SCOPE,matching_basis:'source_id_event_name_latest_begin',limits:TCP_DETAIL_LIMITS,
+    unfinished_key_count:count,recorded_key_count:0,omitted_key_count:count,projection_status:status,reason_counts:reasons,records:[]};
+}
+function tcpDiagnosticBytes(diagnostic) {
+  // Include the actual checks.network_audit indentation and final newline.
+  // The small wrapper overhead makes this a conservative persisted-byte bound.
+  return Buffer.byteLength(JSON.stringify({network_audit:{tcp_diagnostics:diagnostic}},null,2)+'\n');
+}
+function tcpNetlogDetails(log,unfinished,endpoints,names) {
+  const count=unfinished.size;
+  try {
+    const reasons=new Map(),reason=(name,n=1)=>reasons.set(name,(reasons.get(name)??0)+n);
+    const result=tcpDiagnosticSummary(count,'complete');
+    // Reuse the audit's inverse Map read-only; never rebuild a constants index.
+    const phaseConstants=log.constants?.logEventPhase??{};
+    const ticks=value=>{
+      if(typeof value!=='string'||!/^-?(0|[1-9][0-9]{0,18})$/.test(value)||value==='-0')return null;
+      const n=BigInt(value);
+      return n>=-9223372036854775808n&&n<=9223372036854775807n?n:null;
+    };
+    const anchor=ticks(log.events[0]?.time);
+    const relative=index=>{
+      const value=ticks(log.events[index]?.time),delta=anchor!==null&&value!==null?value-anchor:null;
+      if(delta===null||delta<0n||delta>BigInt(TCP_DETAIL_LIMITS.relative_time_ms)){reason('relative_time_unknown');return null;}
+      return Number(delta);
+    };
+    const eventName=event=>{
+      const name=names.get(event.type);
+      return ['TCP_CONNECT','TCP_CONNECT_ATTEMPT','SOCKET_BYTES_SENT','SOCKET_ALIVE'].includes(name)?name:'OTHER';
+    };
+    const phase=event=>{
+      const matches=['PHASE_BEGIN','PHASE_END','PHASE_NONE'].filter(name=>Number.isSafeInteger(phaseConstants[name])&&event.phase===phaseConstants[name]);
+      return matches.length===1?matches[0]:'UNKNOWN';
+    };
+    // Select only a fixed-length set of the earliest surviving BEGIN indexes.
+    // Map keys retain the old guard's exact matching semantics and stay private.
+    const selected=[];
+    for(const index of unfinished.values()) {
+      if(!Number.isSafeInteger(index)||index<0||index>=log.events.length)throw new Error('invalid private BEGIN index');
+      if(selected.length<TCP_DETAIL_LIMITS.pending_records||index<selected.at(-1)) {
+        selected.push(index);selected.sort((a,b)=>a-b);
+        if(selected.length>TCP_DETAIL_LIMITS.pending_records)selected.pop();
+      }
+    }
+    if(count>selected.length)reason('pending_record_limit',count-selected.length);
+    const contexts=new Map();
+    for(const index of selected) {
+      const event=log.events[index],id=event.source?.id,name=eventName(event);
+      if(!['TCP_CONNECT','TCP_CONNECT_ATTEMPT'].includes(name))throw new Error('invalid private BEGIN event');
+      const valid=validNetLogSourceID(id),counts={total:0,allowlisted:0,non_allowlisted:0,non_string:0};
+      const observe=value=>{
+        counts.total++;
+        if(typeof value!=='string')counts.non_string++;
+        else if(endpoints.has(value))counts.allowlisted++;
+        else counts.non_allowlisted++;
+      };
+      const params=event.params??{};
+      if(Array.isArray(params.address_list))for(const address of params.address_list)observe(address);
+      for(const key of ['address','remote_address','peer_address'])if(params[key]!==undefined)observe(params[key]);
+      if(valid&&!contexts.has(id))contexts.set(id,{count:0,indexes:[]});
+      if(!valid)reason('identity_invalid');
+      result.records.push({source_id:valid?id:null,identity_status:valid?'valid':'invalid',event_type:name,begin_index:index,
+        relative_time_ms:relative(index),begin_endpoint_counts:counts,same_id_event_count:valid?0:null,
+        omitted_same_id_event_count:valid?0:null,recent_same_id_events:[]});
+    }
+    // Same numeric ID is merely a captured identity, not ownership attribution.
+    // Retain indexes rather than raw events or arbitrary parameter objects.
+    for(let index=0;index<log.events.length;index++) {
+      const context=contexts.get(log.events[index].source?.id);
+      if(!context)continue;
+      context.count++;context.indexes.push(index);
+      if(context.indexes.length>TCP_DETAIL_LIMITS.same_id_events_per_record)context.indexes.shift();
+    }
+    for(const row of result.records) {
+      if(row.identity_status!=='valid')continue;
+      const context=contexts.get(row.source_id);
+      row.same_id_event_count=context.count;
+      row.omitted_same_id_event_count=context.count-context.indexes.length;
+      if(row.omitted_same_id_event_count)reason('same_id_event_limit',row.omitted_same_id_event_count);
+      row.recent_same_id_events=context.indexes.map(index=>({event_index:index,event_type:eventName(log.events[index]),phase:phase(log.events[index]),relative_time_ms:relative(index)}));
+    }
+    const finish=()=>{
+      result.recorded_key_count=result.records.length;result.omitted_key_count=count-result.records.length;
+      result.reason_counts=TCP_DETAIL_REASONS.filter(name=>reasons.has(name)).map(name=>({reason:name,count:reasons.get(name)}));
+      result.projection_status=count&&!result.records.length?'summary_only':result.reason_counts.length?'partial':'complete';
+    };
+    finish();
+    while(tcpDiagnosticBytes(result)>TCP_DETAIL_LIMITS.bytes&&result.records.length) {
+      result.records.pop();reason('diagnostic_byte_bound');finish();
+    }
+    return result;
+  }catch {
+    // Do not turn a diagnostic failure into transport success or echo an error.
+    return tcpDiagnosticSummary(count,'unavailable',[{reason:'projection_unavailable',count:1}]);
+  }
+}
+function fitTCPDiagnosticBudget(checks) {
+  const report=checks.network_audit;
+  if(!report||!Object.hasOwn(report,'tcp_diagnostics'))return;
+  const fits=()=>Buffer.byteLength(JSON.stringify(checks,null,2)+'\n')<=256*1024;
+  if(fits())return;
+  const diagnostic=report.tcp_diagnostics;
+  report.tcp_diagnostics=tcpDiagnosticSummary(diagnostic.unfinished_key_count,'summary_only',[
+    ...diagnostic.reason_counts.filter(row=>TCP_DETAIL_REASONS.includes(row.reason)&&row.reason!=='artifact_byte_bound').map(row=>({reason:row.reason,count:row.count})),
+    {reason:'artifact_byte_bound',count:1}
+  ]);
+  // The original evidence and its size assertion always take precedence.
+  if(!fits())delete report.tcp_diagnostics;
+}
 function netlogAudit(log, origins, endpoints) {
   assert(log&&Array.isArray(log.events)&&log.events.length<=100000, 'invalid/bounded NetLog events');
   const types=log.constants?.logEventTypes, phases=log.constants?.logEventPhase;
@@ -455,7 +569,7 @@ function netlogAudit(log, origins, endpoints) {
       }
       if(event.phase===phases.PHASE_BEGIN) {
         if(addresses.length===0)bad(`missing ${name} endpoint; transport outcome unknown`);
-        attempts.set(`${id}:${name}`, true);
+        attempts.set(`${id}:${name}`, eventIndex);
       }
       if(event.phase===phases.PHASE_END) {
         if(!attempts.delete(`${id}:${name}`))bad(`unpaired ${name}; transport audit incomplete`);
@@ -470,6 +584,7 @@ function netlogAudit(log, origins, endpoints) {
   if(report.tcp_endpoint_events===0||report.tcp_bytes_sent_events===0)bad('no actual loopback socket traffic evidence');
   report.udp_diagnostics=udpDetails;
   for(const {reason}of report.udp_diagnostics.failure_reasons)bad(`UDP diagnostic incomplete/prohibited: ${reason}`);
+  report.tcp_diagnostics=tcpNetlogDetails(log,attempts,endpoints,names);
   return report;
 }
 // This only observes/signals the Chrome parent. Linux Go supervision separately
@@ -698,6 +813,202 @@ function checkCaptureBudget(cases) {
   assert(count+3<=32,'planned artifacts including stability exceed Go file budget');
   return count;
 }
+function tcpDiagnosticSelfTest(baseLog,origins,endpoints) {
+  const groups=[],group=(name,test)=>{test();groups.push(name);};
+  const anchor=9223372036854000000n;
+  const fixture=()=>{
+    const f=structuredClone(baseLog);
+    for(let i=0;i<f.events.length;i++)f.events[i].time=String(anchor+BigInt(i));
+    return f;
+  };
+  const pending=()=>{const f=fixture();f.events.splice(3,1);return f;};
+  const audit=f=>netlogAudit(f,origins,endpoints);
+  const project=f=>audit(f).tcp_diagnostics;
+  const jsonBytes=value=>Buffer.byteLength(JSON.stringify(value,null,2)+'\n');
+  const strip=value=>{const copy=structuredClone(value);delete copy.network_audit.tcp_diagnostics;return copy;};
+  group('normal',()=>{
+    const d=project(fixture());
+    assert.equal(d.unfinished_key_count,0);assert.deepEqual(d.records,[]);assert.equal(d.projection_status,'complete');
+    assert.deepEqual(audit(fixture()).violations,[]);
+  });
+  group('missing-END-and-index-zero',()=>{
+    for(const [removed,indexes]of [[[3],[0]],[[2],[1]],[[3,2],[0,1]]]) {
+      const f=fixture();for(const i of removed)f.events.splice(i,1);
+      const a=audit(f),d=a.tcp_diagnostics;
+      assert.equal(d.unfinished_key_count,indexes.length);assert.deepEqual(d.records.map(row=>row.begin_index),indexes);
+      assert(a.violations.includes('unfinished TCP attempt; transport outcome unknown'));
+    }
+  });
+  group('mismatched-and-reordered-END',()=>{
+    for(const change of [f=>f.events[2].type=1,f=>f.events[2].source.id=2,f=>{[f.events[0],f.events[3]]=[f.events[3],f.events[0]];},f=>f.events.push(structuredClone(f.events[2])),f=>f.events[4].source.id=2]) {
+      const f=fixture();change(f);assert(audit(f).violations.length);
+    }
+  });
+  group('duplicate-BEGIN-keeps-old-key-semantics',()=>{
+    const f=pending();f.events.splice(1,0,structuredClone(f.events[0]));
+    const d=project(f);assert.equal(d.unfinished_key_count,1);assert.equal(d.records[0].begin_index,1);
+    f.events.push({type:1,phase:2,source:{id:1},time:String(anchor+9n)});
+    assert.equal(project(f).unfinished_key_count,0);assert.deepEqual(audit(f).violations,[]);
+  });
+  group('exact-endpoint-verdict-counts',()=>{
+    const f=pending();f.events[0].params={address_list:['127.0.0.1:123','127.0.0.1:0123',null,'synthetic-private-endpoint'],address:'127.0.0.1:123',remote_address:'203.0.113.88:443',peer_address:{private:'synthetic-private-endpoint'}};
+    const d=project(f);assert.deepEqual(d.records[0].begin_endpoint_counts,{total:7,allowlisted:2,non_allowlisted:3,non_string:2});
+    const missing=pending();missing.events[0].params={};
+    assert.equal(project(missing).records[0].begin_endpoint_counts.total,0);assert(audit(missing).violations.some(s=>s.startsWith('missing TCP_CONNECT endpoint')));
+    for(const text of ['synthetic-private-endpoint','203.0.113.88','127.0.0.1'])assert(!JSON.stringify(d).includes(text));
+  });
+  group('signed-source-ID-and-no-coercion',()=>{
+    for(const id of [-2147483648,-1,1,2147483647,0,-0,-2147483649,2147483648,4294967295,1.5,'synthetic-private-ID',null,undefined,NaN,Infinity]) {
+      const f=pending();for(const e of f.events)e.source.id=id;
+      const row=project(f).records[0],valid=validNetLogSourceID(id);
+      assert.equal(row.source_id,valid?id:null);assert.equal(row.identity_status,valid?'valid':'invalid');
+      if(!valid){assert.equal(row.same_id_event_count,null);assert.deepEqual(row.recent_same_id_events,[]);}
+    }
+  });
+  group('fixed-recursive-schema-and-private-markers',()=>{
+    const f=pending(),marker='synthetic-private-marker';
+    f.constants.logEventTypes[marker]=99;f.constants.logSourceType={[marker]:7};
+    f.events[0].params={address_list:[marker],url:`https://user:${marker}@host.invalid/${marker}?token=${marker}#${marker}`,headers:{authorization:marker},profile:marker,body:{nested:marker}};
+    f.events[0].source.type=marker;
+    f.events.push({type:99,phase:99,source:{id:1,type:marker},time:marker,params:{secret:marker}});
+    const d=project(f);
+    const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.split(' ').sort());
+    keys(d,'schema_version scope matching_basis limits unfinished_key_count recorded_key_count omitted_key_count projection_status reason_counts records');
+    keys(d.limits,'pending_records same_id_events_per_record bytes relative_time_ms');
+    for(const row of d.reason_counts)keys(row,'reason count');
+    for(const row of d.records) {
+      keys(row,'source_id identity_status event_type begin_index relative_time_ms begin_endpoint_counts same_id_event_count omitted_same_id_event_count recent_same_id_events');
+      keys(row.begin_endpoint_counts,'total allowlisted non_allowlisted non_string');
+      for(const e of row.recent_same_id_events)keys(e,'event_index event_type phase relative_time_ms');
+    }
+    const strings=new Set([TCP_DETAIL_SCOPE,'source_id_event_name_latest_begin','complete','partial','summary_only','unavailable','valid','invalid','TCP_CONNECT','TCP_CONNECT_ATTEMPT','SOCKET_BYTES_SENT','SOCKET_ALIVE','OTHER','PHASE_BEGIN','PHASE_END','PHASE_NONE','UNKNOWN',...TCP_DETAIL_REASONS]);
+    const leaf=value=>{if(value===null)return;if(Array.isArray(value)){value.forEach(leaf);return;}if(typeof value==='object'){Object.values(value).forEach(leaf);return;}if(typeof value==='string')assert(strings.has(value));else assert(Number.isSafeInteger(value));};
+    leaf(d);
+    for(const text of [marker,'host.invalid','https://','authorization','profile','headers','token='])assert(!JSON.stringify(d).includes(text));
+    assert(d.records[0].recent_same_id_events.some(e=>e.event_type==='OTHER'&&e.phase==='UNKNOWN'));
+  });
+  group('unknown-and-ambiguous-metadata',()=>{
+    const f=pending();f.events.push({type:999,phase:999,source:{id:1},time:String(anchor+8n)});
+    let last=project(f).records[0].recent_same_id_events.at(-1);assert.equal(last.event_type,'OTHER');assert.equal(last.phase,'UNKNOWN');
+    f.constants.logEventPhase.PHASE_NONE=1;f.events.at(-1).phase=1;
+    last=project(f).records[0].recent_same_id_events.at(-1);assert.equal(last.phase,'UNKNOWN');
+    f.constants.logEventTypes['synthetic-private-alias']=1;
+    assert(!JSON.stringify(project(f)).includes('synthetic-private-alias'));
+  });
+  group('relative-timestamp-boundaries',()=>{
+    for(const delta of [0n,1n,300000n]) {
+      const f=fixture();f.events.splice(2,1);f.events[1].time=String(anchor+delta);
+      assert.equal(project(f).records[0].relative_time_ms,Number(delta));
+    }
+    for(const value of [undefined,null,1,1.5,'',' 1','1 ','01','-0','1.0','1e3','synthetic-private-time','9223372036854775808','-9223372036854775809','12345678901234567890',String(anchor-1n),String(anchor+300001n)]) {
+      const f=fixture();f.events.splice(2,1);f.events[1].time=value;
+      assert.equal(project(f).records[0].relative_time_ms,null);
+    }
+    const f=pending();f.events[0].time='synthetic-private-anchor';
+    assert.equal(project(f).records[0].relative_time_ms,null);assert(!JSON.stringify(project(f)).includes(String(anchor)));
+  });
+  group('record-context-byte-and-event-bounds',()=>{
+    // Replacing the first inserted key moves its latest BEGIN to the end of
+    // index order without moving that key's Map insertion position.
+    for(const size of [16,17]) {
+      const f=fixture();
+      for(let id=2;id<size+2;id++)f.events.push({type:1,phase:1,source:{id},params:{address:'127.0.0.1:123'},time:String(anchor+BigInt(id))});
+      f.events.push({type:1,phase:1,source:{id:2},params:{address:'127.0.0.1:123'},time:String(anchor+99n)});
+      const d=project(f),expected=[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21];
+      assert.equal(d.unfinished_key_count,size);assert.equal(d.recorded_key_count,16);assert.equal(d.omitted_key_count,size-16);
+      assert.deepEqual(d.records.map(row=>row.begin_index),expected);
+      assert.deepEqual(d.records.map(row=>row.source_id),size===16?[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,2]:[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]);
+      for(const row of d.records)assert.deepEqual(row.recent_same_id_events.map(e=>e.event_index),row.source_id===2?[5,21]:[row.source_id+3]);
+      assert(!d.reason_counts.some(row=>row.reason==='diagnostic_byte_bound'),'key-cap fixture must not trim by bytes');
+      assert.equal(d.reason_counts.find(row=>row.reason==='pending_record_limit')?.count??0,size-16);
+    }
+    const context=pending();
+    let d=project(context);assert.deepEqual(d.records[0].recent_same_id_events.map(e=>e.event_index),[0,1,2,3]);
+    assert.equal(d.records[0].same_id_event_count,4);assert.equal(d.records[0].omitted_same_id_event_count,0);
+    context.events.push({type:999,phase:999,source:{id:1},time:String(anchor+9n)});
+    d=project(context);assert.deepEqual(d.records[0].recent_same_id_events.map(e=>e.event_index),[1,2,3,4]);
+    assert.equal(d.records[0].same_id_event_count,5);assert.equal(d.records[0].omitted_same_id_event_count,1);
+    const many=fixture();
+    for(let id=2;id<18;id++) {
+      many.events.push({type:1,phase:1,source:{id},params:{address:'127.0.0.1:123'},time:String(anchor+BigInt(id))});
+      for(let i=0;i<5;i++)many.events.push({type:999,phase:999,source:{id},time:String(anchor+BigInt(id+i))});
+    }
+    d=project(many);assert(tcpDiagnosticBytes(d)<=16384);assert.equal(d.projection_status,'partial');
+    assert.equal(d.recorded_key_count,13);assert.equal(d.omitted_key_count,3);
+    assert.deepEqual(d.records.map(row=>row.begin_index),[5,11,17,23,29,35,41,47,53,59,65,71,77]);
+    for(const row of d.records) {
+      assert.deepEqual(row.recent_same_id_events.map(e=>e.event_index),[row.begin_index+2,row.begin_index+3,row.begin_index+4,row.begin_index+5]);
+      assert.equal(row.same_id_event_count,6);assert.equal(row.omitted_same_id_event_count,2);
+    }
+    assert.equal(d.reason_counts.find(row=>row.reason==='diagnostic_byte_bound').count,3);
+    assert(!d.reason_counts.some(row=>row.reason==='pending_record_limit'),'byte-cap fixture has only 16 pending keys');
+    const oneMore=structuredClone(d);
+    oneMore.records.push({source_id:15,identity_status:'valid',event_type:'TCP_CONNECT',begin_index:83,relative_time_ms:15,
+      begin_endpoint_counts:{total:1,allowlisted:1,non_allowlisted:0,non_string:0},same_id_event_count:6,omitted_same_id_event_count:2,
+      recent_same_id_events:[85,86,87,88].map((event_index,i)=>({event_index,event_type:'OTHER',phase:'UNKNOWN',relative_time_ms:16+i}))});
+    oneMore.recorded_key_count=14;oneMore.omitted_key_count=2;oneMore.reason_counts.find(row=>row.reason==='diagnostic_byte_bound').count=2;
+    assert(tcpDiagnosticBytes(oneMore)>16384,'the next exact prefix must exceed the persisted-byte cap');
+    const large=pending();while(large.events.length<100000)large.events.push({type:999,phase:0,source:{id:2},time:String(anchor)});
+    assert.equal(project(large).unfinished_key_count,1);large.events.push(large.events.at(-1));
+    assert.throws(()=>audit(large),/invalid\/bounded NetLog events/);
+  });
+  group('deterministic-nonmutating-projection',()=>{
+    const f=pending(),before=structuredClone(f),keys=new Map([['private-key',0]]),beforeKeys=[...keys],beforeEndpoints=[...endpoints];
+    const names=new Map(Object.entries(f.constants.logEventTypes).map(([name,value])=>[value,name]));
+    for(let i=0;i<5000;i++)names.set(1000+i,'synthetic-unused-event-'+i);
+    const beforeNames=[...names];
+    for(const method of ['set','delete','clear','entries','values',Symbol.iterator])Object.defineProperty(names,method,{value(){throw new Error('shared event Map must be read-only and never enumerated');}});
+    // The projection must reuse the passed Map, never enumerate raw constants.
+    const a=tcpNetlogDetails(f,keys,endpoints,names),b=tcpNetlogDetails(f,keys,endpoints,names);
+    assert.notEqual(a.projection_status,'unavailable');assert.deepEqual(a,b);assert.deepEqual(f,before);
+    const probe=structuredClone(f);
+    Object.defineProperty(probe.constants,'logEventTypes',{get(){throw new Error('raw event constants must not be reread');}});
+    assert.deepEqual(tcpNetlogDetails(probe,keys,endpoints,names),a);
+    assert.deepEqual([...Map.prototype.entries.call(names)],beforeNames);assert.deepEqual([...keys],beforeKeys);assert.deepEqual([...endpoints],beforeEndpoints);
+    assert.deepEqual(a.records.map(row=>row.begin_index),[...a.records.map(row=>row.begin_index)].sort((a,b)=>a-b));
+    for(const row of a.records)assert.deepEqual(row.recent_same_id_events.map(e=>e.event_index),[...row.recent_same_id_events.map(e=>e.event_index)].sort((a,b)=>a-b));
+  });
+  group('existing-JSON-budget-preserves-original-evidence',()=>{
+    const d=project(pending()),limit=256*1024;
+    const make=bytes=>{
+      const baseline={padding:'',network_audit:{violations:['unfinished TCP attempt; transport outcome unknown'],existing_field:'kept'}};
+      baseline.padding='x'.repeat(bytes-jsonBytes(baseline));
+      const checks=structuredClone(baseline);checks.network_audit.tcp_diagnostics=structuredClone(d);
+      return {baseline,checks};
+    };
+    const sample=make(1000),overhead=jsonBytes(sample.checks)-jsonBytes(sample.baseline);
+    for(const [bytes,status]of [[limit-overhead,'full'],[limit-overhead+1,'summary_only'],[limit,'omitted'],[limit+1,'omitted']]) {
+      const {baseline,checks}=make(bytes);fitTCPDiagnosticBudget(checks);
+      assert.deepEqual(strip(checks),baseline);
+      if(status==='full')assert.deepEqual(checks.network_audit.tcp_diagnostics,d);
+      else if(status==='summary_only')assert.equal(checks.network_audit.tcp_diagnostics.projection_status,status);
+      else assert(!Object.hasOwn(checks.network_audit,'tcp_diagnostics'));
+      assert.equal(jsonBytes(checks)<=limit,bytes<=limit);
+    }
+    const summarySample=make(limit-overhead+1);fitTCPDiagnosticBudget(summarySample.checks);
+    const summaryOverhead=jsonBytes(summarySample.checks)-jsonBytes(summarySample.baseline);
+    for(const [bytes,status]of [[limit-summaryOverhead,'summary_only'],[limit-summaryOverhead+1,'omitted']]) {
+      const {baseline,checks}=make(bytes);fitTCPDiagnosticBudget(checks);assert.deepEqual(strip(checks),baseline);
+      if(status==='summary_only'){assert.equal(checks.network_audit.tcp_diagnostics.projection_status,status);assert.equal(jsonBytes(checks),limit);}
+      else {assert(!Object.hasOwn(checks.network_audit,'tcp_diagnostics'));assert.equal(bytes+summaryOverhead,limit+1);}
+    }
+  });
+  group('unavailable-is-not-a-transport-verdict',()=>{
+    const d=tcpNetlogDetails(fixture(),{size:1,values(){throw new Error('synthetic-private-exception');}},endpoints,new Map());
+    assert.equal(d.unfinished_key_count,1);assert.equal(d.projection_status,'unavailable');assert.deepEqual(d.reason_counts,[{reason:'projection_unavailable',count:1}]);
+    assert(!JSON.stringify(d).includes('synthetic-private-exception'));
+    assert(audit(pending()).violations.includes('unfinished TCP attempt; transport outcome unknown'));
+    assert.throws(()=>audit({events:[]}),/missing NetLog constant/);
+  });
+  group('UDP-and-DNS-rejections-remain',()=>{
+    for(const [type,name]of [[5,'UDP_BYTES_SENT'],[99,'DNS_TRANSACTION_ATTEMPT']]) {
+      const f=fixture();f.constants.logEventTypes[name]=type;f.events.push({type,source:{id:2},params:{byte_count:0},time:String(anchor+9n)});
+      assert(audit(f).violations.some(text=>text===`unexpected ${name}; no UDP/DNS transport permitted`));
+    }
+  });
+  assert.equal(groups.length,14);
+  console.log('PASS TCP diagnostic 14 groups: '+groups.join(', ')+'; synthetic only');
+}
 async function selfTest() {
   const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
   const failures=[],cancellations=[],decisions=new FetchDecisions((error,metadata)=>failures.push({error:error.message,...metadata}),metadata=>cancellations.push(metadata));
@@ -849,6 +1160,7 @@ async function selfTest() {
     }]
   };
   udpDiagnosticSelfTest(log,origins,policy.endpoints);
+  tcpDiagnosticSelfTest(log,origins,policy.endpoints);
   const audit=netlogAudit(log, origins, policy.endpoints);
   assert.deepEqual(audit.violations, []);
   assert.deepEqual(audit.non_fixture_url_attempts, ['https://example.invalid/path']);
@@ -1495,6 +1807,7 @@ async function main() {
     checks.request_count=allRequests.length;
     checks.automated_status=!fatal&&checks.violations.length===0?'passed':'failed';
     checks.visual_review='pending';
+    fitTCPDiagnosticBudget(checks);
     await writeJSON('checks.json', checks);
     manifest.automated_status=checks.automated_status;
     manifest.configured_deadlines_ms=checks.configured_deadlines_ms?? {};
