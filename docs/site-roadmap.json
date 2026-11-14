@@ -1,29 +1,21 @@
 {
   "schemaVersion": 1,
   "project": "DevSecOps Console",
-  "checkedAt": "2026-11-14T07:26:58Z",
+  "checkedAt": "2026-11-14T10:15:38Z",
   "publishedSnapshotAt": "2026-11-13T20:28:00Z",
-  "lastSubstantiveProgressAt": "2026-11-14T07:23:00Z",
-  "lastSubstantiveProgressLabel": "PR #89のpure認可契約を統合し、同一mainのCheck・Trialは初回成功。K275は部分完了で、実ログイン・session・HTTP route統合は未着手",
-  "lastCodeMergeAt": "2026-11-14T07:06:18Z",
-  "mainSha": "b0c84a10b74340cbcdb7c9d3bb9dde3890d60fb4",
+  "lastSubstantiveProgressAt": "2026-11-14T09:50:08Z",
+  "lastSubstantiveProgressLabel": "PR #95のoffline ID token verifierを統合・検証。K275は部分完了で、SessionSnapshot変換API・実ログイン・runtime統合は未実装",
+  "lastCodeMergeAt": "2026-11-14T09:15:21Z",
+  "mainSha": "3a36efcb78ed4bbcec9e3a50b1608db784c196cc",
   "repository": "https://github.com/g-kari/devsecops-console",
-  "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHAとPR一覧は確認時点の観測値。公開進捗データ自身の更新commitとは別。",
-  "currentFocus": "K275のpure認可契約は統合・検証済み。次段の実protocol確認と担当確定、既存PR #94による公開進捗同期",
-  "openPullRequests": [
-    {
-      "number": 94,
-      "title": "公開ロードマップ状態更新",
-      "url": "https://github.com/g-kari/devsecops-console/pull/94",
-      "status": "open",
-      "scope": "07:26 UTC照合時点で旧head ed7bb97はCheck・Trial失敗、未統合・未公開。#88/#89の確定結果をまとめた更新候補を準備済み。更新headのCIは別途必要。"
-    }
-  ],
+  "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHA・PR一覧・CIはcheckedAt時点の観測値。成果時刻と公開JSONの配信commitは別。資料更新の統合・配信確認は対応するPRと作業記録で追跡する。",
+  "currentFocus": "K275はoffline verifierまでの部分完了。SessionSnapshot変換・live/current-status・実ログイン/runtimeの次工程と担当を確定。Intel Macのpackage timeoutは原因未確定で、次の全package計測・store単独比較は保留中",
+  "openPullRequests": [],
   "ci": {
     "status": "success",
-    "label": "main b0c84a10: Check全6job・Trial全10jobがattempt 1成功。4 native/buildとmain限定6 ready、6対象の同一SHA trial成果物を確認。正式release v0.5.0不変。K305根因修正や未更新PR #94のCI合格とは別",
-    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43569498670",
-    "checkedAt": "2026-11-14T07:26:58Z"
+    "label": "main 3a36efcb: Check全6jobはattempt 1成功、Trial全10jobはattempt 2成功。Trial初回のIntel internal/store package全体600.090秒timeoutを保全し、原因未確定。4 native/build＋6 ready、6対象の同一SHA trial成果物を確認。正式release v0.5.0は不変。K305根因修正とは別",
+    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210",
+    "checkedAt": "2026-11-14T10:15:38Z"
   },
   "rows": [
     {
@@ -31,15 +23,31 @@
       "title": "Webログイン・役割制御",
       "phase": "共通認可",
       "status": "partial",
-      "owner": "認可契約の担当作業は終了 / 次工程担当は未定",
-      "lastCheckedAt": "2026-11-14T07:26:58Z",
-      "lastProgressAt": "2026-11-14T07:23:00Z",
+      "owner": "offline verifierの担当工程は終了 / 次のruntime工程担当は未定",
+      "lastCheckedAt": "2026-11-14T10:15:38Z",
+      "lastProgressAt": "2026-11-14T09:50:08Z",
       "activityAt": null,
-      "latestAchievement": "PR #89のpure role/scope認可契約をmain b0c84a10へ統合。PR時Check・Trial、統合後Check全6job・Trial全10jobが初回成功し、6対象の同一SHA trial成果物を確認。",
-      "waitReason": "部分完了はpure認可契約のみ。実ログイン・IdP検証・session・HTTP route統合は未着手。元担当の作業は終了し、次段の実装担当は未定。",
-      "nextAction": "実protocol・IdP/session/HTTP境界の仕様を確認し、次工程担当と実装範囲を確定。認可契約の統合をK275全体の完了や本番稼働と混同しない。",
+      "latestAchievement": "PR #89のpure認可契約に続き、PR #95のoffline ID token verifierをmain 3a36efcbへ統合。統合後Checkはattempt 1、Trialはattempt 2で成功し、6 ready・同一SHAの6成果物を確認。PR時Checkはfont guard失敗後のattempt 2、Trialはattempt 1成功。Linux/Windows arm64はcross-compileのみ、他4対象はnative smoke。UI・実機・署名/公証は未検証。",
+      "waitReason": "部分完了はpure認可契約とoffline ID token verifierのみ。SessionSnapshot変換APIはなく、live/current-status・実ログイン・session・HTTP routeを含むruntime統合は未実装。限定担当工程は終了し、次工程担当は未定。",
+      "nextAction": "verified identityからSessionSnapshotへの変換・live/current-status・実protocol/IdP/session/HTTP境界を確認し、次工程担当と実装範囲を確定。offline verifierの合格を実ログインや本番稼働の完了と混同しない。",
       "dependencies": [],
       "evidence": [
+        {
+          "label": "PR #95（offline verifierの限定統合）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/95"
+        },
+        {
+          "label": "統合main 3a36efcb",
+          "url": "https://github.com/g-kari/devsecops-console/commit/3a36efcb78ed4bbcec9e3a50b1608db784c196cc"
+        },
+        {
+          "label": "統合後Check attempt 1",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210"
+        },
+        {
+          "label": "統合後Trial attempt 2",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685201/attempts/2"
+        },
         {
           "label": "PR #89（認可契約の統合）",
           "url": "https://github.com/g-kari/devsecops-console/pull/89"
@@ -163,17 +171,29 @@
       "title": "ブラウザーCIの起動診断",
       "phase": "品質",
       "status": "blocked",
-      "owner": "修正担当の現在稼働は未確認",
-      "lastCheckedAt": "2026-11-14T07:26:58Z",
-      "lastProgressAt": "2026-11-14T07:12:46Z",
+      "owner": "根因修正の専任は未割当（記録上）",
+      "lastCheckedAt": "2026-11-14T10:15:38Z",
+      "lastProgressAt": "2026-11-14T09:20:16Z",
       "activityAt": null,
-      "latestAchievement": "最新main b0c84a10のCheckは初回成功。前main 9d2a02bdはBrowser.getVersion 10034ms・受信0で画面試験前に失敗し、同一SHAの失敗jobを1回再試行してattempt 2成功。初回証拠は保存済み。",
-      "waitReason": "起動失敗の根因・修正担当は未確定。再試行成功は根因修正ではない。旧main 9fe430398のunfinished TCP attemptも別観測で、通信成立・漏洩は未確定。",
-      "nextAction": "実装担当を確定してから、保存済み初回・成功時の証拠と過去のoffline guard失敗を分離して診断。安全な通信制約を緩めず、根因修正と同一SHA検証を確認。",
+      "latestAchievement": "最新main 3a36efcbのCheckはattempt 1成功。PR #94統合後Checkも初回成功済み。PR #95の初回font guard失敗と再試行成功は、旧Browser.getVersion起動失敗とは別の観測として保持。",
+      "waitReason": "ブラウザー起動失敗の根因は未修正。記録上は修正専任が未割当で、K275・公開同期を優先する作業順序により未着手・保留。存在を確認した旧担当の終了待ちとは扱わない。PR #95のfont guard失敗と再試行成功は別問題。旧main 9fe430398のunfinished TCP attemptも別観測で、通信成立・漏洩は未確定。",
+      "nextAction": "根因修正の担当とstartup診断の限定scopeを明示し、現在の実稼働・競合を確認してから着手する。保存済み初回・成功時の証拠とoffline guard失敗を分離し、安全な通信制約を緩めずに診断・修正・同一SHA検証を進める。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "最新main Check初回成功",
+          "label": "最新main Check attempt 1",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210"
+        },
+        {
+          "label": "PR #95 Check初回font guard失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43578154811/attempts/1"
+        },
+        {
+          "label": "PR #95 Check attempt 2成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43578154811/attempts/2"
+        },
+        {
+          "label": "PR #89統合時main Check初回成功",
           "url": "https://github.com/g-kari/devsecops-console/actions/runs/43569498670"
         },
         {
@@ -769,25 +789,29 @@
       "phase": "公開資料",
       "status": "complete",
       "owner": "更新経路の限定工程完了 / 進捗同期は継続",
-      "lastCheckedAt": "2026-11-14T07:26:58Z",
-      "lastProgressAt": "2026-11-13T23:23:27Z",
+      "lastCheckedAt": "2026-11-14T10:15:38Z",
+      "lastProgressAt": "2026-11-14T08:14:33Z",
       "activityAt": null,
-      "latestAchievement": "PR #93で公開JSONのmain・raw・候補全文一致とSiteの22:42時点33工程取得を確認済み。最新main b0c84a10でも正本JSONは同じ22:42 snapshot。#88/#89の確定結果をまとめるPR #94は照合時点で未統合・未公開。",
-      "waitReason": "限定完了は公開データ読取・更新経路。最新実装進捗の掲載は既存PR #94の更新headのレビュー・CI・統合・Site取得確認待ち。",
-      "nextAction": "担当を一本化した既存PR #94に確定結果と最新main同期を一度反映し、独立レビュー・同一head CI・main読戻し・Site取得を確認する。通常のJSON更新にSite再配備は不要。",
+      "latestAchievement": "PR #94をmain b16cf8a9へ統合し、raw mainとの全文一致・公開Siteで07:26:58 snapshotと33工程の取得・検索/filterを確認済み。統合後Check全6job・Trial全10jobは初回成功。観測snapshotと配信commitを分離して記録した。",
+      "waitReason": "なし（公開データ読取・更新経路の限定工程）。実装状況の照合と公開資料の保守は継続。資料更新ごとの配信確認は対応するPR・作業記録で追跡する。",
+      "nextAction": "確定した実装・検証結果を継続照合し、33工程と根拠を保った通常PRで更新する。同一head CI・独立レビュー・main読戻し・既存Site取得を更新ごとに確認。通常のJSON更新にSite再配備は不要。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "PR #93（公開済み資料）",
-          "url": "https://github.com/g-kari/devsecops-console/pull/93"
-        },
-        {
-          "label": "PR #94（照合時点の更新候補・未統合）",
+          "label": "PR #94（統合・公開確認済み）",
           "url": "https://github.com/g-kari/devsecops-console/pull/94"
         },
         {
-          "label": "照合時点mainの公開正本",
-          "url": "https://github.com/g-kari/devsecops-console/blob/b0c84a10b74340cbcdb7c9d3bb9dde3890d60fb4/docs/site-roadmap.json"
+          "label": "確認済み配信commit b16cf8a9の公開正本",
+          "url": "https://github.com/g-kari/devsecops-console/blob/b16cf8a9ac27bde29386d43ebc026d76277ad51b/docs/site-roadmap.json"
+        },
+        {
+          "label": "PR #94統合後Check初回成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43573554666"
+        },
+        {
+          "label": "PR #94統合後Trial初回成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43573554658"
         },
         {
           "label": "更新手順",
@@ -1071,9 +1095,70 @@
           "url": "https://github.com/g-kari/devsecops-console/pull/89"
         }
       ]
+    },
+    {
+      "id": "offline検証",
+      "title": "offline ID token verifier",
+      "start": "2026-11-14T08:53:47Z",
+      "end": "2026-11-14T09:15:21Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。SessionSnapshot変換API・実ログイン・runtime統合・K275全体の完了とは別。",
+      "evidence": [
+        {
+          "label": "PR #95",
+          "url": "https://github.com/g-kari/devsecops-console/pull/95"
+        }
+      ]
     }
   ],
   "updates": [
+    {
+      "at": "2026-11-14T09:50:08Z",
+      "type": "再検証",
+      "text": "main 3a36efcbのTrialはIntel失敗jobのみ1回再試行しattempt 2成功。既存3jobの成功結果を再利用し、Intelと6 readyを通過。6成果物のsource commit/tree・build attempt 1 / verification attempt 2を照合。初回package timeoutの原因は未確定で、根因修正ではない。Linux/Windows arm64はcross-compileのみ。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685201/attempts/2"
+    },
+    {
+      "at": "2026-11-14T09:35:19Z",
+      "type": "失敗履歴",
+      "text": "PR #95統合後Trialの初回はIntel Macのinternal/store package全体が600.090秒timeout。webauth・build・Windows・ARM Macは成功、6 readyはskipで配布用成果物は未生成。単一テストの600秒停止とは断定しない。後続再試行成功後も原因未確定で、font guard・K305起動失敗とは分離する。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685201/attempts/1"
+    },
+    {
+      "at": "2026-11-14T09:20:16Z",
+      "type": "検証",
+      "text": "main 3a36efcbのCheck全6jobがattempt 1成功。K305根因の解消やPR時font guard失敗原因の修正とは扱わない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210"
+    },
+    {
+      "at": "2026-11-14T09:15:21Z",
+      "type": "offline検証統合",
+      "text": "PR #95のoffline ID token verifierを通常マージ。SessionSnapshot変換API・実ログイン/runtimeは未実装で、K275は部分完了。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/95"
+    },
+    {
+      "at": "2026-11-14T09:01:00Z",
+      "type": "失敗履歴",
+      "text": "PR #95のCheck初回はfont guardで失敗。同一headの失敗jobのみ1回再試行してattempt 2成功。初回証拠を保全し、原因修正とは扱わない。Intel package timeout・K305のブラウザー起動失敗とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43578154811/attempts/1"
+    },
+    {
+      "at": "2026-11-14T08:14:33Z",
+      "type": "検証",
+      "text": "PR #94統合後main b16cf8a9のTrialは初回全10job成功。6対象の同一SHA成果物を確認。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43573554658"
+    },
+    {
+      "at": "2026-11-14T08:03:48Z",
+      "type": "検証",
+      "text": "PR #94統合後main b16cf8a9のCheckは初回全6job成功。K305根因修正とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43573554666"
+    },
+    {
+      "at": "2026-11-14T07:58:16Z",
+      "type": "資料統合",
+      "text": "PR #94で07:26:58観測snapshotをmain b16cf8a9へ統合。後続の公開Site取得確認で33工程と検索/filterを確認。観測時刻と配信commitを区別し、Site本体は再配備していない。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/94"
+    },
     {
       "at": "2026-11-14T07:23:00Z",
       "type": "検証",
