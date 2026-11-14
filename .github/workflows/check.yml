@@ -37,57 +37,12 @@ jobs:
         run: node scripts/test_log_stream_lifecycle.mjs
       - name: Verify Mac packaging helpers
         run: python3 scripts/test_macos_tools.py
+      - name: Verify CJK font preparation contract
+        run: python3 scripts/test_ci_cjk_font.py
       - name: Prepare official Ubuntu CJK font for browser QA
         timeout-minutes: 3
         shell: bash
-        run: |
-          set -euo pipefail
-          export LC_ALL=C
-          source /etc/os-release
-          [[ "$ID" == ubuntu && "$VERSION_ID" == 26.04 && "$VERSION_CODENAME" == resolute ]]
-          test -r /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          python3 - <<'PY'
-          from email.parser import Parser
-          from pathlib import Path
-          import re
-          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
-          assert len(source) <= 65536, 'Ubuntu source exceeds bound'
-          allowed = {'http://azure.archive.ubuntu.com/ubuntu/', 'http://archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/', 'http://security.ubuntu.com/ubuntu/', 'https://security.ubuntu.com/ubuntu/'}
-          mirror = 'mirror+file:/etc/apt/apt-mirrors.txt'
-          entries = re.split(r'\n\s*\n', '\n'.join(line for line in source.splitlines() if not line.lstrip().startswith('#')))
-          assert any(entry.strip() for entry in entries), 'Ubuntu source missing'
-          for raw in filter(str.strip, entries):
-              entry = Parser().parsestr(raw)
-              assert not entry.get_payload().strip(), 'Malformed Ubuntu source'
-              assert set(entry.keys()) <= {'Types', 'URIs', 'Suites', 'Components', 'Signed-By', 'Enabled', 'Architectures'}, 'Unexpected source field'
-              assert all(len(entry.get_all(key, [])) == 1 for key in ['Types', 'URIs', 'Suites', 'Components', 'Signed-By']), 'Missing/duplicate source field'
-              assert entry['Types'].split() == ['deb'] and entry.get('Enabled', 'yes').strip() == 'yes'
-              assert entry['Signed-By'].strip() == '/usr/share/keyrings/ubuntu-archive-keyring.gpg'
-              assert entry['URIs'].split() and set(entry['URIs'].split()) <= allowed | {mirror}, 'Non-Ubuntu source'
-              assert entry['Suites'].split() and set(entry['Suites'].split()) <= {'resolute', 'resolute-updates', 'resolute-security', 'resolute-backports'}
-              assert 'main' in entry['Components'].split() and set(entry['Components'].split()) <= {'main', 'restricted', 'universe', 'multiverse'}
-              if mirror in entry['URIs'].split():
-                  lines = Path('/etc/apt/apt-mirrors.txt').read_text().splitlines()
-                  assert 0 < len(lines) <= 32, 'Ubuntu mirror list missing/oversized'
-                  for line in filter(str.strip, (line.split('#', 1)[0].strip() for line in lines)):
-                      words = line.split()
-                      assert words[0] in allowed and len(words) <= 2 and all(re.fullmatch(r'priority:[1-3]', word) for word in words[1:]), 'Non-Ubuntu mirror'
-          PY
-          font_dir=$(mktemp -d "$RUNNER_TEMP/devsecops-cjk-apt.XXXXXX")
-          trap 'sudo rm -rf -- "$font_dir"' EXIT
-          chmod 755 "$font_dir"
-          sudo install -d -o _apt -g root "$font_dir/lists/partial" "$font_dir/archives/partial"
-          apt_opts=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$font_dir/lists" -o "Dir::Cache::archives=$font_dir/archives" -o APT::Update::Error-Mode=any -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_opts[@]}" update
-          candidate=$(apt-cache "${apt_opts[@]}" policy fonts-noto-cjk | awk '$1 == "Candidate:" {print $2}')
-          [[ "$candidate" =~ ^[0-9A-Za-z.+:~_-]+$ ]]
-          apt-cache "${apt_opts[@]}" madison fonts-noto-cjk | awk -F '|' -v wanted="$candidate" '{gsub(/^[ \t]+|[ \t]+$/, "", $2); if ($2 == wanted) found=1} END {exit !found}'
-          sudo apt-get "${apt_opts[@]}" --simulate --no-install-recommends --reinstall install "fonts-noto-cjk=$candidate" > "$font_dir/transaction.txt"
-          awk '/^Remv / {bad=1} /^(Inst|Conf) / {split($2, package, ":"); if (package[1] != "fonts-noto-cjk") bad=1; if ($1 == "Inst" && package[1] == "fonts-noto-cjk") found=1} END {exit bad || !found}' "$font_dir/transaction.txt"
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get "${apt_opts[@]}" --yes --no-install-recommends --reinstall install "fonts-noto-cjk=$candidate"
-          [[ $(dpkg-query -W -f='${Version}' fonts-noto-cjk) == "$candidate" ]]
-          dpkg-query -W -f='${Package} ${Version} ${Architecture}\n' fonts-noto-cjk
-          fc-match -f '%{family}\n' 'Noto Sans CJK JP:lang=ja' | grep -Fx 'Noto Sans CJK JP'
+        run: bash scripts/prepare_ci_cjk_font.sh
       - name: Native console browser acceptance
         env:
           DEVSECOPS_BROWSER_QA: "1"
