@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
   "project": "DevSecOps Console",
-  "checkedAt": "2026-11-14T10:15:38Z",
+  "checkedAt": "2026-11-14T12:49:23Z",
   "publishedSnapshotAt": "2026-11-13T20:28:00Z",
-  "lastSubstantiveProgressAt": "2026-11-14T09:50:08Z",
-  "lastSubstantiveProgressLabel": "PR #95のoffline ID token verifierを統合・検証。K275は部分完了で、SessionSnapshot変換API・実ログイン・runtime統合は未実装",
-  "lastCodeMergeAt": "2026-11-14T09:15:21Z",
-  "mainSha": "3a36efcb78ed4bbcec9e3a50b1608db784c196cc",
+  "lastSubstantiveProgressAt": "2026-11-14T12:40:52Z",
+  "lastSubstantiveProgressLabel": "PR #97でCIのCJKフォント準備を限定修復し、統合後CIと6成果物を確認。K305の起動/TCP根因・K275実ログイン・Intel timeout根因は未解決",
+  "lastCodeMergeAt": "2026-11-14T12:26:51Z",
+  "mainSha": "b7cd341cbd0cc411f5abec47373c2996a2ab8bb3",
   "repository": "https://github.com/g-kari/devsecops-console",
   "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHA・PR一覧・CIはcheckedAt時点の観測値。成果時刻と公開JSONの配信commitは別。資料更新の統合・配信確認は対応するPRと作業記録で追跡する。",
-  "currentFocus": "K275はoffline verifierまでの部分完了。SessionSnapshot変換・live/current-status・実ログイン/runtimeの次工程と担当を確定。Intel Macのpackage timeoutは原因未確定で、次の全package計測・store単独比較は保留中",
+  "currentFocus": "CJKフォント準備の限定修復は統合・検証済み。K305のBrowser.getVersion起動根因と未知TCPを分けて診断する担当・範囲を確定。K275の実ログイン/session/runtimeとIntel package timeout根因は未解決",
   "openPullRequests": [],
   "ci": {
     "status": "success",
-    "label": "main 3a36efcb: Check全6jobはattempt 1成功、Trial全10jobはattempt 2成功。Trial初回のIntel internal/store package全体600.090秒timeoutを保全し、原因未確定。4 native/build＋6 ready、6対象の同一SHA trial成果物を確認。正式release v0.5.0は不変。K305根因修正とは別",
-    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210",
-    "checkedAt": "2026-11-14T10:15:38Z"
+    "label": "main b7cd341c: Check全6job・Trial全10jobがattempt 1成功。ブラウザー32ケース/10フロー/29 PNG、監査違反0。4 native/build＋6 ready、同一SHAの6 ZIP・内部checksum・manifestを照合。Linux/Windows arm64はcross-compileのみ。正式release v0.5.0は不変。PR初回の未知TCPとK305起動根因の解明とは別",
+    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43594867213",
+    "checkedAt": "2026-11-14T12:49:23Z"
   },
   "rows": [
     {
@@ -172,16 +172,44 @@
       "phase": "品質",
       "status": "blocked",
       "owner": "根因修正の専任は未割当（記録上）",
-      "lastCheckedAt": "2026-11-14T10:15:38Z",
-      "lastProgressAt": "2026-11-14T09:20:16Z",
+      "lastCheckedAt": "2026-11-14T12:49:23Z",
+      "lastProgressAt": "2026-11-14T12:33:32Z",
       "activityAt": null,
-      "latestAchievement": "最新main 3a36efcbのCheckはattempt 1成功。PR #94統合後Checkも初回成功済み。PR #95の初回font guard失敗と再試行成功は、旧Browser.getVersion起動失敗とは別の観測として保持。",
-      "waitReason": "ブラウザー起動失敗の根因は未修正。記録上は修正専任が未割当で、K275・公開同期を優先する作業順序により未着手・保留。存在を確認した旧担当の終了待ちとは扱わない。PR #95のfont guard失敗と再試行成功は別問題。旧main 9fe430398のunfinished TCP attemptも別観測で、通信成立・漏洩は未確定。",
-      "nextAction": "根因修正の担当とstartup診断の限定scopeを明示し、現在の実稼働・競合を確認してから着手する。保存済み初回・成功時の証拠とoffline guard失敗を分離し、安全な通信制約を緩めずに診断・修正・同一SHA検証を進める。",
+      "latestAchievement": "PR #97のCJKフォント準備をmain b7cd341cへ統合。runnerの可変mirrorに依存せず専用tempと固定HTTPS Ubuntu配信元から取得し、既存Ubuntu archive keyringで署名検証する限定修復で、新鍵追加やguardの緩和はしていない。PR初回AWS image 20261111.82.6で実取得・指定version・Noto CJK実使用とGo試験を確認。後段の未知TCP失敗後、同一headの失敗jobのみ1回再試行しAzureで成功。統合後CheckもAzureで初回成功し、32ケース/10フロー/29 PNG・監査違反0・所有process残存0・store不変・外部action 0を確認。",
+      "waitReason": "Browser.getVersion起動失敗の根因は未修正で、根因修正の専任は未割当（記録上）。PR #97初回のunfinished TCP attemptは別問題で、transport outcome unknown。PR #93の旧失敗と同症状、ブラウザー関連4fileのblobとfont版は同一だが、宛先・sourceID・raw NetLogが残らず、通信成立・漏洩・原因は未確定。Azureでの成功は根因解明を意味しない。font限定工程の担当は終了し、従来の_apt fallback warningも未調査。",
+      "nextAction": "K305のstartup根因と未知TCPを分けて担当・診断範囲を確定し、実稼働・競合を確認して着手する。初回と成功時の証拠を保持し、安全な通信制約を維持し、秘密情報を含めない上限付きの最小診断記録を設計して同一SHAで検証する。font限定完了を起動/TCP根因の解消と扱わない。",
       "dependencies": [],
       "evidence": [
         {
-          "label": "最新main Check attempt 1",
+          "label": "PR #97（CJKフォント準備の限定修復）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/97"
+        },
+        {
+          "label": "統合main b7cd341c",
+          "url": "https://github.com/g-kari/devsecops-console/commit/b7cd341cbd0cc411f5abec47373c2996a2ab8bb3"
+        },
+        {
+          "label": "PR #97初回: AWSでfont成功・後段TCP outcome unknown",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43592972728/attempts/1"
+        },
+        {
+          "label": "PR #97同一head Check attempt 2成功（Azure）",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43592972728/attempts/2"
+        },
+        {
+          "label": "統合後Check attempt 1成功（Azure）",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43594867213/attempts/1"
+        },
+        {
+          "label": "PR #96統合後Check初回font guard失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822023/attempts/1"
+        },
+        {
+          "label": "PR #96統合後Check attempt 2成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822023/attempts/2"
+        },
+        {
+          "label": "PR #95統合時main Check attempt 1",
           "url": "https://github.com/g-kari/devsecops-console/actions/runs/43579685210"
         },
         {
@@ -789,14 +817,34 @@
       "phase": "公開資料",
       "status": "complete",
       "owner": "更新経路の限定工程完了 / 進捗同期は継続",
-      "lastCheckedAt": "2026-11-14T10:15:38Z",
-      "lastProgressAt": "2026-11-14T08:14:33Z",
+      "lastCheckedAt": "2026-11-14T12:49:23Z",
+      "lastProgressAt": "2026-11-14T11:04:40Z",
       "activityAt": null,
-      "latestAchievement": "PR #94をmain b16cf8a9へ統合し、raw mainとの全文一致・公開Siteで07:26:58 snapshotと33工程の取得・検索/filterを確認済み。統合後Check全6job・Trial全10jobは初回成功。観測snapshotと配信commitを分離して記録した。",
+      "latestAchievement": "PR #96をmain d93601b9へ統合し、正本・raw・候補の全文一致と既存公開Siteで10:15:38観測snapshot/09:50:08成果時刻・33工程の取得、検索/filter/reset・手動更新を確認済み。統合後Checkは初回font guard失敗後の限定1回再試行でattempt 2成功、Trialはattempt 1で4 native/build＋6 ready成功。新たなモバイルQAやSite再配備は実施していない。",
       "waitReason": "なし（公開データ読取・更新経路の限定工程）。実装状況の照合と公開資料の保守は継続。資料更新ごとの配信確認は対応するPR・作業記録で追跡する。",
       "nextAction": "確定した実装・検証結果を継続照合し、33工程と根拠を保った通常PRで更新する。同一head CI・独立レビュー・main読戻し・既存Site取得を更新ごとに確認。通常のJSON更新にSite再配備は不要。",
       "dependencies": [],
       "evidence": [
+        {
+          "label": "PR #96（統合・公開・事後CI確認済み）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/96"
+        },
+        {
+          "label": "確認済み配信commit d93601b9の公開正本",
+          "url": "https://github.com/g-kari/devsecops-console/blob/d93601b96a3c71229248d77bf82b5ce2aea3c853/docs/site-roadmap.json"
+        },
+        {
+          "label": "PR #96統合後Check初回font guard失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822023/attempts/1"
+        },
+        {
+          "label": "PR #96統合後Check attempt 2成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822023/attempts/2"
+        },
+        {
+          "label": "PR #96統合後Trial attempt 1成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822018/attempts/1"
+        },
         {
           "label": "PR #94（統合・公開確認済み）",
           "url": "https://github.com/g-kari/devsecops-console/pull/94"
@@ -1108,9 +1156,76 @@
           "url": "https://github.com/g-kari/devsecops-console/pull/95"
         }
       ]
+    },
+    {
+      "id": "CJK準備",
+      "title": "CIのCJKフォント準備修復",
+      "start": "2026-11-14T12:03:58Z",
+      "end": "2026-11-14T12:26:51Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。font準備の限定修復で、K305のBrowser.getVersion起動根因・未知TCP根因の解消とは別。",
+      "evidence": [
+        {
+          "label": "PR #97",
+          "url": "https://github.com/g-kari/devsecops-console/pull/97"
+        }
+      ]
     }
   ],
   "updates": [
+    {
+      "at": "2026-11-14T12:40:52Z",
+      "type": "検証",
+      "text": "main b7cd341cのTrialはattempt 1で全10job（4 native/build＋6 ready）成功。6 ZIPのGitHub digest・内部SHA256SUMS・manifestのsource commit/tree/run/attemptとarchive hashを照合し、同一SHA・attempt 1・未失効を確認。Linux/Windows arm64はcross-compileのみ。正式release v0.5.0は不変で、release/tag/本番配備は行っていない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43594867227/attempts/1"
+    },
+    {
+      "at": "2026-11-14T12:33:32Z",
+      "type": "検証",
+      "text": "main b7cd341cのCheck全6jobがattempt 1成功。Azure northcentralus/image 20261111.196.1でfont準備とnative browserを通過。32ケース/10フロー/29 PNG、checks/manifest/stability成功、監査違反0・所有process残存0・store不変・外部action 0。PR初回の未知TCPや旧Browser.getVersion根因の解明とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43594867213/attempts/1"
+    },
+    {
+      "at": "2026-11-14T12:26:51Z",
+      "type": "font準備統合",
+      "text": "PR #97のCI用CJKフォント準備修復を通常マージ。可変runner mirrorを信頼入力から外し、専用temp・固定HTTPS Ubuntu配信元・専用indexesに限定し、既存Ubuntu archive keyringで署名検証する。新鍵追加やguardの緩和なし。K275実ログイン/session/runtime・K305起動/TCP根因・Intel package timeout根因は未解決。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/97"
+    },
+    {
+      "at": "2026-11-14T12:23:37Z",
+      "type": "検証",
+      "text": "PR #97のTrialはattempt 1で4 native/build成功。PRではreadyが意図的にskipされるため、main限定6 readyと配布用6成果物の確認とは分ける。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43592972726/attempts/1"
+    },
+    {
+      "at": "2026-11-14T12:22:18Z",
+      "type": "再検証",
+      "text": "PR #97のCheckは初回証拠を保存後、同一headの失敗jobのみ1回再試行しattempt 2で全6job成功。Azure eastus/image 20261111.196.1での成功は、初回AWSでの未知TCPの原因解明や通信不成立の証明ではない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43592972728/attempts/2"
+    },
+    {
+      "at": "2026-11-14T12:09:00Z",
+      "type": "失敗履歴",
+      "text": "PR #97のCheck初回はAWS us-east-1/image 20261111.82.6で固定HTTPS font取得・指定version・Noto CJK実使用・Go試験が成功した後、ブラウザー監査のunfinished TCP attemptで失敗。transport outcome unknown。PR #93の旧失敗と同症状だが、宛先/sourceID/raw NetLogがなく通信成立・漏洩・原因は未確定。旧Browser.getVersion起動失敗とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43592972728/attempts/1"
+    },
+    {
+      "at": "2026-11-14T11:04:40Z",
+      "type": "再検証",
+      "text": "PR #96統合後main d93601b9のCheckは初回CJK font guard失敗の証拠を保持し、同一SHAの失敗jobのみ1回再試行してattempt 2で全6job成功。初回はブラウザー受入が未実行で、PNG欠落は二次的な結果。再試行成功だけをfont原因修正とは扱わない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822023/attempts/2"
+    },
+    {
+      "at": "2026-11-14T11:03:00Z",
+      "type": "検証",
+      "text": "PR #96統合後main d93601b9のTrialはattempt 1で全10job（4 native/build＋6 ready）成功し、6対象の同一SHA成果物を確認。Linux/Windows arm64はcross-compileのみ。この時点で6 ZIPすべての独立再取得・展開まで実施したとは扱わない。正式release v0.5.0不変。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43586822018/attempts/1"
+    },
+    {
+      "at": "2026-11-14T10:46:00Z",
+      "type": "資料統合",
+      "text": "PR #96で10:15:38観測snapshot/09:50:08成果時刻の公開JSONをmain d93601b9へ統合。正本・raw・候補全文一致、既存公開Siteの33工程取得・検索/filter/reset・手動更新を確認済み。観測時刻・実成果時刻・配信commitを分け、Site本体は再配備していない。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/96"
+    },
     {
       "at": "2026-11-14T09:50:08Z",
       "type": "再検証",
