@@ -37,9 +37,11 @@ func newOIDCFixture(t testing.TB) oidcFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x, y := make([]byte, 32), make([]byte, 32)
-	key.X.FillBytes(x)
-	key.Y.FillBytes(y)
+	point, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := point[1:33], point[33:]
 	jwk := map[string]any{"kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256", "kid": "synthetic-key", "x": encodePart(x), "y": encodePart(y)}
 	jwks := oidcJSON(t, map[string]any{"keys": []any{jwk}})
 	verifier, err := webauth.NewOIDCVerifier(oidcClient, jwks)
@@ -120,11 +122,11 @@ func TestOIDCVerifiesOnlyFixedClientIdentityAndNoSession(t *testing.T) {
 	}
 	// Unknown/stale/mismatched current status has no conversion path at all.
 	// This verifier intentionally supplies no current-status or session API.
-	var injected webauth.VerifiedIdentity
-	if err := json.Unmarshal([]byte(`{"subject":"pairwise-subject-A","role":"admin"}`), &injected); err != nil {
+	injected := reflect.New(identityType)
+	if err := json.Unmarshal([]byte(`{"subject":"pairwise-subject-A","role":"admin"}`), injected.Interface()); err != nil {
 		t.Fatal(err)
 	}
-	if injected != (webauth.VerifiedIdentity{}) || string(oidcJSON(t, identity)) != "{}" {
+	if injected.Elem().Interface().(webauth.VerifiedIdentity) != (webauth.VerifiedIdentity{}) || string(oidcJSON(t, identity)) != "{}" {
 		t.Fatal("JSON injected or exposed trusted identity fields")
 	}
 	policy, err := webauth.NewPolicy(webauth.OIDCIssuer, []webauth.Grant{{Subject: identity.Subject(), Scope: "asset:one", Role: webauth.Admin}})

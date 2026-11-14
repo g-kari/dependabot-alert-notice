@@ -194,8 +194,12 @@ func signingKey(raw []byte) (string, *ecdsa.PublicKey, bool) {
 	if kid == "" || !xOK || !yOK || len(x) != 32 || len(y) != 32 {
 		return "", nil, false
 	}
-	public := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-	if !public.Curve.IsOnCurve(public.X, public.Y) {
+	point := make([]byte, 65)
+	point[0] = 4
+	copy(point[1:33], x)
+	copy(point[33:], y)
+	public, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+	if err != nil {
 		return "", nil, false
 	}
 	return kid, public, true
