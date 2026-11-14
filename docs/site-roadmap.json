@@ -1,0 +1,1101 @@
+{
+  "schemaVersion": 1,
+  "project": "DevSecOps Console",
+  "checkedAt": "2026-11-13T22:42:53Z",
+  "publishedSnapshotAt": "2026-11-13T20:28:00Z",
+  "lastSubstantiveProgressAt": "2026-11-13T22:34:05Z",
+  "lastSubstantiveProgressLabel": "PR #92の公開資料更新を統合。main ff2e0266のCheckとTrialが成功。認可・依存更新のPRは未マージ",
+  "lastCodeMergeAt": "2026-11-13T04:50:11Z",
+  "mainSha": "ff2e0266ea365c31f2e6fc244ccdfca7733d0edb",
+  "repository": "https://github.com/g-kari/devsecops-console",
+  "scopeNote": "コード統合、各変更の検証、正式版収録、本番稼働を分ける。main SHAとPR一覧は確認時点の観測値。公開進捗データ自身の更新commitとは別。",
+  "currentFocus": "K275: Web認可契約は未マージ・CI失敗。既存担当の継続確認と公開進捗の同期",
+  "openPullRequests": [
+    {
+      "number": 88,
+      "title": "GoReleaser v2.20.2",
+      "url": "https://github.com/g-kari/devsecops-console/pull/88",
+      "status": "open",
+      "scope": "依存保守。最新head 72dce95のCheck・Trialがmanifestとinstaller pinの不一致で失敗。既存担当の稼働は未確認。"
+    },
+    {
+      "number": 89,
+      "title": "Web role/scope認可ポリシー",
+      "url": "https://github.com/g-kari/devsecops-console/pull/89",
+      "status": "open",
+      "scope": "K275の最小コード工程。CheckとTrial失敗、未マージ。Webログイン・session・HTTP接続は未実装。"
+    }
+  ],
+  "ci": {
+    "status": "success",
+    "label": "main ff2e0266のCheck・Trialが成功。過去のブラウザー起動失敗の根因解消やPR #88/#89の合格を意味しない",
+    "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643",
+    "checkedAt": "2026-11-13T22:42:53Z"
+  },
+  "rows": [
+    {
+      "id": "K275",
+      "title": "Webログイン・役割制御",
+      "phase": "共通認可",
+      "status": "blocked",
+      "owner": "一姫（既存担当の現在稼働は未確認）",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
+      "lastProgressAt": "2026-11-13T20:34:00Z",
+      "activityAt": "2026-11-13T20:22:00Z",
+      "latestAchievement": "PR #89の認可packageは合成テスト・race・coverage 100%を確認。Checkはブラウザー起動、TrialはIntel Mac試験で失敗し、未マージ。",
+      "waitReason": "最終headの全CI未合格。既存担当の継続状況は未確認。Webログイン・session・HTTP実接続も未実装。",
+      "nextAction": "既存担当の継続を確認し、失敗CIの原因を切り分ける。修正・再検証後に統合条件を確認。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #89（未マージ）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/89"
+        },
+        {
+          "label": "Check失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501736123"
+        },
+        {
+          "label": "Trial失敗",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43501736182"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K267",
+      "title": "GitHub実行主体の明示",
+      "phase": "Phase 1",
+      "status": "complete",
+      "owner": "実装完了",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-09T17:24:36Z",
+      "activityAt": null,
+      "latestAchievement": "全17 gh起動経路の共通runnerと明示的credential contextをコード統合。実アカウント有効化とは別。",
+      "waitReason": "なし（このコード工程）。",
+      "nextAction": "K271の収集処理でcontextを再利用。Web認可はK275で別実装。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #48",
+          "url": "https://github.com/g-kari/devsecops-console/pull/48"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K270",
+      "title": "Overview・Assets・画面統合",
+      "phase": "Phase 1",
+      "status": "complete",
+      "owner": "実装完了",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-12T09:08:15Z",
+      "activityAt": null,
+      "latestAchievement": "Overview、Assets、記録済みIntegrations、共通shellを統合。実Chrome 32ケースを当該変更で確認。",
+      "waitReason": "現在のmain全体CI成功を意味しない。",
+      "nextAction": "後続変更は同一headのブラウザーCIで回帰確認。",
+      "dependencies": [
+        "K269"
+      ],
+      "evidence": [
+        {
+          "label": "PR #53",
+          "url": "https://github.com/g-kari/devsecops-console/pull/53"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K269",
+      "title": "記録済み収集状態API",
+      "phase": "Phase 1",
+      "status": "complete",
+      "owner": "実装完了",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-09T18:52:49Z",
+      "activityAt": null,
+      "latestAchievement": "GET-onlyのsource/scope別読取。最新試行と最終成功を分離。",
+      "waitReason": "設定inventory・未scan母数・生存監視は対象外。",
+      "nextAction": "K287で設定母数を別契約として追加。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #49",
+          "url": "https://github.com/g-kari/devsecops-console/pull/49"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K268",
+      "title": "全体仕様・受入条件",
+      "phase": "全体",
+      "status": "complete",
+      "owner": "実装完了",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-12T13:43:24Z",
+      "activityAt": null,
+      "latestAchievement": "Phase 0–3、検証境界、追加読取機能案を文書化。",
+      "waitReason": "記述済みは実装済みを意味しない。",
+      "nextAction": "新しいマージ結果と未完範囲に合わせて同期。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #50",
+          "url": "https://github.com/g-kari/devsecops-console/pull/50"
+        },
+        {
+          "label": "PR #84",
+          "url": "https://github.com/g-kari/devsecops-console/pull/84"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K305",
+      "title": "ブラウザーCIの起動診断",
+      "phase": "品質",
+      "status": "blocked",
+      "owner": "修正担当の現在稼働は未確認",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
+      "lastProgressAt": "2026-11-13T10:48:15Z",
+      "activityAt": null,
+      "latestAchievement": "main ff2e0266のCheckではNative browser acceptance成功。旧main 39ee8d0のBrowser.getVersion timeoutとは結果を区別し、根因解消とは断定しない。",
+      "waitReason": "過去の起動失敗の根因と修正担当は未確定。最新mainの成功だけで診断工程を完了にしない。",
+      "nextAction": "修正担当を一本化してから、上限と通信制約を保った起動診断・回帰試験を追加し、正確なSHAで再検証。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "最新mainのCheck成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643"
+        },
+        {
+          "label": "旧mainの起動失敗job",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671419/job/132172876662"
+        },
+        {
+          "label": "同一source比較の成功run",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43381469467"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K271",
+      "title": "GitHubセキュリティ継続収集",
+      "phase": "Phase 1",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "Code/Secret Scanningのoffline adapterは存在。継続collectorは未完。",
+      "waitReason": "未着手。実装担当・完了日未確定。",
+      "nextAction": "paging・rate limit・取消・部分取得のmock collectorから実装。",
+      "dependencies": [
+        "K267"
+      ],
+      "evidence": [
+        {
+          "label": "PR #28",
+          "url": "https://github.com/g-kari/devsecops-console/pull/28"
+        },
+        {
+          "label": "PR #29",
+          "url": "https://github.com/g-kari/devsecops-console/pull/29"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K272",
+      "title": "Trivy・CIの安全な入力",
+      "phase": "Phase 1",
+      "status": "partial",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-13T07:11:14Z",
+      "activityAt": null,
+      "latestAchievement": "offline取込と、結果不明時の安全な再送判断を文書化。",
+      "waitReason": "CI/export/import全体の受入は未完。",
+      "nextAction": "scope・digest・runの受渡しと失敗/部分reportの合成試験を整備。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #20",
+          "url": "https://github.com/g-kari/devsecops-console/pull/20"
+        },
+        {
+          "label": "PR #87",
+          "url": "https://github.com/g-kari/devsecops-console/pull/87"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K273",
+      "title": "脅威情報の継続更新",
+      "phase": "Phase 1",
+      "status": "partial",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-11T18:37:28Z",
+      "activityAt": null,
+      "latestAchievement": "receipt、世代付き保存、証拠付き予約解除、同一controller内の限定復旧を統合。",
+      "waitReason": "fenced controller接続とruntime/UI caller、再起動復旧が未完。",
+      "nextAction": "K294でdefault-disabledの合成controller接続を実装。",
+      "dependencies": [
+        "K294"
+      ],
+      "evidence": [
+        {
+          "label": "PR #56",
+          "url": "https://github.com/g-kari/devsecops-console/pull/56"
+        },
+        {
+          "label": "PR #70",
+          "url": "https://github.com/g-kari/devsecops-console/pull/70"
+        },
+        {
+          "label": "PR #74",
+          "url": "https://github.com/g-kari/devsecops-console/pull/74"
+        },
+        {
+          "label": "PR #77",
+          "url": "https://github.com/g-kari/devsecops-console/pull/77"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K294",
+      "title": "予約付きcontroller接続",
+      "phase": "Phase 1",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "保存層・旧入口guard・terminal proofの前提コードは統合済み。",
+      "waitReason": "未着手。実装担当・完了日未確定。",
+      "nextAction": "fake fetch/clockと隔離DBでowned requestのRed契約を作る。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #70",
+          "url": "https://github.com/g-kari/devsecops-console/pull/70"
+        },
+        {
+          "label": "PR #72",
+          "url": "https://github.com/g-kari/devsecops-console/pull/72"
+        },
+        {
+          "label": "PR #76",
+          "url": "https://github.com/g-kari/devsecops-console/pull/76"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K274",
+      "title": "根拠付き優先度UI",
+      "phase": "Phase 1",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "参考試算APIとJSON導線は存在。人向け根拠表示は未完。",
+      "waitReason": "未着手。",
+      "nextAction": "as_of、不足情報、根拠、明示bindingを表示する最小UIを定義。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #42",
+          "url": "https://github.com/g-kari/devsecops-console/pull/42"
+        },
+        {
+          "label": "PR #47",
+          "url": "https://github.com/g-kari/devsecops-console/pull/47"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K287",
+      "title": "設定対象・カバレッジ母数",
+      "phase": "Phase 1",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "記録済みreceipt APIを再利用できる。母数は未確定のまま。",
+      "waitReason": "未着手。",
+      "nextAction": "設定inventoryと対象scopeを定義し、未scan・空設定・不明を合成試験。",
+      "dependencies": [
+        "K269"
+      ],
+      "evidence": [
+        {
+          "label": "PR #49",
+          "url": "https://github.com/g-kari/devsecops-console/pull/49"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K297",
+      "title": "修正候補ボード",
+      "phase": "追加読取",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画・受入条件のみ。実装完了の証拠なし。",
+      "waitReason": "実装担当未割当。",
+      "nextAction": "修正版・Asset・観測時刻・Issue/PR参照を棚卸しし、読取専用DTOを定義。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K298",
+      "title": "Findings保存検索",
+      "phase": "追加読取",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画・受入条件のみ。実装完了の証拠なし。",
+      "waitReason": "保存場所・利用者scope未決定。",
+      "nextAction": "既存filterを使い、ローカル保存か認証付き永続保存かを決める。",
+      "dependencies": [
+        "K275（サーバー保存の場合）"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K299",
+      "title": "Dependabot・Trivy比較",
+      "phase": "追加読取",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "same-CVE関連APIは存在。比較機能の実装完了証拠なし。",
+      "waitReason": "対象identity・比較不能の表示契約が未確定。",
+      "nextAction": "厳密比較・参考関連・比較不能を分ける最小契約を確定。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #31",
+          "url": "https://github.com/g-kari/devsecops-console/pull/31"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K276",
+      "title": "共通トリアージ",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画・受入条件のみ。",
+      "waitReason": "共通変更操作の認可契約に依存。",
+      "nextAction": "K275に接続するlocal triage・監査・revision/idempotencyを設計。",
+      "dependencies": [
+        "K275"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K277",
+      "title": "調査案件",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画・受入条件のみ。",
+      "waitReason": "Web認可と共通triageに依存。",
+      "nextAction": "複数Findingを原観測のまま関連付けるモデル・履歴を設計。",
+      "dependencies": [
+        "K275",
+        "K276"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K278",
+      "title": "修正Action・再検査",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画・受入条件のみ。",
+      "waitReason": "Web認可・triage・調査案件に依存。",
+      "nextAction": "fake外部操作で対象単位承認・結果不明照合・再検査証拠を実装。",
+      "dependencies": [
+        "K275",
+        "K276",
+        "K277"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K279",
+      "title": "共通Finding通知",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "既存通知基盤は存在。共通Findingへの接続は未完。",
+      "waitReason": "収集状態と共通triageの契約に依存。",
+      "nextAction": "既存batchを再利用し、失敗・重複・部分取得をmock検証。",
+      "dependencies": [
+        "K269",
+        "K276"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K280",
+      "title": "SLA・期限付き例外",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "既存legacy期限計算は存在。共通Findingへの接続は未完。",
+      "waitReason": "根拠付き優先度と共通triageに依存。",
+      "nextAction": "例外期限切れ・再発・重要度上昇と資産別履歴を設計。",
+      "dependencies": [
+        "K274",
+        "K276"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K281",
+      "title": "AWS形式別adapter",
+      "phase": "Phase 2",
+      "status": "planned",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "未実装。ASFF/OCSF等の採用仕様を分離する計画。",
+      "waitReason": "実装担当未割当。offline設計は外部接続なしで先行可。",
+      "nextAction": "source-native identityを保つ合成adapterを実装。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K282",
+      "title": "AWS継続収集・補完",
+      "phase": "Phase 2",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "未実装。",
+      "waitReason": "AWS offline adapterに依存。実account/regionの導入は別。",
+      "nextAction": "fake API/EventBridgeで重複・順序逆転・欠落補完を検証。",
+      "dependencies": [
+        "K281"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K283",
+      "title": "WAF集計Finding",
+      "phase": "Phase 3",
+      "status": "decision",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "未実装。provider未採用。",
+      "waitReason": "provider・時間窓・保持方針の選定待ち。",
+      "nextAction": "公開仕様と合成データでprovider/集約契約を比較。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K284",
+      "title": "SBOM継続監視",
+      "phase": "Phase 3",
+      "status": "decision",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "未実装。監視方式未採用。",
+      "waitReason": "方式・format・Asset対応の選定待ち。",
+      "nextAction": "SBOM版・component・資産・原観測を保持する契約を選定。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K285",
+      "title": "傾向分析・集計性能",
+      "phase": "Phase 3",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "未実装。",
+      "waitReason": "収集状態・triage・SLA契約に依存。",
+      "nextAction": "欠落を改善と誤認しない集計と、大きめ合成DBの性能測定。",
+      "dependencies": [
+        "K269",
+        "K276",
+        "K280"
+      ],
+      "evidence": [
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K286",
+      "title": "導入・復旧・運用受入",
+      "phase": "運用",
+      "status": "partial",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T20:25:00Z",
+      "lastProgressAt": "2026-11-12T10:29:54Z",
+      "activityAt": null,
+      "latestAchievement": "合成migration、release、品質gateの一部は存在。",
+      "waitReason": "実環境の導入・復旧演習は未検証。合成工程は先行可。",
+      "nextAction": "隔離backup/restoreと運用手順の合成受入を進める。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #17",
+          "url": "https://github.com/g-kari/devsecops-console/pull/17"
+        },
+        {
+          "label": "PR #81",
+          "url": "https://github.com/g-kari/devsecops-console/pull/81"
+        },
+        {
+          "label": "全体仕様",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K307",
+      "title": "GoReleaser v2.20.2更新",
+      "phase": "依存保守",
+      "status": "blocked",
+      "owner": "一姫（既存診断担当の現在稼働は未確認）",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "PR #88は未マージ。head 72dce95のCheck・Trialでmanifestとinstaller pinの不一致を再確認。ブラウザー受入とartifact生成は開始前に停止。",
+      "waitReason": "manifest・installer pinの整合修正と同一head検証が未完。既存診断担当の現在稼働は未確認。",
+      "nextAction": "担当と修正範囲を照合し、manifest・installer pinの整合と最終CIを検証。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #88",
+          "url": "https://github.com/g-kari/devsecops-console/pull/88"
+        },
+        {
+          "label": "最新Check",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517661319"
+        },
+        {
+          "label": "最新Trial",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517661312"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K309",
+      "title": "公開ロードマップ更新経路",
+      "phase": "公開資料",
+      "status": "complete",
+      "owner": "更新経路の限定工程完了 / 進捗同期は継続",
+      "lastCheckedAt": "2026-11-13T22:42:53Z",
+      "lastProgressAt": "2026-11-13T22:34:05Z",
+      "activityAt": null,
+      "latestAchievement": "PR #92の公開資料をmainへ統合。正本JSON・rawの全文一致とSiteの33工程取得を確認。統合後mainのCheck・Trial成功。",
+      "waitReason": "限定完了は公開データ読取・更新経路。認可・依存更新の未統合や製品の未実装工程は残る。",
+      "nextAction": "既存の毎時確認で公開JSONを更新し、通常PRの検証・main読戻し・Site取得を確認。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "PR #92（統合済み）",
+          "url": "https://github.com/g-kari/devsecops-console/pull/92"
+        },
+        {
+          "label": "統合後Check成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528643"
+        },
+        {
+          "label": "統合後Trial成功",
+          "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528634"
+        },
+        {
+          "label": "更新手順",
+          "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/site-roadmap-update.md"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-A",
+      "title": "AI監査基盤 A: 調査・設計",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": "2026-11-13T20:55:04Z",
+      "activityAt": null,
+      "latestAchievement": "OWASPを監査基準、Cloudflareを監査手順とする初期設計とA–E計画をIssue #91に登録。Phase A全体は未完。",
+      "waitReason": "今回は設計整理のみ。既存の開発優先順位は変更せず、実装・監査実行・CI変更・配備は行わない。",
+      "nextAction": "基準版・ライセンス・隔離能力・予算・Finding identity・状態変換・証拠保持の残契約をレビュー。",
+      "dependencies": [],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-B",
+      "title": "AI監査基盤 B: 隔離PoC",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。PoC・実監査は未実施。",
+      "waitReason": "Phase Aの契約、隔離環境の受入と別途の着手判断が必要。",
+      "nextAction": "固定source refの合成・公開対象で、再現性、誤検知、独立検証、費用・時間上限を評価する計画。",
+      "dependencies": [
+        "K310-A"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-C",
+      "title": "AI監査基盤 C: Finding統合",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。Dependabot・Trivyとはsource-native identityと観測履歴を分離し、承認状態と解消状態を別管理する設計。",
+      "waitReason": "Phase Bの証拠と既存ingestion/ID/transaction契約に依存。adapterは未実装。",
+      "nextAction": "bounded offline importと読取から検討し、replay・衝突・scope越境・partial結果を検証する計画。",
+      "dependencies": [
+        "K310-B",
+        "K275（変更操作の場合）"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-D",
+      "title": "AI監査基盤 D: CI/CD連携",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。PR差分・手動・定期監査と監査履歴を将来検討。",
+      "waitReason": "Phase C、K272の来歴契約、対象・権限・費用の導入判断に依存。CI変更なし。",
+      "nextAction": "artifact/source refの結合と未信頼PRの分離を設計し、opt-in・advisoryから評価する計画。",
+      "dependencies": [
+        "K310-C",
+        "K272"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    },
+    {
+      "id": "K310-E",
+      "title": "AI監査基盤 E: OWASP Dashboard",
+      "phase": "将来計画 / K310",
+      "status": "waiting",
+      "owner": "未割当",
+      "lastCheckedAt": "2026-11-13T21:39:34Z",
+      "lastProgressAt": null,
+      "activityAt": null,
+      "latestAchievement": "計画のみ。OWASP/ASVS分類、監査履歴・差分、検証状態・証跡を表示する将来工程。",
+      "waitReason": "Phase C/Dと既存UI・Web認可・scope契約に依存。Dashboardは未実装。",
+      "nextAction": "未実施・失敗・partial・unknownと正常ゼロ件を分け、既存Findings/Overviewへ接続する計画。",
+      "dependencies": [
+        "K310-C",
+        "K310-D",
+        "K275",
+        "K274"
+      ],
+      "evidence": [
+        {
+          "label": "設計Issue #91 / K310",
+          "url": "https://github.com/g-kari/devsecops-console/issues/91"
+        }
+      ],
+      "plannedStart": null,
+      "plannedEnd": null
+    }
+  ],
+  "milestones": [
+    {
+      "id": "基盤",
+      "title": "共通データ基盤",
+      "start": "2026-11-05T06:15:44Z",
+      "end": "2026-11-05T11:09:48Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #17",
+          "url": "https://github.com/g-kari/devsecops-console/pull/17"
+        }
+      ]
+    },
+    {
+      "id": "入力",
+      "title": "Trivy / Code / Secret入力",
+      "start": "2026-11-05T12:44:09Z",
+      "end": "2026-11-07T20:34:10Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #20",
+          "url": "https://github.com/g-kari/devsecops-console/pull/20"
+        },
+        {
+          "label": "PR #31",
+          "url": "https://github.com/g-kari/devsecops-console/pull/31"
+        }
+      ]
+    },
+    {
+      "id": "優先度",
+      "title": "参考優先度・読取API",
+      "start": "2026-11-08T07:30:16Z",
+      "end": "2026-11-08T16:22:31Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #36",
+          "url": "https://github.com/g-kari/devsecops-console/pull/36"
+        },
+        {
+          "label": "PR #42",
+          "url": "https://github.com/g-kari/devsecops-console/pull/42"
+        }
+      ]
+    },
+    {
+      "id": "認証",
+      "title": "GitHub主体指定",
+      "start": "2026-11-09T17:20:52Z",
+      "end": "2026-11-09T17:24:36Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #48",
+          "url": "https://github.com/g-kari/devsecops-console/pull/48"
+        }
+      ]
+    },
+    {
+      "id": "画面",
+      "title": "native画面統合",
+      "start": "2026-11-09T16:56:27Z",
+      "end": "2026-11-12T09:08:15Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #47",
+          "url": "https://github.com/g-kari/devsecops-console/pull/47"
+        },
+        {
+          "label": "PR #53",
+          "url": "https://github.com/g-kari/devsecops-console/pull/53"
+        }
+      ]
+    },
+    {
+      "id": "脅威",
+      "title": "継続更新の限定基盤",
+      "start": "2026-11-10T03:50:33Z",
+      "end": "2026-11-11T18:37:28Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #56",
+          "url": "https://github.com/g-kari/devsecops-console/pull/56"
+        },
+        {
+          "label": "PR #77",
+          "url": "https://github.com/g-kari/devsecops-console/pull/77"
+        }
+      ]
+    },
+    {
+      "id": "品質",
+      "title": "配布・品質gate",
+      "start": "2026-11-11T11:19:01Z",
+      "end": "2026-11-12T13:04:17Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #75",
+          "url": "https://github.com/g-kari/devsecops-console/pull/75"
+        },
+        {
+          "label": "PR #83",
+          "url": "https://github.com/g-kari/devsecops-console/pull/83"
+        }
+      ]
+    },
+    {
+      "id": "手順",
+      "title": "Trivy安全な再送手順",
+      "start": "2026-11-13T06:47:16Z",
+      "end": "2026-11-13T07:11:14Z",
+      "basis": "PR作成からマージまでの観測期間。連続作業時間ではない。",
+      "evidence": [
+        {
+          "label": "PR #87",
+          "url": "https://github.com/g-kari/devsecops-console/pull/87"
+        }
+      ]
+    }
+  ],
+  "updates": [
+    {
+      "at": "2026-11-13T22:34:05Z",
+      "type": "検証",
+      "text": "PR #92統合後のmain ff2e0266でCheck・Trialが成功。PR #88/#89の失敗や過去のブラウザー起動原因の解消とは別。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43517528634"
+    },
+    {
+      "at": "2026-11-13T22:13:40Z",
+      "type": "資料統合",
+      "text": "PR #92で公開進捗を33工程へ更新し、AI監査基盤A–Eの設計のみの計画を掲載。製品コード・CI設定・監査実行・配備の変更なし。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/92"
+    },
+    {
+      "at": "2026-11-13T21:28:55Z",
+      "type": "検証",
+      "text": "PR #90統合後のmain 39ee8d0でTrial成功。Checkはブラウザー起動失敗のため全CI合格ではない。",
+      "url": "https://github.com/g-kari/devsecops-console/actions/runs/43508671295"
+    },
+    {
+      "at": "2026-11-13T21:12:54Z",
+      "type": "資料統合",
+      "text": "公開ロードマップJSONをPR #90でmainへ統合。公開SiteでGitHub JSON取得成功を確認。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/90"
+    },
+    {
+      "at": "2026-11-13T20:55:04Z",
+      "type": "計画登録",
+      "text": "OWASP × Cloudflare AI監査基盤の設計Issue #91とA–E計画を登録。実装・CI変更・配備は未実施。",
+      "url": "https://github.com/g-kari/devsecops-console/issues/91"
+    },
+    {
+      "at": "2026-11-13T20:27:28Z",
+      "type": "PR作成",
+      "text": "K275のrole/scope認可ポリシーと合成テストをPR #89へ公開。未マージ、CI確認中。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/89"
+    },
+    {
+      "at": "2026-11-13T20:22:00Z",
+      "type": "着手報告",
+      "text": "K275の認可契約と合成テストの実装開始。マージ・テスト合格はまだ確認していない。",
+      "url": "https://github.com/g-kari/devsecops-console/blob/main/docs/devsecops-roadmap.md"
+    },
+    {
+      "at": "2026-11-13T07:11:14Z",
+      "type": "マージ",
+      "text": "Trivy取込の結果不明時における安全な再送判断を補足。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/87"
+    },
+    {
+      "at": "2026-11-13T04:50:11Z",
+      "type": "マージ",
+      "text": "Hermes Proxy評価とコンソールUI整理。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/86"
+    },
+    {
+      "at": "2026-11-12T09:08:15Z",
+      "type": "マージ",
+      "text": "Overview、Assets、記録済みIntegrationsと共通画面shellを統合。",
+      "url": "https://github.com/g-kari/devsecops-console/pull/53"
+    }
+  ],
+  "updateMode": "public-json",
+  "dataUrl": "https://raw.githubusercontent.com/g-kari/devsecops-console/main/docs/site-roadmap.json"
+}
