@@ -5,14 +5,16 @@
 `internal/webauth` defines a pure local role/scope policy for a future **0g0-id**
 Web session. It is not wired into `internal/web.Server`, the CLI, or configuration.
 Existing loopback defaults, routes and behavior are unchanged. This package alone
-provides no authentication or protection for existing routes. Do not expose the
-console on a non-loopback address based on this change.
+provides no authentication or protection for existing routes. The separate
+[offline ID-token verifier](web-oidc-verifier.md) also remains unwired and returns
+identity only, never a session. Do not expose the console on a non-loopback address
+based on either code slice.
 
-The provider choice is fixed to 0g0-id. Its actual protocol, trusted issuer,
-audience, subject semantics, verification keys and revocation contract still need
-verification. No endpoint, JWT claim, discovery document, callback or role claim is
-assumed. The issuer in this first contract is an exact opaque trusted identifier,
-not a URL the package will fetch.
+The provider choice is fixed to 0g0-id. The offline verifier separately records
+the reviewed source-level token profile; live deployment, trusted key acquisition,
+client registration and current revocation remain unverified. This policy itself
+does not infer protocol, fetch discovery, or trust token/role claims. Its issuer
+is an exact opaque trusted identifier, not a URL the policy will fetch.
 
 ## Two independent trust boundaries
 
@@ -75,8 +77,9 @@ seeds. They do not establish the truth of an input identity or exercise a live I
 
 Before enabling Web authentication, implement and verify separately:
 
-- The actual 0g0-id verifier and server-side session store, login/callback/state
-  validation, secure cookies, expiry, logout and revocation.
+- Live 0g0-id protocol verification, trusted key acquisition and the independent
+  current-status/session boundary, plus the server-side session store,
+  login/callback/state validation, secure cookies, expiry, logout and revocation.
 - The complete route-to-capability and object-scope mapping, including legacy
   POST, SSE, TUI controls, settings, approval and manual refresh routes. Never
   treat a generic read grant as permission for every GET endpoint.

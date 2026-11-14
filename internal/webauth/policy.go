@@ -1,7 +1,7 @@
-// Package webauth defines the local authorization boundary for a future 0g0-id
-// Web session. It does not authenticate tokens, issue sessions, or connect to an
-// identity provider. Callers must supply a session already verified by a trusted
-// server-side authenticator and its current revocation state.
+// Package webauth defines local authorization and an unwired offline verifier
+// for reviewed 0g0-id identity assertions. It does not issue sessions or connect
+// to an identity provider. Policy callers must supply a session already verified
+// by a trusted server-side authenticator and its current revocation state.
 package webauth
 
 import (

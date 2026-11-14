@@ -1,0 +1,20 @@
+{
+  "provenance": "Synthetic Node v24.22.1 WebCrypto ECDSA/P-256/SHA-256, 64-byte R||S; private key discarded",
+  "jwks": {
+    "keys": [
+      {
+        "key_ops": [
+          "verify"
+        ],
+        "kty": "EC",
+        "x": "loowUXM-DJgRtX6-KUQbPr6FbBh1m8EuTE-N2iwflt0",
+        "y": "P1iZlgi80HcWXQtQXhgTAFFHUpjmwFl02Qg-u1W0Pic",
+        "crv": "P-256",
+        "kid": "synthetic-webcrypto-key",
+        "alg": "ES256",
+        "use": "sig"
+      }
+    ]
+  },
+  "token": "eyJhbGciOiJFUzI1NiIsImtpZCI6InN5bnRoZXRpYy13ZWJjcnlwdG8ta2V5In0.eyJpc3MiOiJodHRwczovL2lkLjBnMC54eXoiLCJhdWQiOiJzeW50aGV0aWMtY29uc29sZS1ycCIsInN1YiI6ImluZGVwZW5kZW50LXdlYmNyeXB0by1wYWlyd2lzZS1zdWJqZWN0IiwiaWF0IjoxNzk0NjU3NTQwLCJleHAiOjE3OTQ2NjExNDAsImF1dGhfdGltZSI6MTc5NDY1NzQ4MCwianRpIjoic3ludGhldGljLXdlYmNyeXB0by1hc3NlcnRpb24taWQiLCJub25jZSI6InN5bnRoZXRpYy1vdXRzdGFuZGluZy1sb2dpbi1ub25jZSJ9.TbsNT3b1LvVjPNE9OquOst6LiXc698Ec2u_6hhkTR3snquAPieqUvFLKyvHBIUroowsH8mtD_Y2uE6S7M3U3pA"
+}
